@@ -446,11 +446,9 @@ impl GodotLspClient {
         segments: &[String],
     ) -> Result<(Position, String)> {
         let mut current_symbols = symbols.to_vec();
-        let mut found_name = String::new();
 
         for (i, segment) in segments.iter().enumerate() {
-            let (sym, name) = find_symbol_with_candidates(&current_symbols, segment, i)?;
-            found_name = name;
+            let (sym, found_name) = find_symbol_with_candidates(&current_symbols, segment, i)?;
 
             if i < segments.len() - 1 {
                 // 还没到最后一层，继续深入 children

@@ -88,6 +88,7 @@ impl SymbolPath {
     /// 例如：
     ///   - player.gd:Player.health → Some("Player")
     ///   - player.gd:health        → None（只有一段，没有类名前缀）
+    #[allow(dead_code)]
     pub fn class_name(&self) -> Option<&str> {
         if self.segments.len() > 1 {
             Some(&self.segments[0])
@@ -102,6 +103,7 @@ impl SymbolPath {
     /// 例如：
     ///   - a.gd:Foo.bar.baz → &["bar", "baz"]
     ///   - a.gd:foo         → &["foo"]
+    #[allow(dead_code)]
     pub fn member_path(&self) -> &[String] {
         if self.segments.len() > 1 {
             &self.segments[1..]
