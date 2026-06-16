@@ -38,6 +38,7 @@ enum Cmd {
     NativeSymbol { class: String, member: Option<String> },
     Diagnostics { file: Option<PathBuf> },
     Capabilities,
+    Status,
 }
 
 fn resolve_file(file: &Path, project: Option<&Path>) -> PathBuf {
@@ -177,6 +178,49 @@ async fn main() {
 async fn run() -> Result<()> {
     let cli = Cli::parse();
     let project = cli.project.as_deref();
+
+    // For status command, we want to handle connection errors gracefully
+    if matches!(cli.cmd, Cmd::Status) {
+        match GodotLspClient::connect(&cli.host, cli.port, project).await {
+            Ok(client) => {
+                if cli.json {
+                    let status = json!({
+                        "connected": true,
+                        "host": cli.host,
+                        "port": cli.port,
+                        "project": project.map(|p| p.to_string_lossy().to_string()),
+                    });
+                    println!("{}", serde_json::to_string_pretty(&status)?);
+                } else {
+                    println!("Connected to Godot LSP at {}:{}", cli.host, cli.port);
+                    if let Some(p) = project {
+                        println!("Project: {}", p.display());
+                    }
+                }
+                client.disconnect().await;
+                return Ok(());
+            }
+            Err(e) => {
+                if cli.json {
+                    let status = json!({
+                        "connected": false,
+                        "host": cli.host,
+                        "port": cli.port,
+                        "error": e.to_string(),
+                    });
+                    println!("{}", serde_json::to_string_pretty(&status)?);
+                } else {
+                    eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, cli.port);
+                    eprintln!("Error: {}", e);
+                    eprintln!(
+                        "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
+                        cli.port
+                    );
+                }
+                std::process::exit(1);
+            }
+        }
+    }
 
     let client = match GodotLspClient::connect(&cli.host, cli.port, project).await {
         Ok(c) => c,
@@ -376,6 +420,10 @@ async fn run() -> Result<()> {
                 let f = file.as_deref().map(|p| resolve_file(p, project));
                 let result = client.diagnostics_for(f.as_deref()).await;
                 handle_diagnostics(result, cli.json)?;
+            }
+            Cmd::Status => {
+                // Status command is handled earlier in the function
+                unreachable!()
             }
         }
         Ok(())

@@ -42,6 +42,7 @@ godot --editor --headless --lsp-port 6005 --path /path/to/project
 | `native-symbol <class> [member]` | Godot 内置类文档 |
 | `diagnostics [file]` | 显示诊断 |
 | `capabilities` | 显示 LSP 服务器能力 |
+| `status` | 验证 LSP 服务器连接状态 |
 
 ### 符号路径模式（新功能）
 
