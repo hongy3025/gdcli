@@ -130,7 +130,7 @@ async fn rename_human_output() {
             .assert()
             .success()
             .stdout(predicate::str::contains("tmp/x.gd:"))
-            .stdout(predicate::str::contains("1:4-1:5 → \"y\""));
+            .stdout(predicate::str::contains("2:5-2:6 → \"y\""));
     })
     .await
     .unwrap();
@@ -153,7 +153,7 @@ async fn rename_json_decodes_uris() {
 
     let f = write_temp_gd();
     let path = f.path().to_path_buf();
-    let target = format!("{}:0:0", path.display());
+    let target = format!("{}:1:1", path.display());
     tokio::task::spawn_blocking(move || {
         let out = Command::cargo_bin("gdcli")
             .unwrap()
@@ -210,4 +210,15 @@ fn connection_failure_prints_hint() {
         .stderr(predicate::str::contains(
             "Make sure Godot is running with: godot --editor --headless --lsp-port 1",
         ));
+}
+
+#[test]
+fn native_symbol_members_full_conflict() {
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["native-symbol", "--members", "--full", "Node"])
+        .timeout(Duration::from_secs(5))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
 }

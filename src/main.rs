@@ -94,7 +94,14 @@ enum Cmd {
     Hover { target: String },
     /// 查询 Godot 原生类文档（Godot LSP 扩展）
     #[command(name = "native-symbol")]
-    NativeSymbol { class: String, member: Option<String> },
+    NativeSymbol {
+        #[arg(long, conflicts_with = "full")]
+        members: bool,
+        #[arg(long, conflicts_with = "members")]
+        full: bool,
+        class: String,
+        member: Option<String>,
+    },
     /// 获取诊断信息（编译错误/警告）
     Diagnostics { file: Option<PathBuf> },
     /// 查询服务器能力列表
@@ -112,6 +119,11 @@ enum Cmd {
 ///   2. 如果提供了 --project，基于项目目录拼接
 ///   3. 否则基于当前工作目录拼接
 fn resolve_file(file: &Path, project: Option<&Path>) -> PathBuf {
+    // 剥离 res:// 前缀（Godot 资源协议）
+    let file = match file.to_str() {
+        Some(s) if s.starts_with("res://") => Path::new(&s[6..]),
+        _ => file,
+    };
     if file.is_absolute() {
         return file.to_path_buf();
     }
@@ -155,11 +167,20 @@ fn parse_target(target: &str, _project: Option<&Path>) -> Result<TargetMode> {
         // 尝试把最后两段解析为 u32
         if let (Ok(line), Ok(col)) = (last_two[0].parse::<u32>(), last_two[1].parse::<u32>()) {
             // 前面的所有段用 : 重新拼起来作为文件路径
-            let file = parts[..parts.len() - 2].join(":");
+            let file_raw = parts[..parts.len() - 2].join(":");
+            // 剥离 res:// 前缀（Godot 资源协议），得到实际文件路径
+            let file = file_raw.strip_prefix("res://").unwrap_or(&file_raw);
+            // 用户输入 1-based，转为 LSP 的 0-based；行号和列号必须 >= 1
+            if line == 0 || col == 0 {
+                return Err(anyhow::anyhow!(
+                    "Line and column numbers are 1-based and must be >= 1, got {}:{}",
+                    line, col
+                ));
+            }
             return Ok(TargetMode::Position {
                 file: PathBuf::from(file),
-                line,
-                col,
+                line: line - 1,
+                col: col - 1,
             });
         }
     }
@@ -179,10 +200,11 @@ fn parse_target(target: &str, _project: Option<&Path>) -> Result<TargetMode> {
 // ==================== 格式化输出工具 ====================
 
 /// 把 LSP Range 格式化为人类可读的字符串：start_line:start_col-end_line:end_col
+/// LSP 内部 0-based，显示给用户时 +1 转为 1-based。
 fn format_range(r: &Range) -> String {
     format!(
         "{}:{}-{}:{}",
-        r.start.line, r.start.character, r.end.line, r.end.character
+        r.start.line + 1, r.start.character + 1, r.end.line + 1, r.end.character + 1
     )
 }
 
@@ -195,7 +217,8 @@ fn format_location_value(loc: &Value) -> Option<String> {
     let uri = loc.get("uri")?.as_str()?;
     let line = loc.get("range")?.get("start")?.get("line")?.as_u64()?;
     let col = loc.get("range")?.get("start")?.get("character")?.as_u64()?;
-    Some(format!("{}:{}:{}", uri_to_file(uri), line, col))
+    // LSP 0-based → 显示 1-based
+    Some(format!("{}:{}:{}", uri_to_file(uri), line + 1, col + 1))
 }
 
 /// 把 LSP severity 数字转为人可读的名称。
@@ -350,8 +373,8 @@ async fn run() -> Result<()> {
             Cmd::Hover { target } => {
                 handle_hover_command(&client, &target, project, cli.json).await?;
             }
-            Cmd::NativeSymbol { class, member } => {
-                handle_native_symbol_command(&client, &class, member.as_deref(), cli.json).await?;
+            Cmd::NativeSymbol { members, full, class, member } => {
+                handle_native_symbol_command(&client, &class, member.as_deref(), members, full, cli.json).await?;
             }
             Cmd::Diagnostics { file } => {
                 handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
@@ -453,7 +476,7 @@ async fn handle_rename_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
             } else {
-                println!("Renaming symbol '{}' at {}:{}", name, pos.line, pos.character);
+                println!("Renaming symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
                 print_rename_result(result, false)?;
             }
         }
@@ -487,7 +510,7 @@ async fn handle_references_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
             } else {
-                println!("References for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                println!("References for symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
                 print_references_result(&result, false)?;
             }
         }
@@ -521,7 +544,7 @@ async fn handle_definition_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
             } else {
-                println!("Definition for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                println!("Definition for symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
                 handle_locations(&v, false, "No definition found.")?;
             }
         }
@@ -555,7 +578,7 @@ async fn handle_declaration_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
             } else {
-                println!("Declaration for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                println!("Declaration for symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
                 handle_locations(&v, false, "No declaration found.")?;
             }
         }
@@ -616,7 +639,7 @@ async fn handle_hover_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
             } else {
-                println!("Hover info for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                println!("Hover info for symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
                 println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
             }
         }
@@ -624,11 +647,131 @@ async fn handle_hover_command(
     Ok(())
 }
 
-/// 处理 native-symbol 子命令。
+const NATIVE_KIND_GROUPS: [(u32, &str); 7] = [
+    (14, "Constants"),
+    (13, "Properties"),
+    (24, "Signals"),
+    (6, "Methods"),
+    (9, "Constructors"),
+    (25, "Operators"),
+    (10, "Annotations"),
+];
+
+fn first_line(doc: &str) -> &str {
+    doc.lines().next().unwrap_or("").trim()
+}
+
+fn format_native_member(v: &Value) {
+    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+    let detail = v.get("detail").and_then(|x| x.as_str());
+    let docs = v.get("documentation").and_then(|x| x.as_str());
+    println!("{}", name);
+    if let Some(d) = detail {
+        println!("  {}", d);
+    }
+    if let Some(d) = docs {
+        println!();
+        println!("  {}", d.trim());
+    }
+}
+
+fn format_native_members_table(children: &[Value]) {
+    for (kind, label) in &NATIVE_KIND_GROUPS {
+        let members: Vec<&Value> = children
+            .iter()
+            .filter(|c| c.get("kind").and_then(|x| x.as_u64()).unwrap_or(0) == *kind as u64)
+            .collect();
+        if members.is_empty() {
+            continue;
+        }
+        println!("{}:", label);
+        for m in members {
+            let name = m.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+            let detail = m.get("detail").and_then(|x| x.as_str()).unwrap_or("");
+            let docs = m.get("documentation").and_then(|x| x.as_str()).unwrap_or("");
+            let brief = first_line(docs);
+            if brief.is_empty() {
+                println!("  {:<28} {}", name, detail);
+            } else {
+                println!("  {:<28} {:<40} {}", name, detail, brief);
+            }
+        }
+        println!();
+    }
+    let known_kinds: [u32; 7] = [14, 13, 24, 6, 9, 25, 10];
+    let others: Vec<&Value> = children
+        .iter()
+        .filter(|c| {
+            let k = c.get("kind").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            !known_kinds.contains(&k)
+        })
+        .collect();
+    if !others.is_empty() {
+        println!("Other:");
+        for m in others {
+            let name = m.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+            let detail = m.get("detail").and_then(|x| x.as_str()).unwrap_or("");
+            println!("  {:<28} {}", name, detail);
+        }
+        println!();
+    }
+}
+
+fn format_native_full(children: &[Value]) {
+    for (kind, label) in &NATIVE_KIND_GROUPS {
+        let members: Vec<&Value> = children
+            .iter()
+            .filter(|c| c.get("kind").and_then(|x| x.as_u64()).unwrap_or(0) == *kind as u64)
+            .collect();
+        if members.is_empty() {
+            continue;
+        }
+        println!("── {} ──", label);
+        println!();
+        for m in members {
+            format_native_member(m);
+            println!();
+        }
+    }
+    let known_kinds: [u32; 7] = [14, 13, 24, 6, 9, 25, 10];
+    let others: Vec<&Value> = children
+        .iter()
+        .filter(|c| {
+            let k = c.get("kind").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            !known_kinds.contains(&k)
+        })
+        .collect();
+    if !others.is_empty() {
+        println!("── Other ──");
+        println!();
+        for m in others {
+            format_native_member(m);
+            println!();
+        }
+    }
+}
+
+fn print_class_header(v: &Value) {
+    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+    let detail = v.get("detail").and_then(|x| x.as_str());
+    let docs = v.get("documentation").and_then(|x| x.as_str());
+    if let Some(d) = detail {
+        println!("{} — {}", name, d);
+    } else {
+        println!("{}", name);
+    }
+    if let Some(d) = docs {
+        println!();
+        println!("{}", d);
+    }
+}
+
 async fn handle_native_symbol_command(
     client: &Arc<GodotLspClient>,
     class: &str,
     member: Option<&str>,
+    members_flag: bool,
+    full_flag: bool,
     json_mode: bool,
 ) -> Result<()> {
     let v = client.native_symbol(class, member).await?;
@@ -636,24 +779,22 @@ async fn handle_native_symbol_command(
         println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
     } else if v.is_null() {
         println!("No documentation found.");
-    } else {
-        let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("?");
-        let detail = v.get("detail").and_then(|x| x.as_str());
-        let docs = v.get("documentation").and_then(|x| x.as_str());
-        let children = v.get("children").and_then(|x| x.as_array());
-        if let Some(d) = detail {
-            println!("{} — {}", name, d);
+    } else if member.is_some() {
+        format_native_member(&v);
+    } else if full_flag {
+        print_class_header(&v);
+        if let Some(children) = v.get("children").and_then(|x| x.as_array()) {
+            println!();
+            format_native_full(children);
+        }
+    } else if members_flag {
+        if let Some(children) = v.get("children").and_then(|x| x.as_array()) {
+            format_native_members_table(children);
         } else {
-            println!("{}", name);
+            println!("No members found.");
         }
-        if let Some(d) = docs {
-            println!();
-            println!("{}", d);
-        }
-        if let (Some(c), None) = (children, member) {
-            println!();
-            println!("Members: {}", c.len());
-        }
+    } else {
+        print_class_header(&v);
     }
     Ok(())
 }
@@ -801,7 +942,8 @@ mod tests {
             start: Position { line: 1, character: 2 },
             end: Position { line: 3, character: 4 },
         };
-        assert_eq!(format_range(&r), "1:2-3:4");
+        // 0-based 内部 → 1-based 显示
+        assert_eq!(format_range(&r), "2:3-4:5");
     }
 
     #[test]
@@ -816,7 +958,7 @@ mod tests {
             message: "bad".into(),
             source: None,
         };
-        assert_eq!(format_diagnostic(&d), "  [error] 5:0-5:10: bad");
+        assert_eq!(format_diagnostic(&d), "  [error] 6:1-6:11: bad");
     }
 
     #[test]
@@ -831,7 +973,7 @@ mod tests {
             message: "x".into(),
             source: None,
         };
-        assert_eq!(format_diagnostic(&d), "  [error] 0:0-0:1: x");
+        assert_eq!(format_diagnostic(&d), "  [error] 1:1-1:2: x");
     }
 
     #[test]
@@ -848,12 +990,13 @@ mod tests {
 
     #[test]
     fn parse_target_position_mode() {
+        // 用户输入 1-based: 10:5 → 内部 0-based: 9:4
         let result = parse_target("player.gd:10:5", None).unwrap();
         match result {
             TargetMode::Position { file, line, col } => {
                 assert_eq!(file, PathBuf::from("player.gd"));
-                assert_eq!(line, 10);
-                assert_eq!(col, 5);
+                assert_eq!(line, 9);
+                assert_eq!(col, 4);
             }
             _ => panic!("Expected Position mode"),
         }

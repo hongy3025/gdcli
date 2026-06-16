@@ -29,7 +29,7 @@ godot --editor --headless --lsp-port 6005 --path /path/to/project
 
 ### 行列号模式（传统）
 
-行列号 0-based（LSP 约定）。
+行列号从 1 开始（与编辑器显示一致）。
 
 | 命令 | 说明 |
 |---|---|
@@ -39,7 +39,7 @@ godot --editor --headless --lsp-port 6005 --path /path/to/project
 | `declaration <file> <line> <col>` | 跳转声明 |
 | `symbols <file>` | 列出文件符号 |
 | `hover <file> <line> <col>` | 悬停信息 |
-| `native-symbol <class> [member]` | Godot 内置类文档 |
+| `native-symbol <class> [member]` | Godot 内置类文档（支持 `--members` / `--full`） |
 | `diagnostics [file]` | 显示诊断 |
 | `capabilities` | 显示 LSP 服务器能力 |
 | `status` | 验证 LSP 服务器连接状态 |
@@ -104,6 +104,58 @@ Symbol 'count' not found. Did you mean: counter?
 
 - 文件名包含 `.`（如 `2d_in_3d.gd`）时，只能使用简写形式
 - 不支持真正的全局符号搜索（需要文件路径）
+
+## native-symbol 命令
+
+查询 Godot 内置类（如 Node、Vector2、Node3D）的文档。支持渐进式披露：
+
+### 默认模式
+
+```bash
+gdcli native-symbol Node3D
+```
+
+显示类名、签名、描述全文。
+
+### `--members` 成员列表
+
+```bash
+gdcli native-symbol --members Node3D
+```
+
+按 Constants / Properties / Signals / Methods 分组，每行显示成员名、签名、首行简述：
+
+```
+Constants:
+  NOTIFICATION_ENTER_TREE    const ...: int = 10    Constant to notify...
+  NOTIFICATION_EXIT_TREE     const ...: int = 11    Constant to notify...
+
+Properties:
+  position    var position: Vector3    Position in global coordinates
+  rotation    var rotation: Vector3    Rotation in radians
+
+Methods:
+  get_parent       func get_parent() -> Node       Returns the parent node
+  get_child_count  func get_child_count() -> int   Returns the number of children
+```
+
+### `--full` 完整文档
+
+```bash
+gdcli native-symbol --full Node3D
+```
+
+类信息 + 所有成员完整展开（detail + 全部 documentation）。
+
+### 查询单个成员
+
+```bash
+gdcli native-symbol Node3D get_parent
+```
+
+显示该成员的完整签名和描述。`--members` / `--full` 对此无效。
+
+`--members` 和 `--full` 互斥，不可同时使用。`--json` 模式下输出完整 JSON，不受 flag 影响。
 
 ## 全局选项
 
