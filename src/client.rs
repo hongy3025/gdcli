@@ -1,5 +1,5 @@
 use crate::transport::{LspTransport, Notification};
-use crate::types::{file_to_uri, Diagnostic, Location, Range, WorkspaceEdit};
+use crate::types::{file_to_uri, Diagnostic, Location, WorkspaceEdit};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -277,6 +277,3 @@ pub enum DiagnosticsResult {
     Single(Vec<Diagnostic>),
     All(HashMap<String, Vec<Diagnostic>>),
 }
-
-// 让 Range 可在外部模块使用
-pub use crate::types::Range as ClientRange;
