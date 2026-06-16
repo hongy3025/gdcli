@@ -272,107 +272,59 @@ impl GodotLspClient {
             return Err(anyhow!("No symbols found in file"));
         }
 
-        // For short form (single segment), try to find in top-level symbols first,
-        // then try in children of top-level symbols
         if segments.len() == 1 {
-            let segment = &segments[0];
-            
-            // First, try to find in top-level symbols
-            for sym in &arr {
-                let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                if name == segment {
-                    let selection_range = sym
-                        .get("selectionRange")
-                        .ok_or_else(|| anyhow!("Symbol '{}' has no selectionRange", segment))?;
-                    let range: Range = serde_json::from_value(selection_range.clone())?;
-                    return Ok((range.start, name.to_string()));
-                }
-            }
-            
-            // If not found, try in children of top-level symbols
-            for sym in &arr {
-                let children = sym.get("children").and_then(|x| x.as_array()).cloned().unwrap_or_default();
-                for child in &children {
-                    let name = child.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                    if name == segment {
-                        let selection_range = child
-                            .get("selectionRange")
-                            .ok_or_else(|| anyhow!("Symbol '{}' has no selectionRange", segment))?;
-                        let range: Range = serde_json::from_value(selection_range.clone())?;
-                        return Ok((range.start, name.to_string()));
-                    }
-                }
-            }
-            
-            // If still not found, provide suggestions
-            let mut candidates = Vec::new();
-            for sym in &arr {
-                let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                candidates.push(name.to_string());
-                let children = sym.get("children").and_then(|x| x.as_array()).cloned().unwrap_or_default();
-                for child in &children {
-                    let name = child.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                    candidates.push(name.to_string());
-                }
-            }
-            
-            let suggestions = find_similar(segment, &candidates);
-            if suggestions.is_empty() {
-                return Err(anyhow!(
-                    "Symbol '{}' not found. Available symbols: {}",
-                    segment,
-                    candidates.join(", ")
-                ));
-            } else {
-                return Err(anyhow!(
-                    "Symbol '{}' not found. Did you mean: {}?",
-                    segment,
-                    suggestions.join(", ")
-                ));
+            self.resolve_single_segment_path(&arr, &segments[0])
+        } else {
+            self.resolve_multi_segment_path(&arr, segments)
+        }
+    }
+
+    fn resolve_single_segment_path(
+        &self,
+        symbols: &[Value],
+        segment: &str,
+    ) -> Result<(Position, String)> {
+        // Try to find in top-level symbols
+        if let Some(result) = find_symbol_in_list(symbols, segment) {
+            return Ok(result);
+        }
+
+        // Try to find in children of top-level symbols
+        for sym in symbols {
+            let children = sym.get("children").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            if let Some(result) = find_symbol_in_list(&children, segment) {
+                return Ok(result);
             }
         }
 
-        // For multi-segment paths, traverse the symbol tree
-        let mut current_symbols = arr;
+        // If not found, provide suggestions
+        let candidates = collect_all_symbol_names(symbols);
+        let suggestions = find_similar(segment, &candidates);
+        if suggestions.is_empty() {
+            Err(anyhow!(
+                "Symbol '{}' not found. Available symbols: {}",
+                segment,
+                candidates.join(", ")
+            ))
+        } else {
+            Err(anyhow!(
+                "Symbol '{}' not found. Did you mean: {}?",
+                segment,
+                suggestions.join(", ")
+            ))
+        }
+    }
+
+    fn resolve_multi_segment_path(
+        &self,
+        symbols: &[Value],
+        segments: &[String],
+    ) -> Result<(Position, String)> {
+        let mut current_symbols = symbols.to_vec();
         let mut found_name = String::new();
 
         for (i, segment) in segments.iter().enumerate() {
-            let mut found = None;
-            let mut candidates = Vec::new();
-
-            for sym in &current_symbols {
-                let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                candidates.push(name.to_string());
-                if name == segment {
-                    found = Some(sym.clone());
-                    break;
-                }
-            }
-
-            let sym = match found {
-                Some(s) => s,
-                None => {
-                    if candidates.is_empty() {
-                        return Err(anyhow!("No symbols found at level {}", i));
-                    }
-                    let suggestions = find_similar(segment, &candidates);
-                    if suggestions.is_empty() {
-                        return Err(anyhow!(
-                            "Symbol '{}' not found. Available symbols: {}",
-                            segment,
-                            candidates.join(", ")
-                        ));
-                    } else {
-                        return Err(anyhow!(
-                            "Symbol '{}' not found. Did you mean: {}?",
-                            segment,
-                            suggestions.join(", ")
-                        ));
-                    }
-                }
-            };
-
-            let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("?").to_string();
+            let (sym, name) = find_symbol_with_candidates(&current_symbols, segment, i)?;
             found_name = name;
 
             if i < segments.len() - 1 {
@@ -459,6 +411,68 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     }
 
     matrix[len1][len2]
+}
+
+fn find_symbol_in_list(symbols: &[Value], name: &str) -> Option<(Position, String)> {
+    for sym in symbols {
+        let sym_name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
+        if sym_name == name {
+            let selection_range = sym.get("selectionRange")?;
+            let range: Range = serde_json::from_value(selection_range.clone()).ok()?;
+            return Some((range.start, sym_name.to_string()));
+        }
+    }
+    None
+}
+
+fn find_symbol_with_candidates(
+    symbols: &[Value],
+    segment: &str,
+    level: usize,
+) -> Result<(Value, String)> {
+    let mut candidates = Vec::new();
+
+    for sym in symbols {
+        let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
+        candidates.push(name.to_string());
+        if name == segment {
+            let name = name.to_string();
+            return Ok((sym.clone(), name));
+        }
+    }
+
+    if candidates.is_empty() {
+        return Err(anyhow!("No symbols found at level {}", level));
+    }
+
+    let suggestions = find_similar(segment, &candidates);
+    if suggestions.is_empty() {
+        Err(anyhow!(
+            "Symbol '{}' not found. Available symbols: {}",
+            segment,
+            candidates.join(", ")
+        ))
+    } else {
+        Err(anyhow!(
+            "Symbol '{}' not found. Did you mean: {}?",
+            segment,
+            suggestions.join(", ")
+        ))
+    }
+}
+
+fn collect_all_symbol_names(symbols: &[Value]) -> Vec<String> {
+    let mut candidates = Vec::new();
+    for sym in symbols {
+        let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
+        candidates.push(name.to_string());
+        let children = sym.get("children").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+        for child in &children {
+            let name = child.get("name").and_then(|x| x.as_str()).unwrap_or("");
+            candidates.push(name.to_string());
+        }
+    }
+    candidates
 }
 
 #[cfg(test)]

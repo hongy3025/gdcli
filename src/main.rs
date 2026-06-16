@@ -9,6 +9,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -181,45 +182,7 @@ async fn run() -> Result<()> {
 
     // For status command, we want to handle connection errors gracefully
     if matches!(cli.cmd, Cmd::Status) {
-        match GodotLspClient::connect(&cli.host, cli.port, project).await {
-            Ok(client) => {
-                if cli.json {
-                    let status = json!({
-                        "connected": true,
-                        "host": cli.host,
-                        "port": cli.port,
-                        "project": project.map(|p| p.to_string_lossy().to_string()),
-                    });
-                    println!("{}", serde_json::to_string_pretty(&status)?);
-                } else {
-                    println!("Connected to Godot LSP at {}:{}", cli.host, cli.port);
-                    if let Some(p) = project {
-                        println!("Project: {}", p.display());
-                    }
-                }
-                client.disconnect().await;
-                return Ok(());
-            }
-            Err(e) => {
-                if cli.json {
-                    let status = json!({
-                        "connected": false,
-                        "host": cli.host,
-                        "port": cli.port,
-                        "error": e.to_string(),
-                    });
-                    println!("{}", serde_json::to_string_pretty(&status)?);
-                } else {
-                    eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, cli.port);
-                    eprintln!("Error: {}", e);
-                    eprintln!(
-                        "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
-                        cli.port
-                    );
-                }
-                std::process::exit(1);
-            }
-        }
+        return handle_status_command(&cli.host, cli.port, project, cli.json).await;
     }
 
     let client = match GodotLspClient::connect(&cli.host, cli.port, project).await {
@@ -241,185 +204,28 @@ async fn run() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&caps)?);
             }
             Cmd::Rename { target, new_name } => {
-                let mode = parse_target(&target, project)?;
-                match mode {
-                    TargetMode::Position { file, line, col } => {
-                        let f = resolve_file(&file, project);
-                        let result = client.rename(&f, line, col, &new_name).await?;
-                        print_rename_result(result, cli.json)?;
-                    }
-                    TargetMode::SymbolPath { symbol_path } => {
-                        let f = resolve_file(&symbol_path.file, project);
-                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
-                        let result = client.rename(&f, pos.line, pos.character, &new_name).await?;
-                        if cli.json {
-                            let v = json!({
-                                "symbol": name,
-                                "position": { "line": pos.line, "character": pos.character },
-                                "result": result
-                            });
-                            println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                        } else {
-                            println!("Renaming symbol '{}' at {}:{}", name, pos.line, pos.character);
-                            print_rename_result(result, false)?;
-                        }
-                    }
-                }
+                handle_rename_command(&client, &target, &new_name, project, cli.json).await?;
             }
             Cmd::References { target } => {
-                let mode = parse_target(&target, project)?;
-                match mode {
-                    TargetMode::Position { file, line, col } => {
-                        let f = resolve_file(&file, project);
-                        let result = client.references(&f, line, col).await?;
-                        print_references_result(&result, cli.json)?;
-                    }
-                    TargetMode::SymbolPath { symbol_path } => {
-                        let f = resolve_file(&symbol_path.file, project);
-                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
-                        let result = client.references(&f, pos.line, pos.character).await?;
-                        if cli.json {
-                            let v = json!({
-                                "symbol": name,
-                                "position": { "line": pos.line, "character": pos.character },
-                                "references": result
-                            });
-                            println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                        } else {
-                            println!("References for symbol '{}' at {}:{}", name, pos.line, pos.character);
-                            print_references_result(&result, false)?;
-                        }
-                    }
-                }
+                handle_references_command(&client, &target, project, cli.json).await?;
             }
             Cmd::Definition { target } => {
-                let mode = parse_target(&target, project)?;
-                match mode {
-                    TargetMode::Position { file, line, col } => {
-                        let f = resolve_file(&file, project);
-                        let v = client.definition(&f, line, col).await?;
-                        handle_locations(&v, cli.json, "No definition found.")?;
-                    }
-                    TargetMode::SymbolPath { symbol_path } => {
-                        let f = resolve_file(&symbol_path.file, project);
-                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
-                        let v = client.definition(&f, pos.line, pos.character).await?;
-                        if cli.json {
-                            let result = json!({
-                                "symbol": name,
-                                "position": { "line": pos.line, "character": pos.character },
-                                "definition": v
-                            });
-                            println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
-                        } else {
-                            println!("Definition for symbol '{}' at {}:{}", name, pos.line, pos.character);
-                            handle_locations(&v, false, "No definition found.")?;
-                        }
-                    }
-                }
+                handle_definition_command(&client, &target, project, cli.json).await?;
             }
             Cmd::Declaration { target } => {
-                let mode = parse_target(&target, project)?;
-                match mode {
-                    TargetMode::Position { file, line, col } => {
-                        let f = resolve_file(&file, project);
-                        let v = client.declaration(&f, line, col).await?;
-                        handle_locations(&v, cli.json, "No declaration found.")?;
-                    }
-                    TargetMode::SymbolPath { symbol_path } => {
-                        let f = resolve_file(&symbol_path.file, project);
-                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
-                        let v = client.declaration(&f, pos.line, pos.character).await?;
-                        if cli.json {
-                            let result = json!({
-                                "symbol": name,
-                                "position": { "line": pos.line, "character": pos.character },
-                                "declaration": v
-                            });
-                            println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
-                        } else {
-                            println!("Declaration for symbol '{}' at {}:{}", name, pos.line, pos.character);
-                            handle_locations(&v, false, "No declaration found.")?;
-                        }
-                    }
-                }
+                handle_declaration_command(&client, &target, project, cli.json).await?;
             }
             Cmd::Symbols { file } => {
-                let f = resolve_file(&file, project);
-                let v = client.document_symbols(&f).await?;
-                if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                } else {
-                    let arr = v.as_array().cloned().unwrap_or_default();
-                    if arr.is_empty() {
-                        println!("No symbols found.");
-                    } else {
-                        print_symbols(&arr, 0);
-                    }
-                }
+                handle_symbols_command(&client, &file, project, cli.json).await?;
             }
             Cmd::Hover { target } => {
-                let mode = parse_target(&target, project)?;
-                match mode {
-                    TargetMode::Position { file, line, col } => {
-                        let f = resolve_file(&file, project);
-                        let result = client.hover(&f, line, col).await?;
-                        if cli.json {
-                            let v = json!({ "hover": result });
-                            println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                        } else {
-                            println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
-                        }
-                    }
-                    TargetMode::SymbolPath { symbol_path } => {
-                        let f = resolve_file(&symbol_path.file, project);
-                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
-                        let result = client.hover(&f, pos.line, pos.character).await?;
-                        if cli.json {
-                            let v = json!({
-                                "symbol": name,
-                                "position": { "line": pos.line, "character": pos.character },
-                                "hover": result
-                            });
-                            println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                        } else {
-                            println!("Hover info for symbol '{}' at {}:{}", name, pos.line, pos.character);
-                            println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
-                        }
-                    }
-                }
+                handle_hover_command(&client, &target, project, cli.json).await?;
             }
             Cmd::NativeSymbol { class, member } => {
-                let v = client.native_symbol(&class, member.as_deref()).await?;
-                if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                } else if v.is_null() {
-                    println!("No documentation found.");
-                } else {
-                    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("?");
-                    let detail = v.get("detail").and_then(|x| x.as_str());
-                    let docs = v.get("documentation").and_then(|x| x.as_str());
-                    let children = v.get("children").and_then(|x| x.as_array());
-                    if let Some(d) = detail {
-                        println!("{} — {}", name, d);
-                    } else {
-                        println!("{}", name);
-                    }
-                    if let Some(d) = docs {
-                        println!();
-                        println!("{}", d);
-                    }
-                    if let (Some(c), None) = (children, member.as_ref()) {
-                        println!();
-                        println!("Members: {}", c.len());
-                    }
-                }
+                handle_native_symbol_command(&client, &class, member.as_deref(), cli.json).await?;
             }
             Cmd::Diagnostics { file } => {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                let f = file.as_deref().map(|p| resolve_file(p, project));
-                let result = client.diagnostics_for(f.as_deref()).await;
-                handle_diagnostics(result, cli.json)?;
+                handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
             }
             Cmd::Status => {
                 // Status command is handled earlier in the function
@@ -432,6 +238,290 @@ async fn run() -> Result<()> {
 
     client.disconnect().await;
     result
+}
+
+async fn handle_status_command(
+    host: &str,
+    port: u16,
+    project: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    match GodotLspClient::connect(host, port, project).await {
+        Ok(client) => {
+            if json_mode {
+                let status = json!({
+                    "connected": true,
+                    "host": host,
+                    "port": port,
+                    "project": project.map(|p| p.to_string_lossy().to_string()),
+                });
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                println!("Connected to Godot LSP at {}:{}", host, port);
+                if let Some(p) = project {
+                    println!("Project: {}", p.display());
+                }
+            }
+            client.disconnect().await;
+            Ok(())
+        }
+        Err(e) => {
+            if json_mode {
+                let status = json!({
+                    "connected": false,
+                    "host": host,
+                    "port": port,
+                    "error": e.to_string(),
+                });
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                eprintln!("Failed to connect to Godot LSP at {}:{}", host, port);
+                eprintln!("Error: {}", e);
+                eprintln!(
+                    "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
+                    port
+                );
+            }
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn handle_rename_command(
+    client: &Arc<GodotLspClient>,
+    target: &str,
+    new_name: &str,
+    project: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    let mode = parse_target(target, project)?;
+    match mode {
+        TargetMode::Position { file, line, col } => {
+            let f = resolve_file(&file, project);
+            let result = client.rename(&f, line, col, new_name).await?;
+            print_rename_result(result, json_mode)?;
+        }
+        TargetMode::SymbolPath { symbol_path } => {
+            let f = resolve_file(&symbol_path.file, project);
+            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let result = client.rename(&f, pos.line, pos.character, new_name).await?;
+            if json_mode {
+                let v = json!({
+                    "symbol": name,
+                    "position": { "line": pos.line, "character": pos.character },
+                    "result": result
+                });
+                println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+            } else {
+                println!("Renaming symbol '{}' at {}:{}", name, pos.line, pos.character);
+                print_rename_result(result, false)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_references_command(
+    client: &Arc<GodotLspClient>,
+    target: &str,
+    project: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    let mode = parse_target(target, project)?;
+    match mode {
+        TargetMode::Position { file, line, col } => {
+            let f = resolve_file(&file, project);
+            let result = client.references(&f, line, col).await?;
+            print_references_result(&result, json_mode)?;
+        }
+        TargetMode::SymbolPath { symbol_path } => {
+            let f = resolve_file(&symbol_path.file, project);
+            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let result = client.references(&f, pos.line, pos.character).await?;
+            if json_mode {
+                let v = json!({
+                    "symbol": name,
+                    "position": { "line": pos.line, "character": pos.character },
+                    "references": result
+                });
+                println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+            } else {
+                println!("References for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                print_references_result(&result, false)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_definition_command(
+    client: &Arc<GodotLspClient>,
+    target: &str,
+    project: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    let mode = parse_target(target, project)?;
+    match mode {
+        TargetMode::Position { file, line, col } => {
+            let f = resolve_file(&file, project);
+            let v = client.definition(&f, line, col).await?;
+            handle_locations(&v, json_mode, "No definition found.")?;
+        }
+        TargetMode::SymbolPath { symbol_path } => {
+            let f = resolve_file(&symbol_path.file, project);
+            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let v = client.definition(&f, pos.line, pos.character).await?;
+            if json_mode {
+                let result = json!({
+                    "symbol": name,
+                    "position": { "line": pos.line, "character": pos.character },
+                    "definition": v
+                });
+                println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
+            } else {
+                println!("Definition for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                handle_locations(&v, false, "No definition found.")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_declaration_command(
+    client: &Arc<GodotLspClient>,
+    target: &str,
+    project: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    let mode = parse_target(target, project)?;
+    match mode {
+        TargetMode::Position { file, line, col } => {
+            let f = resolve_file(&file, project);
+            let v = client.declaration(&f, line, col).await?;
+            handle_locations(&v, json_mode, "No declaration found.")?;
+        }
+        TargetMode::SymbolPath { symbol_path } => {
+            let f = resolve_file(&symbol_path.file, project);
+            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let v = client.declaration(&f, pos.line, pos.character).await?;
+            if json_mode {
+                let result = json!({
+                    "symbol": name,
+                    "position": { "line": pos.line, "character": pos.character },
+                    "declaration": v
+                });
+                println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
+            } else {
+                println!("Declaration for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                handle_locations(&v, false, "No declaration found.")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_symbols_command(
+    client: &Arc<GodotLspClient>,
+    file: &Path,
+    project: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    let f = resolve_file(file, project);
+    let v = client.document_symbols(&f).await?;
+    if json_mode {
+        println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+    } else {
+        let arr = v.as_array().cloned().unwrap_or_default();
+        if arr.is_empty() {
+            println!("No symbols found.");
+        } else {
+            print_symbols(&arr, 0);
+        }
+    }
+    Ok(())
+}
+
+async fn handle_hover_command(
+    client: &Arc<GodotLspClient>,
+    target: &str,
+    project: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    let mode = parse_target(target, project)?;
+    match mode {
+        TargetMode::Position { file, line, col } => {
+            let f = resolve_file(&file, project);
+            let result = client.hover(&f, line, col).await?;
+            if json_mode {
+                let v = json!({ "hover": result });
+                println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+            } else {
+                println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
+            }
+        }
+        TargetMode::SymbolPath { symbol_path } => {
+            let f = resolve_file(&symbol_path.file, project);
+            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let result = client.hover(&f, pos.line, pos.character).await?;
+            if json_mode {
+                let v = json!({
+                    "symbol": name,
+                    "position": { "line": pos.line, "character": pos.character },
+                    "hover": result
+                });
+                println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+            } else {
+                println!("Hover info for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_native_symbol_command(
+    client: &Arc<GodotLspClient>,
+    class: &str,
+    member: Option<&str>,
+    json_mode: bool,
+) -> Result<()> {
+    let v = client.native_symbol(class, member).await?;
+    if json_mode {
+        println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+    } else if v.is_null() {
+        println!("No documentation found.");
+    } else {
+        let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+        let detail = v.get("detail").and_then(|x| x.as_str());
+        let docs = v.get("documentation").and_then(|x| x.as_str());
+        let children = v.get("children").and_then(|x| x.as_array());
+        if let Some(d) = detail {
+            println!("{} — {}", name, d);
+        } else {
+            println!("{}", name);
+        }
+        if let Some(d) = docs {
+            println!();
+            println!("{}", d);
+        }
+        if let (Some(c), None) = (children, member) {
+            println!();
+            println!("Members: {}", c.len());
+        }
+    }
+    Ok(())
+}
+
+async fn handle_diagnostics_command(
+    client: &Arc<GodotLspClient>,
+    file: Option<&Path>,
+    project: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let f = file.map(|p| resolve_file(p, project));
+    let result = client.diagnostics_for(f.as_deref()).await;
+    handle_diagnostics(result, json_mode)
 }
 
 fn handle_locations(v: &Value, json_mode: bool, empty_msg: &str) -> Result<()> {
