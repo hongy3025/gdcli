@@ -25,6 +25,10 @@ godot --editor --headless --lsp-port 6005 --path /path/to/project
 
 ## 命令
 
+支持两种定位方式：**行列号** 和 **符号路径**。
+
+### 行列号模式（传统）
+
 行列号 0-based（LSP 约定）。
 
 | 命令 | 说明 |
@@ -38,6 +42,67 @@ godot --editor --headless --lsp-port 6005 --path /path/to/project
 | `native-symbol <class> [member]` | Godot 内置类文档 |
 | `diagnostics [file]` | 显示诊断 |
 | `capabilities` | 显示 LSP 服务器能力 |
+
+### 符号路径模式（新功能）
+
+使用 `文件:符号` 格式定位符号，无需手动查找行列号。
+
+| 命令 | 说明 |
+|---|---|
+| `rename <target> <new_name>` | 按符号路径重命名 |
+| `references <target>` | 查找符号的全部引用 |
+| `definition <target>` | 跳转到符号定义 |
+| `declaration <target>` | 跳转到符号声明 |
+| `hover <target>` | 查看符号悬停信息 |
+
+**符号路径格式**：`文件路径:符号路径`
+
+```bash
+# 简写形式（推荐）
+gdcli definition player.gd:counter
+
+# 完整形式（仅当文件名不含 '.' 时可用）
+gdcli definition player.gd:Player.health
+
+# 多级形式
+gdcli definition player.gd:Player.Inventory.Item.name
+
+# res:// 路径
+gdcli definition res://player.gd:Player.health
+```
+
+**使用示例**：
+
+```bash
+# 查找定义
+gdcli definition player.gd:counter
+
+# 查找引用
+gdcli references player.gd:counter
+
+# 重命名符号
+gdcli rename player.gd:counter new_counter
+
+# 悬停信息
+gdcli hover player.gd:counter
+
+# JSON 模式输出
+gdcli definition player.gd:counter --json
+```
+
+**错误处理**：
+
+当符号找不到时，gdcli 会提供建议：
+
+```
+$ gdcli definition player.gd:count
+Symbol 'count' not found. Did you mean: counter?
+```
+
+**限制**：
+
+- 文件名包含 `.`（如 `2d_in_3d.gd`）时，只能使用简写形式
+- 不支持真正的全局符号搜索（需要文件路径）
 
 ## 全局选项
 
