@@ -25,7 +25,7 @@ impl GodotLspClient {
             initialized: AtomicBool::new(false),
             diagnostics: Arc::new(Mutex::new(HashMap::new())),
             opened_files: Mutex::new(HashSet::new()),
-            server_capabilities: Mutex::new(Value::Null),
+            server_capabilities: Mutex::new(Value::Object(serde_json::Map::new())),
         });
         client.spawn_notification_listener();
         client.initialize(project).await?;
@@ -82,7 +82,10 @@ impl GodotLspClient {
         });
 
         let result = self.transport.request("initialize", params).await?;
-        let caps = result.get("capabilities").cloned().unwrap_or(Value::Null);
+        let caps = result
+            .get("capabilities")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
         *self.server_capabilities.lock().await = caps;
         self.transport.notify("initialized", json!({})).await?;
         self.initialized.store(true, Ordering::SeqCst);
