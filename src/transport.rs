@@ -1,7 +1,54 @@
-use anyhow::{anyhow, Result};
-use bytes::BytesMut;
+//! transport.rs — LSP JSON-RPC 传输层
+//!
+//! 【这个文件的作用】
+//! 负责通过 TCP 与 Godot LSP 服务器建立连接，发送/接收 JSON-RPC 消息。
+//! 实现了 LSP 协议规定的基于长度前缀的消息帧格式（Content-Length Header）。
+//!
+//! 【JSON-RPC 与 LSP 消息格式】
+//! LSP 使用 JSON-RPC 2.0 作为通信协议，消息通过 TCP 传输。
+//! 每条消息前有一个 HTTP 风格的头部：
+//!   Content-Length: <字节数>\r\n
+//!   \r\n
+//!   <JSON 正文>
+//!
+//! 【异步编程基础】
+//! Rust 中异步代码用 async/await 编写，配合 tokio 运行时执行。
+//! - async fn 返回一个 Future（待执行的任务）
+//! - .await 挂起当前任务，等待异步操作完成
+//! - tokio::spawn 把任务放到后台执行
 
-/// 滚动缓冲区：从 TCP 字节流中解出一个完整 JSON-RPC body。
+// ==================== 导入 ====================
+
+use anyhow::{anyhow, Result};
+/// BytesMut 是可动态增长的字节缓冲区，适合处理网络流数据
+use bytes::BytesMut;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+/// AtomicI64：线程安全的 64 位整数，可无锁并发读写
+use std::sync::atomic::{AtomicI64, Ordering};
+/// Arc（Atomic Reference Counted）是线程安全的引用计数智能指针，
+/// 多个线程可以共享同一个数据的所有权
+use std::sync::Arc;
+use std::time::Duration;
+/// tokio 提供的异步 IO trait：AsyncReadExt（扩展读取）、AsyncWriteExt（扩展写入）
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+/// broadcast：一对多广播通道；oneshot：一次性发送/接收通道；Mutex：异步互斥锁
+use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio::task::JoinHandle;
+
+// ==================== 消息缓冲区 ====================
+
+/// 【MessageBuffer — 滚动消息缓冲区】
+///
+/// TCP 是字节流协议，没有消息边界。LSP 规定用 Content-Length 头部划分消息，
+/// 但一次 read 可能收到：不到一条消息、刚好一条、多条、半条等。
+/// MessageBuffer 负责把收到的字节累积起来，按需提取出完整的 JSON body。
+///
+/// 【BytesMut 说明】
+/// BytesMut 来自 bytes crate，是可增长的连续字节缓冲区。
+/// 它比 Vec<u8> 更适合网络编程，因为支持高效的分割（split_to）和引用计数。
 pub struct MessageBuffer {
     buf: BytesMut,
 }
@@ -11,13 +58,24 @@ impl MessageBuffer {
         Self { buf: BytesMut::new() }
     }
 
+    /// 把新收到的字节追加到缓冲区尾部
     pub fn append(&mut self, chunk: &[u8]) {
         self.buf.extend_from_slice(chunk);
     }
 
-    /// 尝试读出一个 body（UTF-8 字符串）。返回 None 表示数据不足。
+    /// 尝试从缓冲区中读取一条完整的 LSP 消息。
+    ///
+    /// 返回 Ok(Some(body)) — 成功提取出一条消息
+    /// 返回 Ok(None)      — 数据还不够一条完整消息
+    /// 返回 Err(...)      — 数据格式错误（如非法 UTF-8、缺少 Content-Length）
+    ///
+    /// 【find_double_crlf】
+    /// LSP 头部以 \r\n\r\n 结束，找到它才能确定头部占多少字节。
+    ///
+    /// 【std::str::from_utf8】
+    /// 把字节切片转为 &str。如果字节不是合法 UTF-8 会返回 Err。
+    /// 这里用 map_err 把错误转为 anyhow::Error。
     pub fn try_read_message(&mut self) -> Result<Option<String>> {
-        // 找 \r\n\r\n
         let sep = match find_double_crlf(&self.buf) {
             Some(i) => i,
             None => return Ok(None),
@@ -46,6 +104,10 @@ impl MessageBuffer {
     }
 }
 
+/// 在字节缓冲区中查找 \r\n\r\n 的位置。
+///
+/// 这是 LSP 消息头部和正文的分隔符。
+/// 如果缓冲区长度小于 4 字节，直接返回 None。
 fn find_double_crlf(buf: &[u8]) -> Option<usize> {
     if buf.len() < 4 {
         return None;
@@ -58,23 +120,22 @@ fn find_double_crlf(buf: &[u8]) -> Option<usize> {
     None
 }
 
-use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{broadcast, oneshot, Mutex};
-use tokio::task::JoinHandle;
+// ==================== LSP 消息结构 ====================
 
+/// 【Notification — 服务器推送的通知】
+///
+/// LSP 服务器可以主动向客户端推送消息（如诊断信息），不需要客户端请求。
+/// 通知有 method（方法名）和 params（参数），但没有 id（不需要回复）。
 #[derive(Debug, Clone)]
 pub struct Notification {
     pub method: String,
     pub params: Value,
 }
 
+/// 【LspError — LSP 协议层面的错误】
+///
+/// JSON-RPC 响应中的 error 对象，包含错误代码和消息。
+/// 实现了 Display 和 Error trait，可以与 anyhow 等错误处理库集成。
 #[derive(Debug, Clone)]
 pub struct LspError {
     pub code: i64,
@@ -89,8 +150,36 @@ impl std::fmt::Display for LspError {
 
 impl std::error::Error for LspError {}
 
+// ==================== 传输核心 ====================
+
+/// 等待中的请求映射表。
+///
+/// 【类型别名说明】
+/// type PendingMap = ... 是给复杂类型起个别名，提高可读性。
+/// 这个类型的意思是：
+///   - Arc<Mutex<...>>：线程安全共享的互斥锁保护的数据
+///   - HashMap<i64, oneshot::Sender<...>>：用请求 id 映射到一次性发送器
+///   - oneshot::Sender：只能发送一次值的通道发送端
+///
+/// 【为什么用 oneshot？】
+/// 每个 request 对应唯一一个 response，用 oneshot 通道把 response
+/// 从读取线程传回调用 request() 的异步任务，非常贴切。
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<std::result::Result<Value, LspError>>>>>;
 
+/// 【LspTransport — LSP TCP 传输管理器】
+///
+/// 封装了与 LSP 服务器的 TCP 连接，提供：
+///   - request()：发送请求并等待响应
+///   - notify()：发送通知（不需要响应）
+///   - subscribe()：订阅服务器主动推送的通知
+///   - shutdown()：优雅关闭连接
+///
+/// 【字段说明】
+/// - writer：对 TCP 写入半边的共享引用，多个任务可能并发写，需要 Mutex 保护
+/// - next_id：自增的请求 ID，用 AtomicI64 保证线程安全无锁递增
+/// - pending：存放等待响应的请求，读取线程收到响应后通过 oneshot 回调
+/// - notif_tx：广播发送器，用于分发服务器推送的通知给多个订阅者
+/// - _reader：读取循环的 JoinHandle，持有它防止任务被过早释放
 pub struct LspTransport {
     writer: Arc<Mutex<OwnedWriteHalf>>,
     next_id: AtomicI64,
@@ -100,6 +189,17 @@ pub struct LspTransport {
 }
 
 impl LspTransport {
+    /// 连接到 LSP 服务器。
+    ///
+    /// 【流程】
+    /// 1. 用 tokio::time::timeout 设置 5 秒连接超时
+    /// 2. TCP 连接成功后拆分为读半边和写半边
+    /// 3. 创建广播通道和 pending 映射表
+    /// 4. 启动后台读取循环（reader_loop）
+    /// 5. 返回 LspTransport 的 Arc 共享引用
+    ///
+    /// 【Arc<Self>】
+    /// 返回 Arc 是因为调用者通常需要把 Transport 共享给多个异步任务使用。
     pub async fn connect(host: &str, port: u16) -> Result<Arc<Self>> {
         let stream = tokio::time::timeout(
             Duration::from_secs(5),
@@ -124,10 +224,26 @@ impl LspTransport {
         }))
     }
 
+    /// 订阅服务器推送的通知。
+    ///
+    /// 【broadcast::Receiver】
+    /// 每次调用 subscribe() 都会创建一个新的接收器，可以独立接收通知。
+    /// 适合"一个生产者，多个消费者"的场景。
     pub fn subscribe(&self) -> broadcast::Receiver<Notification> {
         self.notif_tx.subscribe()
     }
 
+    /// 发送一个 JSON-RPC request，并等待服务器的 response。
+    ///
+    /// 【流程】
+    /// 1. fetch_add 获取并递增唯一请求 ID
+    /// 2. 创建一个 oneshot 通道，把 Sender 存到 pending 表中
+    /// 3. 构造 JSON-RPC 请求报文并发送
+    /// 4. 等待 oneshot Receiver 收到响应
+    ///
+    /// 【Ordering::SeqCst】
+    /// 原子操作的内存顺序：SeqCst（顺序一致性）是最安全的默认选项，
+    /// 保证所有线程看到的操作顺序一致。
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
@@ -148,6 +264,10 @@ impl LspTransport {
         }
     }
 
+    /// 发送一个 JSON-RPC notification（不需要响应）。
+    ///
+    /// 与 request 的区别：没有 id 字段，服务器不会发回 response。
+    /// 用于打开文件、保存文件、初始化完成等场景。
     pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
         let msg = json!({
             "jsonrpc": "2.0",
@@ -157,6 +277,10 @@ impl LspTransport {
         self.send(&msg).await
     }
 
+    /// 底层的 TCP 发送函数。
+    ///
+    /// 把 JSON Value 序列化为字节，加上 Content-Length 头部，写入 TCP 流。
+    /// 用 Mutex 保护 writer，保证同一时间只有一个任务在写 socket。
     async fn send(&self, msg: &Value) -> Result<()> {
         let body = serde_json::to_vec(msg)?;
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
@@ -167,12 +291,29 @@ impl LspTransport {
         Ok(())
     }
 
+    /// 关闭 TCP 写入端。
+    ///
+    /// 调用后对方会收到 EOF，读取循环随之结束。
     pub async fn shutdown(&self) {
         let mut w = self.writer.lock().await;
         let _ = w.shutdown().await;
     }
 }
 
+// ==================== 后台读取循环 ====================
+
+/// 后台读取任务：持续从 TCP 读半边读取字节，解析出完整消息并分发。
+///
+/// 【loop 说明】
+/// loop { ... } 是 Rust 中的无限循环，内部用 break 跳出。
+///
+/// 【match reader.read(&mut chunk).await】
+///   - Ok(0)：对方关闭连接，退出循环
+///   - Ok(n)：读到 n 字节，追加到缓冲区
+///   - Err(_)：读出错，退出循环
+///
+/// 【内层 loop】
+/// 一次 read 可能收到多条消息，所以用内层循环尽可能多地提取完整消息。
 async fn reader_loop(
     mut reader: OwnedReadHalf,
     pending: PendingMap,
@@ -194,13 +335,21 @@ async fn reader_loop(
             }
         }
     }
-    // 连接关闭：reject 所有 pending
+    // 连接关闭：reject 所有还在等待响应的请求
     let mut p = pending.lock().await;
     for (_, tx) in p.drain() {
         let _ = tx.send(Err(LspError { code: -1, message: "Connection closed".into() }));
     }
 }
 
+/// 分发一条解析好的 JSON-RPC 消息。
+///
+/// 【流程】
+/// 1. 把 JSON 字符串反序列化为 Value
+/// 2. 如果有 id 字段：说明是 response，找到对应的 pending 请求，通过 oneshot 发送结果
+///    - 如果 JSON 中有 error：包装成 LspError 发送 Err
+///    - 否则：取 result 字段发送 Ok
+/// 3. 如果没有 id 但有 method：说明是服务器推送的 notification，广播给所有订阅者
 async fn dispatch(body: &str, pending: &PendingMap, notif_tx: &broadcast::Sender<Notification>) {
     let v: Value = match serde_json::from_str(body) {
         Ok(v) => v,
@@ -232,6 +381,8 @@ async fn dispatch(body: &str, pending: &PendingMap, notif_tx: &broadcast::Sender
         });
     }
 }
+
+// ==================== 单元测试 ====================
 
 #[cfg(test)]
 mod tests {

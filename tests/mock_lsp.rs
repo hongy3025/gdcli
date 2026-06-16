@@ -9,7 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-/// 简单 MessageBuffer，用于测试中读取一帧。
+/// 简单 MessageBuffer，用于测试中读取一帧 LSP 消息。
 struct Buf {
     data: Vec<u8>,
 }
@@ -38,11 +38,15 @@ impl Buf {
     }
 }
 
+/// 构造一条带 Content-Length 头部的 LSP 消息帧。
 fn frame(body: &str) -> Vec<u8> {
     format!("Content-Length: {}\r\n\r\n{}", body.len(), body).into_bytes()
 }
 
-/// 启动一个 mock LSP，按 `responder` 应答请求；同时在 initialize 后立即推送一条诊断。
+/// 启动一个 mock LSP TCP 服务器。
+///
+/// responder：根据请求 method、id、params 返回可选的响应 JSON 字符串。
+/// 在应答 initialize 后，会自动推送一条诊断通知（测试 diagnostics 命令用）。
 async fn start_mock<F>(responder: F) -> u16
 where
     F: Fn(&str, i64, &serde_json::Value) -> Option<String> + Send + Sync + 'static,
@@ -91,6 +95,7 @@ where
     port
 }
 
+/// 创建一个临时的 .gd 脚本文件供测试使用。
 fn write_temp_gd() -> tempfile::NamedTempFile {
     let mut f = tempfile::Builder::new().suffix(".gd").tempfile().unwrap();
     writeln!(f, "extends Node\nvar x = 1\n").unwrap();
@@ -196,7 +201,7 @@ async fn diagnostics_receives_pushed() {
 fn connection_failure_prints_hint() {
     Command::cargo_bin("gdcli")
         .unwrap()
-        // 1 端口几乎肯定不会有 LSP 监听
+        // 端口 1 几乎肯定不会有 LSP 监听
         .args(["--port", "1", "capabilities"])
         .timeout(Duration::from_secs(15))
         .assert()
