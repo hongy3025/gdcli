@@ -1,5 +1,5 @@
 use crate::transport::{LspTransport, Notification};
-use crate::types::{file_to_uri, Diagnostic, Location, WorkspaceEdit};
+use crate::types::{file_to_uri, Diagnostic, Location, Position, Range, WorkspaceEdit};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -261,6 +261,138 @@ impl GodotLspClient {
             .await
     }
 
+    pub async fn resolve_symbol_path(
+        &self,
+        file: &Path,
+        segments: &[String],
+    ) -> Result<(Position, String)> {
+        let symbols = self.document_symbols(file).await?;
+        let arr = symbols.as_array().cloned().unwrap_or_default();
+        if arr.is_empty() {
+            return Err(anyhow!("No symbols found in file"));
+        }
+
+        // For short form (single segment), try to find in top-level symbols first,
+        // then try in children of top-level symbols
+        if segments.len() == 1 {
+            let segment = &segments[0];
+            
+            // First, try to find in top-level symbols
+            for sym in &arr {
+                let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                if name == segment {
+                    let selection_range = sym
+                        .get("selectionRange")
+                        .ok_or_else(|| anyhow!("Symbol '{}' has no selectionRange", segment))?;
+                    let range: Range = serde_json::from_value(selection_range.clone())?;
+                    return Ok((range.start, name.to_string()));
+                }
+            }
+            
+            // If not found, try in children of top-level symbols
+            for sym in &arr {
+                let children = sym.get("children").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+                for child in &children {
+                    let name = child.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                    if name == segment {
+                        let selection_range = child
+                            .get("selectionRange")
+                            .ok_or_else(|| anyhow!("Symbol '{}' has no selectionRange", segment))?;
+                        let range: Range = serde_json::from_value(selection_range.clone())?;
+                        return Ok((range.start, name.to_string()));
+                    }
+                }
+            }
+            
+            // If still not found, provide suggestions
+            let mut candidates = Vec::new();
+            for sym in &arr {
+                let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                candidates.push(name.to_string());
+                let children = sym.get("children").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+                for child in &children {
+                    let name = child.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                    candidates.push(name.to_string());
+                }
+            }
+            
+            let suggestions = find_similar(segment, &candidates);
+            if suggestions.is_empty() {
+                return Err(anyhow!(
+                    "Symbol '{}' not found. Available symbols: {}",
+                    segment,
+                    candidates.join(", ")
+                ));
+            } else {
+                return Err(anyhow!(
+                    "Symbol '{}' not found. Did you mean: {}?",
+                    segment,
+                    suggestions.join(", ")
+                ));
+            }
+        }
+
+        // For multi-segment paths, traverse the symbol tree
+        let mut current_symbols = arr;
+        let mut found_name = String::new();
+
+        for (i, segment) in segments.iter().enumerate() {
+            let mut found = None;
+            let mut candidates = Vec::new();
+
+            for sym in &current_symbols {
+                let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                candidates.push(name.to_string());
+                if name == segment {
+                    found = Some(sym.clone());
+                    break;
+                }
+            }
+
+            let sym = match found {
+                Some(s) => s,
+                None => {
+                    if candidates.is_empty() {
+                        return Err(anyhow!("No symbols found at level {}", i));
+                    }
+                    let suggestions = find_similar(segment, &candidates);
+                    if suggestions.is_empty() {
+                        return Err(anyhow!(
+                            "Symbol '{}' not found. Available symbols: {}",
+                            segment,
+                            candidates.join(", ")
+                        ));
+                    } else {
+                        return Err(anyhow!(
+                            "Symbol '{}' not found. Did you mean: {}?",
+                            segment,
+                            suggestions.join(", ")
+                        ));
+                    }
+                }
+            };
+
+            let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("?").to_string();
+            found_name = name;
+
+            if i < segments.len() - 1 {
+                current_symbols = sym
+                    .get("children")
+                    .and_then(|x| x.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+            } else {
+                let selection_range = sym
+                    .get("selectionRange")
+                    .ok_or_else(|| anyhow!("Symbol '{}' has no selectionRange", segment))?;
+                let range: Range = serde_json::from_value(selection_range.clone())?;
+                return Ok((range.start, found_name));
+            }
+        }
+
+        Err(anyhow!("Unexpected end of symbol path"))
+    }
+
     pub async fn diagnostics_for(
         &self,
         file: Option<&Path>,
@@ -279,4 +411,122 @@ impl GodotLspClient {
 pub enum DiagnosticsResult {
     Single(Vec<Diagnostic>),
     All(HashMap<String, Vec<Diagnostic>>),
+}
+
+fn find_similar(target: &str, candidates: &[String]) -> Vec<String> {
+    let target_lower = target.to_lowercase();
+    let mut suggestions = Vec::new();
+
+    for candidate in candidates {
+        let candidate_lower = candidate.to_lowercase();
+
+        if candidate_lower.contains(&target_lower) || target_lower.contains(&candidate_lower) {
+            suggestions.push(candidate.clone());
+            continue;
+        }
+
+        let distance = levenshtein_distance(&target_lower, &candidate_lower);
+        let max_len = target.len().max(candidate.len());
+        if max_len > 0 && distance as f64 / max_len as f64 <= 0.4 {
+            suggestions.push(candidate.clone());
+        }
+    }
+
+    suggestions.sort();
+    suggestions.truncate(3);
+    suggestions
+}
+
+fn levenshtein_distance(s1: &str, s2: &str) -> usize {
+    let len1 = s1.len();
+    let len2 = s2.len();
+    let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
+
+    for i in 0..=len1 {
+        matrix[i][0] = i;
+    }
+    for j in 0..=len2 {
+        matrix[0][j] = j;
+    }
+
+    for (i, c1) in s1.chars().enumerate() {
+        for (j, c2) in s2.chars().enumerate() {
+            let cost = if c1 == c2 { 0 } else { 1 };
+            matrix[i + 1][j + 1] = (matrix[i][j + 1] + 1)
+                .min(matrix[i + 1][j] + 1)
+                .min(matrix[i][j] + cost);
+        }
+    }
+
+    matrix[len1][len2]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_levenshtein_distance() {
+        assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
+        assert_eq!(levenshtein_distance("hello", "hello"), 0);
+        assert_eq!(levenshtein_distance("", "abc"), 3);
+        assert_eq!(levenshtein_distance("abc", ""), 3);
+    }
+
+    #[test]
+    fn test_find_similar_exact_match() {
+        let candidates = vec![
+            "health".to_string(),
+            "damage".to_string(),
+            "speed".to_string(),
+        ];
+        let suggestions = find_similar("health", &candidates);
+        assert!(suggestions.contains(&"health".to_string()));
+    }
+
+    #[test]
+    fn test_find_similar_partial_match() {
+        let candidates = vec![
+            "health".to_string(),
+            "damage".to_string(),
+            "speed".to_string(),
+        ];
+        let suggestions = find_similar("heal", &candidates);
+        assert!(suggestions.contains(&"health".to_string()));
+    }
+
+    #[test]
+    fn test_find_similar_typo() {
+        let candidates = vec![
+            "health".to_string(),
+            "damage".to_string(),
+            "speed".to_string(),
+        ];
+        let suggestions = find_similar("healht", &candidates);
+        assert!(suggestions.contains(&"health".to_string()));
+    }
+
+    #[test]
+    fn test_find_similar_no_match() {
+        let candidates = vec![
+            "health".to_string(),
+            "damage".to_string(),
+            "speed".to_string(),
+        ];
+        let suggestions = find_similar("xyz", &candidates);
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_find_similar_limits_to_three() {
+        let candidates = vec![
+            "health".to_string(),
+            "healthy".to_string(),
+            "heal".to_string(),
+            "healer".to_string(),
+            "healing".to_string(),
+        ];
+        let suggestions = find_similar("heal", &candidates);
+        assert!(suggestions.len() <= 3);
+    }
 }

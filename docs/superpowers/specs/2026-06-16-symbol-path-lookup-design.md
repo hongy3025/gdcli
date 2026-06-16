@@ -25,11 +25,11 @@
 
 **示例**：
 ```bash
-# 完整形式
-gdcli definition player.gd:Player.health
-
-# 简写形式（省略类名）
+# 简写形式（推荐）
 gdcli definition player.gd:health
+
+# 完整形式（仅当文件名不含 '.' 时可用）
+gdcli definition player.gd:Player.health
 
 # 多级形式
 gdcli definition player.gd:Player.Inventory.Item.name
@@ -42,6 +42,11 @@ gdcli definition res://player.gd:Player.health
 - 以第一个 `:` 分割文件和符号
 - 符号路径以 `.` 分隔各级符号
 - 第一段为类名（可选），后续段为成员路径
+
+**限制**：
+- 文件名包含 `.`（如 `2d_in_3d.gd`）时，只能使用简写形式
+- 完整形式 `2d_in_3d.gd:2d_in_3d.gd.counter` 会产生解析歧义
+- 推荐使用简写形式 `2d_in_3d.gd:counter`
 
 ### 2. Command Integration
 

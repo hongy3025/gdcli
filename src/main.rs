@@ -1,9 +1,10 @@
 mod client;
+mod symbol_path;
 mod transport;
 mod types;
 
 use crate::client::{DiagnosticsResult, GodotLspClient};
-use crate::types::{uri_to_file, symbol_kind_name, Diagnostic, Range};
+use crate::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -27,12 +28,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    Rename { file: PathBuf, line: u32, col: u32, new_name: String },
-    References { file: PathBuf, line: u32, col: u32 },
-    Definition { file: PathBuf, line: u32, col: u32 },
-    Declaration { file: PathBuf, line: u32, col: u32 },
+    Rename { target: String, new_name: String },
+    References { target: String },
+    Definition { target: String },
+    Declaration { target: String },
     Symbols { file: PathBuf },
-    Hover { file: PathBuf, line: u32, col: u32 },
+    Hover { target: String },
     #[command(name = "native-symbol")]
     NativeSymbol { class: String, member: Option<String> },
     Diagnostics { file: Option<PathBuf> },
@@ -49,6 +50,37 @@ fn resolve_file(file: &Path, project: Option<&Path>) -> PathBuf {
     std::env::current_dir()
         .map(|c| c.join(file))
         .unwrap_or_else(|_| file.to_path_buf())
+}
+
+enum TargetMode {
+    Position { file: PathBuf, line: u32, col: u32 },
+    SymbolPath { symbol_path: crate::symbol_path::SymbolPath },
+}
+
+fn parse_target(target: &str, _project: Option<&Path>) -> Result<TargetMode> {
+    let parts: Vec<&str> = target.split(':').collect();
+    
+    if parts.len() >= 3 {
+        let last_two = &parts[parts.len() - 2..];
+        if let (Ok(line), Ok(col)) = (last_two[0].parse::<u32>(), last_two[1].parse::<u32>()) {
+            let file = parts[..parts.len() - 2].join(":");
+            return Ok(TargetMode::Position {
+                file: PathBuf::from(file),
+                line,
+                col,
+            });
+        }
+    }
+    
+    if crate::symbol_path::SymbolPath::is_symbol_path(target) {
+        let sp = crate::symbol_path::SymbolPath::parse(target)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        Ok(TargetMode::SymbolPath { symbol_path: sp })
+    } else {
+        Err(anyhow::anyhow!(
+            "Invalid target format. Expected 'file:line:col' or 'file:SymbolPath'"
+        ))
+    }
 }
 
 fn format_range(r: &Range) -> String {
@@ -164,57 +196,109 @@ async fn run() -> Result<()> {
                 let caps = client.server_capabilities().await;
                 println!("{}", serde_json::to_string_pretty(&caps)?);
             }
-            Cmd::Rename { file, line, col, new_name } => {
-                let f = resolve_file(&file, project);
-                let result = client.rename(&f, line, col, &new_name).await?;
-                if cli.json {
-                    let v = serde_json::to_value(&result)?;
-                    println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                } else {
-                    match result {
-                        Some(we) if we.changes.is_some() => {
-                            for (uri, edits) in we.changes.unwrap() {
-                                println!("{}:", uri_to_file(&uri));
-                                for e in edits {
-                                    println!("  {} → \"{}\"", format_range(&e.range), e.new_text);
-                                }
-                            }
-                        }
-                        Some(we) if we.document_changes.is_some() => {
-                            let v = decode_uris(we.document_changes.unwrap());
-                            println!("{}", serde_json::to_string_pretty(&v)?);
-                        }
-                        _ => println!("No changes returned. Symbol may not support rename."),
+            Cmd::Rename { target, new_name } => {
+                let mode = parse_target(&target, project)?;
+                match mode {
+                    TargetMode::Position { file, line, col } => {
+                        let f = resolve_file(&file, project);
+                        let result = client.rename(&f, line, col, &new_name).await?;
+                        print_rename_result(result, cli.json)?;
                     }
-                }
-            }
-            Cmd::References { file, line, col } => {
-                let f = resolve_file(&file, project);
-                let result = client.references(&f, line, col).await?;
-                if cli.json {
-                    let v = serde_json::to_value(&result)?;
-                    println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                } else if result.is_empty() {
-                    println!("No references found.");
-                } else {
-                    println!("Found {} reference(s):", result.len());
-                    for loc in &result {
-                        let v = serde_json::to_value(loc)?;
-                        if let Some(s) = format_location_value(&v) {
-                            println!("  {}", s);
+                    TargetMode::SymbolPath { symbol_path } => {
+                        let f = resolve_file(&symbol_path.file, project);
+                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+                        let result = client.rename(&f, pos.line, pos.character, &new_name).await?;
+                        if cli.json {
+                            let v = json!({
+                                "symbol": name,
+                                "position": { "line": pos.line, "character": pos.character },
+                                "result": result
+                            });
+                            println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+                        } else {
+                            println!("Renaming symbol '{}' at {}:{}", name, pos.line, pos.character);
+                            print_rename_result(result, false)?;
                         }
                     }
                 }
             }
-            Cmd::Definition { file, line, col } => {
-                let f = resolve_file(&file, project);
-                let v = client.definition(&f, line, col).await?;
-                handle_locations(&v, cli.json, "No definition found.")?;
+            Cmd::References { target } => {
+                let mode = parse_target(&target, project)?;
+                match mode {
+                    TargetMode::Position { file, line, col } => {
+                        let f = resolve_file(&file, project);
+                        let result = client.references(&f, line, col).await?;
+                        print_references_result(&result, cli.json)?;
+                    }
+                    TargetMode::SymbolPath { symbol_path } => {
+                        let f = resolve_file(&symbol_path.file, project);
+                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+                        let result = client.references(&f, pos.line, pos.character).await?;
+                        if cli.json {
+                            let v = json!({
+                                "symbol": name,
+                                "position": { "line": pos.line, "character": pos.character },
+                                "references": result
+                            });
+                            println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+                        } else {
+                            println!("References for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                            print_references_result(&result, false)?;
+                        }
+                    }
+                }
             }
-            Cmd::Declaration { file, line, col } => {
-                let f = resolve_file(&file, project);
-                let v = client.declaration(&f, line, col).await?;
-                handle_locations(&v, cli.json, "No declaration found.")?;
+            Cmd::Definition { target } => {
+                let mode = parse_target(&target, project)?;
+                match mode {
+                    TargetMode::Position { file, line, col } => {
+                        let f = resolve_file(&file, project);
+                        let v = client.definition(&f, line, col).await?;
+                        handle_locations(&v, cli.json, "No definition found.")?;
+                    }
+                    TargetMode::SymbolPath { symbol_path } => {
+                        let f = resolve_file(&symbol_path.file, project);
+                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+                        let v = client.definition(&f, pos.line, pos.character).await?;
+                        if cli.json {
+                            let result = json!({
+                                "symbol": name,
+                                "position": { "line": pos.line, "character": pos.character },
+                                "definition": v
+                            });
+                            println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
+                        } else {
+                            println!("Definition for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                            handle_locations(&v, false, "No definition found.")?;
+                        }
+                    }
+                }
+            }
+            Cmd::Declaration { target } => {
+                let mode = parse_target(&target, project)?;
+                match mode {
+                    TargetMode::Position { file, line, col } => {
+                        let f = resolve_file(&file, project);
+                        let v = client.declaration(&f, line, col).await?;
+                        handle_locations(&v, cli.json, "No declaration found.")?;
+                    }
+                    TargetMode::SymbolPath { symbol_path } => {
+                        let f = resolve_file(&symbol_path.file, project);
+                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+                        let v = client.declaration(&f, pos.line, pos.character).await?;
+                        if cli.json {
+                            let result = json!({
+                                "symbol": name,
+                                "position": { "line": pos.line, "character": pos.character },
+                                "declaration": v
+                            });
+                            println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
+                        } else {
+                            println!("Declaration for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                            handle_locations(&v, false, "No declaration found.")?;
+                        }
+                    }
+                }
             }
             Cmd::Symbols { file } => {
                 let f = resolve_file(&file, project);
@@ -230,14 +314,35 @@ async fn run() -> Result<()> {
                     }
                 }
             }
-            Cmd::Hover { file, line, col } => {
-                let f = resolve_file(&file, project);
-                let result = client.hover(&f, line, col).await?;
-                if cli.json {
-                    let v = json!({ "hover": result });
-                    println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
-                } else {
-                    println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
+            Cmd::Hover { target } => {
+                let mode = parse_target(&target, project)?;
+                match mode {
+                    TargetMode::Position { file, line, col } => {
+                        let f = resolve_file(&file, project);
+                        let result = client.hover(&f, line, col).await?;
+                        if cli.json {
+                            let v = json!({ "hover": result });
+                            println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+                        } else {
+                            println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
+                        }
+                    }
+                    TargetMode::SymbolPath { symbol_path } => {
+                        let f = resolve_file(&symbol_path.file, project);
+                        let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+                        let result = client.hover(&f, pos.line, pos.character).await?;
+                        if cli.json {
+                            let v = json!({
+                                "symbol": name,
+                                "position": { "line": pos.line, "character": pos.character },
+                                "hover": result
+                            });
+                            println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+                        } else {
+                            println!("Hover info for symbol '{}' at {}:{}", name, pos.line, pos.character);
+                            println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
+                        }
+                    }
                 }
             }
             Cmd::NativeSymbol { class, member } => {
@@ -344,6 +449,49 @@ fn handle_diagnostics(result: DiagnosticsResult, json_mode: bool) -> Result<()> 
     Ok(())
 }
 
+fn print_rename_result(result: Option<WorkspaceEdit>, json_mode: bool) -> Result<()> {
+    if json_mode {
+        let v = serde_json::to_value(&result)?;
+        println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+    } else {
+        match result {
+            Some(we) if we.changes.is_some() => {
+                let changes = we.changes.unwrap();
+                for (uri, edits) in changes {
+                    println!("{}:", uri_to_file(&uri));
+                    for e in edits {
+                        println!("  {} → \"{}\"", format_range(&e.range), e.new_text);
+                    }
+                }
+            }
+            Some(we) if we.document_changes.is_some() => {
+                let v = decode_uris(we.document_changes.unwrap());
+                println!("{}", serde_json::to_string_pretty(&v)?);
+            }
+            _ => println!("No changes returned. Symbol may not support rename."),
+        }
+    }
+    Ok(())
+}
+
+fn print_references_result(result: &[Location], json_mode: bool) -> Result<()> {
+    if json_mode {
+        let v = serde_json::to_value(result)?;
+        println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
+    } else if result.is_empty() {
+        println!("No references found.");
+    } else {
+        println!("Found {} reference(s):", result.len());
+        for loc in result {
+            let v = serde_json::to_value(loc)?;
+            if let Some(s) = format_location_value(&v) {
+                println!("  {}", s);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,5 +546,60 @@ mod tests {
         let obj = out.as_object().unwrap();
         assert!(obj.keys().any(|k| !k.starts_with("file:///")));
         assert_eq!(obj.get("plain").unwrap(), "no-uri");
+    }
+
+    #[test]
+    fn parse_target_position_mode() {
+        let result = parse_target("player.gd:10:5", None).unwrap();
+        match result {
+            TargetMode::Position { file, line, col } => {
+                assert_eq!(file, PathBuf::from("player.gd"));
+                assert_eq!(line, 10);
+                assert_eq!(col, 5);
+            }
+            _ => panic!("Expected Position mode"),
+        }
+    }
+
+    #[test]
+    fn parse_target_symbol_path_mode() {
+        let result = parse_target("player.gd:Player.health", None).unwrap();
+        match result {
+            TargetMode::SymbolPath { symbol_path } => {
+                assert_eq!(symbol_path.file, PathBuf::from("player.gd"));
+                assert_eq!(symbol_path.segments, vec!["Player", "health"]);
+            }
+            _ => panic!("Expected SymbolPath mode"),
+        }
+    }
+
+    #[test]
+    fn parse_target_symbol_path_short_form() {
+        let result = parse_target("player.gd:health", None).unwrap();
+        match result {
+            TargetMode::SymbolPath { symbol_path } => {
+                assert_eq!(symbol_path.file, PathBuf::from("player.gd"));
+                assert_eq!(symbol_path.segments, vec!["health"]);
+            }
+            _ => panic!("Expected SymbolPath mode"),
+        }
+    }
+
+    #[test]
+    fn parse_target_invalid_format() {
+        let result = parse_target("player.gd", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_target_invalid_format_no_colon() {
+        let result = parse_target("player.gd", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_target_invalid_format_empty() {
+        let result = parse_target("", None);
+        assert!(result.is_err());
     }
 }

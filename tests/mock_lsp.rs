@@ -114,12 +114,13 @@ async fn rename_human_output() {
 
     let f = write_temp_gd();
     let path = f.path().to_path_buf();
+    let target = format!("{}:1:4", path.display());
     tokio::task::spawn_blocking(move || {
         Command::cargo_bin("gdcli")
             .unwrap()
             .args(["--port", &port.to_string(), "rename"])
-            .arg(&path)
-            .args(["1", "4", "y"])
+            .arg(&target)
+            .arg("y")
             .timeout(Duration::from_secs(10))
             .assert()
             .success()
@@ -147,12 +148,13 @@ async fn rename_json_decodes_uris() {
 
     let f = write_temp_gd();
     let path = f.path().to_path_buf();
+    let target = format!("{}:0:0", path.display());
     tokio::task::spawn_blocking(move || {
         let out = Command::cargo_bin("gdcli")
             .unwrap()
             .args(["--port", &port.to_string(), "--json", "rename"])
-            .arg(&path)
-            .args(["0", "0", "z"])
+            .arg(&target)
+            .arg("z")
             .timeout(Duration::from_secs(10))
             .assert()
             .success();
