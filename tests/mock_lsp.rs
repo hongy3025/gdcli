@@ -1,4 +1,4 @@
-//! 集成测试：mock 一个 LSP TCP 服务器，跑 gd-lsp-cli 子进程对拍输出。
+//! 集成测试：mock 一个 LSP TCP 服务器，跑 gdcli 子进程对拍输出。
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -115,7 +115,7 @@ async fn rename_human_output() {
     let f = write_temp_gd();
     let path = f.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        Command::cargo_bin("gd-lsp-cli")
+        Command::cargo_bin("gdcli")
             .unwrap()
             .args(["--port", &port.to_string(), "rename"])
             .arg(&path)
@@ -148,7 +148,7 @@ async fn rename_json_decodes_uris() {
     let f = write_temp_gd();
     let path = f.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let out = Command::cargo_bin("gd-lsp-cli")
+        let out = Command::cargo_bin("gdcli")
             .unwrap()
             .args(["--port", &port.to_string(), "--json", "rename"])
             .arg(&path)
@@ -176,7 +176,7 @@ async fn diagnostics_receives_pushed() {
     .await;
 
     tokio::task::spawn_blocking(move || {
-        Command::cargo_bin("gd-lsp-cli")
+        Command::cargo_bin("gdcli")
             .unwrap()
             .args(["--port", &port.to_string(), "diagnostics"])
             .timeout(Duration::from_secs(15))
@@ -192,7 +192,7 @@ async fn diagnostics_receives_pushed() {
 
 #[test]
 fn connection_failure_prints_hint() {
-    Command::cargo_bin("gd-lsp-cli")
+    Command::cargo_bin("gdcli")
         .unwrap()
         // 1 端口几乎肯定不会有 LSP 监听
         .args(["--port", "1", "capabilities"])

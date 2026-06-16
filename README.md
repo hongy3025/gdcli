@@ -1,4 +1,4 @@
-# gd-lsp-cli
+# gdcli
 
 `godot-lsp-cli` 的 Rust 复刻版本，与 Godot 内置 LSP 服务器通过 TCP 通信，支持跨项目重命名、查找引用、跳转定义等代码智能能力。
 
@@ -8,7 +8,7 @@
 
 ```bash
 cargo build --release
-# 产物：target/release/gd-lsp-cli (Windows 下为 .exe)
+# 产物：target/release/gdcli (Windows 下为 .exe)
 ```
 
 ## 前置条件

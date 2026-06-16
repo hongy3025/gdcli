@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "gd-lsp-cli", version, about = "CLI for Godot's built-in LSP")]
+#[command(name = "gdcli", version, about = "CLI for Godot's built-in LSP")]
 struct Cli {
     #[arg(long, default_value = "127.0.0.1", global = true)]
     host: String,

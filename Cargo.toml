@@ -1,12 +1,12 @@
 [package]
-name = "gd-lsp-cli"
+name = "gdcli"
 version = "0.1.0"
 edition = "2024"
 description = "CLI that talks to Godot's built-in LSP — rename, references, definition"
 license = "MIT"
 
 [[bin]]
-name = "gd-lsp-cli"
+name = "gdcli"
 path = "src/main.rs"
 
 [dependencies]
