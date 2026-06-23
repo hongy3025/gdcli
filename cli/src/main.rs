@@ -23,6 +23,7 @@ mod lsp;
 mod exec;
 mod gdapi_meta;
 mod project;
+mod embedded_addon;
 
 use lsp::client::{DiagnosticsResult, GodotLspClient};
 use lsp::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
