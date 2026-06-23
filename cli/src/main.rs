@@ -56,9 +56,9 @@ struct Cli {
     /// LSP 服务器主机地址，默认本地回环
     #[arg(long, default_value = "127.0.0.1", global = true)]
     host: String,
-    /// LSP 服务器端口，默认 6005（Godot 默认 LSP 端口）
-    #[arg(long, default_value_t = 6005, global = true)]
-    port: u16,
+    /// LSP 服务器端口（默认从 .godot/gdapi.json 读取，或 6005）
+    #[arg(long, global = true)]
+    port: Option<u16>,
     /// Godot 项目根目录路径（用于解析相对路径和初始化 LSP）
     #[arg(long, global = true)]
     project: Option<PathBuf>,
@@ -350,6 +350,31 @@ async fn main() {
     }
 }
 
+/// 发现 LSP 端口。
+///
+/// 优先级：
+/// 1. --port 显式指定
+/// 2. .godot/gdapi.json 的 lsp_port 字段
+/// 3. 默认 6005
+fn discover_lsp_port(explicit_port: Option<u16>, project_root: Option<&Path>) -> u16 {
+    // 1. 显式指定
+    if let Some(p) = explicit_port {
+        return p;
+    }
+
+    // 2. 从 .godot/gdapi.json 读取
+    if let Some(root) = project_root {
+        if let Ok(meta) = gdapi_meta::read(root) {
+            if let Some(lsp_port) = meta.lsp_port {
+                return lsp_port;
+            }
+        }
+    }
+
+    // 3. 默认值
+    6005
+}
+
 /// 主运行逻辑。
 ///
 /// 【流程】
@@ -384,18 +409,23 @@ async fn run() -> Result<()> {
 
     // Status 命令单独处理：即使连接失败也要友好输出
     if matches!(cli.cmd, Cmd::Status) {
-        return handle_status_command(&cli.host, cli.port, project, cli.json).await;
+        let project_root = project::resolve_project_root(project).ok();
+        let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
+        return handle_status_command(&cli.host, lsp_port, project, cli.json).await;
     }
 
     // LSP 子命令需要连接服务器
     if let Cmd::Lsp { ref sub } = cli.cmd {
-        let client = match GodotLspClient::connect(&cli.host, cli.port, project).await {
+        let project_root = project::resolve_project_root(project).ok();
+        let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
+
+        let client = match GodotLspClient::connect(&cli.host, lsp_port, project).await {
             Ok(c) => c,
             Err(_) => {
-                eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, cli.port);
+                eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, lsp_port);
                 eprintln!(
                     "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
-                    cli.port
+                    lsp_port
                 );
                 std::process::exit(1);
             }
