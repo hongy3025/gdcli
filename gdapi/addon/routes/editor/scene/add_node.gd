@@ -53,8 +53,7 @@ func handle(params: Dictionary) -> Dictionary:
 	if pack_result != OK:
 		return {"error": "failed to pack scene: " + str(pack_result), "code": "pack_failed"}
 
-	var abs_path := ProjectSettings.globalize_path(scene_path)
-	var save_result := ResourceSaver.save(packed, abs_path)
+	var save_result := ResourceSaver.save(packed, scene_path)
 	if save_result != OK:
 		return {"error": "failed to save scene: " + str(save_result), "code": "save_failed"}
 
