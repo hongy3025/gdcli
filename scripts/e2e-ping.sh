@@ -32,6 +32,7 @@ fi
 echo "Starting Godot editor..."
 "$GODOT_BIN" --editor --headless --path "$FIXTURE" &
 GODOT_PID=$!
+trap 'kill $GODOT_PID 2>/dev/null; wait $GODOT_PID 2>/dev/null' EXIT
 
 # 3. 轮询等待 .godot/gdapi.json 出现
 META="$FIXTURE/.godot/gdapi.json"
@@ -46,7 +47,6 @@ done
 
 if [[ ! -f "$META" ]]; then
     echo "ERROR: gdapi.json never appeared"
-    kill $GODOT_PID 2>/dev/null || true
     exit 1
 fi
 
@@ -63,9 +63,5 @@ else
     echo "FAIL: unexpected response"
     RESULT=1
 fi
-
-# 6. 关闭 Godot
-kill $GODOT_PID 2>/dev/null || true
-wait $GODOT_PID 2>/dev/null || true
 
 exit $RESULT
