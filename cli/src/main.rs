@@ -70,24 +70,23 @@ struct Cli {
     cmd: Cmd,
 }
 
-/// 【Cmd — 支持的子命令枚举】
+/// 【LspCmd — LSP 子命令枚举】
 ///
-/// 【#[derive(Subcommand)] 说明】
-/// clap 宏：把枚举的每个变体变成一个 CLI 子命令。
-/// 变体上的属性控制命令名称、参数等。
+/// 通过 `gdcli lsp <subcommand>` 访问。
+/// 这些命令需要连接 Godot LSP 服务器。
 #[derive(Subcommand)]
-enum Cmd {
-    /// 重命名符号：gdcli rename <target> <new_name>
+enum LspCmd {
+    /// 重命名符号：gdcli lsp rename <target> <new_name>
     Rename { target: String, new_name: String },
-    /// 查找引用：gdcli references <target>
+    /// 查找引用：gdcli lsp references <target>
     References { target: String },
-    /// 跳转到定义：gdcli definition <target>
+    /// 跳转到定义：gdcli lsp definition <target>
     Definition { target: String },
-    /// 跳转到声明：gdcli declaration <target>
+    /// 跳转到声明：gdcli lsp declaration <target>
     Declaration { target: String },
-    /// 列出文件中的符号：gdcli symbols <file>
+    /// 列出文件中的符号：gdcli lsp symbols <file>
     Symbols { file: PathBuf },
-    /// 获取悬浮提示：gdcli hover <target>
+    /// 获取悬浮提示：gdcli lsp hover <target>
     Hover { target: String },
     /// 查询 Godot 原生类文档（Godot LSP 扩展）
     #[command(name = "native-symbol")]
@@ -103,6 +102,20 @@ enum Cmd {
     Diagnostics { file: Option<PathBuf> },
     /// 查询服务器能力列表
     Capabilities,
+}
+
+/// 【Cmd — 支持的子命令枚举】
+///
+/// 【#[derive(Subcommand)] 说明】
+/// clap 宏：把枚举的每个变体变成一个 CLI 子命令。
+/// 变体上的属性控制命令名称、参数等。
+#[derive(Subcommand)]
+enum Cmd {
+    /// 与 Godot LSP 服务器交互：gdcli lsp <subcommand>
+    Lsp {
+        #[command(subcommand)]
+        sub: LspCmd,
+    },
     /// 检查与 LSP 服务器的连接状态
     Status,
     /// 在目标项目安装 gdapi addon
@@ -374,67 +387,60 @@ async fn run() -> Result<()> {
         return handle_status_command(&cli.host, cli.port, project, cli.json).await;
     }
 
-    let client = match GodotLspClient::connect(&cli.host, cli.port, project).await {
-        Ok(c) => c,
-        Err(_) => {
-            eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, cli.port);
-            eprintln!(
-                "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
-                cli.port
-            );
-            std::process::exit(1);
-        }
-    };
+    // LSP 子命令需要连接服务器
+    if let Cmd::Lsp { ref sub } = cli.cmd {
+        let client = match GodotLspClient::connect(&cli.host, cli.port, project).await {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, cli.port);
+                eprintln!(
+                    "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
+                    cli.port
+                );
+                std::process::exit(1);
+            }
+        };
 
-    let result: Result<()> = async {
-        match cli.cmd {
-            Cmd::Capabilities => {
-                let caps = client.server_capabilities().await;
-                println!("{}", serde_json::to_string_pretty(&caps)?);
+        let result: Result<()> = async {
+            match sub {
+                LspCmd::Capabilities => {
+                    let caps = client.server_capabilities().await;
+                    println!("{}", serde_json::to_string_pretty(&caps)?);
+                }
+                LspCmd::Rename { target, new_name } => {
+                    handle_rename_command(&client, target, new_name, project, cli.json).await?;
+                }
+                LspCmd::References { target } => {
+                    handle_references_command(&client, target, project, cli.json).await?;
+                }
+                LspCmd::Definition { target } => {
+                    handle_definition_command(&client, target, project, cli.json).await?;
+                }
+                LspCmd::Declaration { target } => {
+                    handle_declaration_command(&client, target, project, cli.json).await?;
+                }
+                LspCmd::Symbols { file } => {
+                    handle_symbols_command(&client, file, project, cli.json).await?;
+                }
+                LspCmd::Hover { target } => {
+                    handle_hover_command(&client, target, project, cli.json).await?;
+                }
+                LspCmd::NativeSymbol { members, full, class, member } => {
+                    handle_native_symbol_command(&client, class, member.as_deref(), *members, *full, cli.json).await?;
+                }
+                LspCmd::Diagnostics { file } => {
+                    handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
+                }
             }
-            Cmd::Rename { target, new_name } => {
-                handle_rename_command(&client, &target, &new_name, project, cli.json).await?;
-            }
-            Cmd::References { target } => {
-                handle_references_command(&client, &target, project, cli.json).await?;
-            }
-            Cmd::Definition { target } => {
-                handle_definition_command(&client, &target, project, cli.json).await?;
-            }
-            Cmd::Declaration { target } => {
-                handle_declaration_command(&client, &target, project, cli.json).await?;
-            }
-            Cmd::Symbols { file } => {
-                handle_symbols_command(&client, &file, project, cli.json).await?;
-            }
-            Cmd::Hover { target } => {
-                handle_hover_command(&client, &target, project, cli.json).await?;
-            }
-            Cmd::NativeSymbol { members, full, class, member } => {
-                handle_native_symbol_command(&client, &class, member.as_deref(), members, full, cli.json).await?;
-            }
-            Cmd::Diagnostics { file } => {
-                handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
-            }
-            Cmd::Status => {
-                // Status 在前面已经处理，这里不可能到达
-                unreachable!()
-            }
-            Cmd::Exec { .. } => {
-                // Exec 在前面已经处理，这里不可能到达
-                unreachable!()
-            }
-            Cmd::Install { .. } => {
-                // Install 在前面已经处理，这里不可能到达
-                unreachable!()
-            }
+            Ok(())
         }
-        Ok(())
+        .await;
+
+        client.disconnect().await;
+        return result;
     }
-    .await;
 
-    client.disconnect().await;
-    result
+    unreachable!()
 }
 
 // ==================== 命令处理器 ====================

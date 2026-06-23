@@ -123,7 +123,7 @@ async fn rename_human_output() {
     tokio::task::spawn_blocking(move || {
         Command::cargo_bin("gdcli")
             .unwrap()
-            .args(["--port", &port.to_string(), "rename"])
+            .args(["--port", &port.to_string(), "lsp", "rename"])
             .arg(&target)
             .arg("y")
             .timeout(Duration::from_secs(10))
@@ -157,7 +157,7 @@ async fn rename_json_decodes_uris() {
     tokio::task::spawn_blocking(move || {
         let out = Command::cargo_bin("gdcli")
             .unwrap()
-            .args(["--port", &port.to_string(), "--json", "rename"])
+            .args(["--port", &port.to_string(), "--json", "lsp", "rename"])
             .arg(&target)
             .arg("z")
             .timeout(Duration::from_secs(10))
@@ -185,7 +185,7 @@ async fn diagnostics_receives_pushed() {
     tokio::task::spawn_blocking(move || {
         Command::cargo_bin("gdcli")
             .unwrap()
-            .args(["--port", &port.to_string(), "diagnostics"])
+            .args(["--port", &port.to_string(), "lsp", "diagnostics"])
             .timeout(Duration::from_secs(15))
             .assert()
             .success()
@@ -202,7 +202,7 @@ fn connection_failure_prints_hint() {
     Command::cargo_bin("gdcli")
         .unwrap()
         // 端口 1 几乎肯定不会有 LSP 监听
-        .args(["--port", "1", "capabilities"])
+        .args(["--port", "1", "lsp", "capabilities"])
         .timeout(Duration::from_secs(15))
         .assert()
         .failure()
@@ -216,7 +216,7 @@ fn connection_failure_prints_hint() {
 fn native_symbol_members_full_conflict() {
     Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["native-symbol", "--members", "--full", "Node"])
+        .args(["lsp", "native-symbol", "--members", "--full", "Node"])
         .timeout(Duration::from_secs(5))
         .assert()
         .failure()
