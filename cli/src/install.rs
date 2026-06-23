@@ -62,7 +62,8 @@ pub fn run(args: InstallArgs) -> Result<()> {
     }
 
     // 5. 输出结果
-    println!("Installed gdapi 0.2.0 → {}", target.display());
+    let version = read_installed_version(&target).unwrap_or_else(|| "unknown".to_string());
+    println!("Installed gdapi {} → {}", version, target.display());
     if !args.no_enable {
         println!("Plugin enabled in project.godot.");
     }
