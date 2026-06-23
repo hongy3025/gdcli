@@ -1,0 +1,10 @@
+config_version=5
+
+[application]
+
+config/name="gdapi_e2e_fixture"
+config/features=PackedStringArray("4.3")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdapi/plugin.cfg")
