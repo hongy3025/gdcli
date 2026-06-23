@@ -104,3 +104,52 @@ fn old_top_level_rename_fails() {
         .failure()
         .stderr(predicate::str::contains("error"));
 }
+
+#[test]
+fn old_top_level_references_fails() {
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["references", "player.gd:10:5"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("error"));
+}
+
+#[test]
+fn old_top_level_definition_fails() {
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["definition", "player.gd:10:5"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("error"));
+}
+
+#[test]
+fn old_top_level_native_symbol_fails() {
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["native-symbol", "Node3D"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("error"));
+}
+
+#[test]
+fn old_top_level_diagnostics_fails() {
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["diagnostics"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("error"));
+}
+
+#[test]
+fn lsp_no_subcommand_shows_help() {
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["lsp"])
+        .assert()
+        .failure();
+}
