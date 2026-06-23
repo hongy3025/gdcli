@@ -1,3 +1,26 @@
+## 实验性：gdcli exec（与 gdapi addon 配合）
+
+> 阶段 1：仅支持内置 `/ping` 路由，验证端到端联通。完整命令集见 `docs/superpowers/specs/2026-06-23-gdcli-godot-editor-tool-design.md`。
+
+### 准备
+
+```bash
+cargo build --workspace
+```
+
+把 `gdapi/addon/` 拷到目标项目的 `addons/gdapi/`，并把编译产物（如 `target/debug/gdapi.dll`）放到 `addons/gdapi/bin/<platform>/`。在 Godot 编辑器中启用 `gdapi` 插件（Project Settings → Plugins）。
+
+### 验证
+
+```bash
+gdcli exec ping --project /path/to/your/godot/project
+# 输出：{"editor_version":"4.3.x","gdapi_version":"0.2.0","ok":true}
+```
+
+后续阶段将提供 `gdcli install` 一键完成上述安装步骤。
+
+---
+
 # gdcli
 
 与 Godot 内置 LSP 服务器通过 TCP 通信，支持跨项目重命名、查找引用、跳转定义等代码智能能力。

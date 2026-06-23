@@ -1,1 +1,10 @@
 /target
+
+# gdapi GDExtension build outputs
+gdapi/rust/target/
+
+# Addon binaries copied into fixture (not source-controlled)
+tests/fixture_project/addons/gdapi/
+
+# Per-project Godot metadata
+.godot/

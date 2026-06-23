@@ -20,8 +20,8 @@
 
 // ==================== 导入 ====================
 
-use crate::transport::{LspTransport, Notification};
-use crate::types::{file_to_uri, Diagnostic, Location, Position, Range, WorkspaceEdit};
+use crate::lsp::transport::{LspTransport, Notification};
+use crate::lsp::types::{file_to_uri, Diagnostic, Location, Position, Range, WorkspaceEdit};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};

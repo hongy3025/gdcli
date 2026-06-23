@@ -19,18 +19,15 @@
 
 // ==================== 模块声明与导入 ====================
 
-/// 声明 client 模块（对应 src/client.rs）
-/// mod 语句告诉 Rust 编译器去加载同名的 .rs 文件
-mod client;
-mod symbol_path;
-mod transport;
-mod types;
+mod lsp;
+mod exec;
+mod gdapi_meta;
+mod project;
+mod embedded_addon;
+mod install;
 
-/// 从 client 模块导入类型
-/// Arc 是共享所有权指针，DiagnosticsResult 和 GodotLspClient 是核心类型
-use crate::client::{DiagnosticsResult, GodotLspClient};
-/// 从 types 模块导入工具函数和类型
-use crate::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
+use lsp::client::{DiagnosticsResult, GodotLspClient};
+use lsp::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
 /// anyhow 提供简洁的错误处理，Result<T> 是 anyhow::Result<T> 的别名
 use anyhow::Result;
 /// clap 是 Rust 最流行的命令行参数解析库
@@ -59,9 +56,9 @@ struct Cli {
     /// LSP 服务器主机地址，默认本地回环
     #[arg(long, default_value = "127.0.0.1", global = true)]
     host: String,
-    /// LSP 服务器端口，默认 6005（Godot 默认 LSP 端口）
-    #[arg(long, default_value_t = 6005, global = true)]
-    port: u16,
+    /// LSP 服务器端口（默认从 .godot/gdapi.json 读取，或 6005）
+    #[arg(long, global = true)]
+    port: Option<u16>,
     /// Godot 项目根目录路径（用于解析相对路径和初始化 LSP）
     #[arg(long, global = true)]
     project: Option<PathBuf>,
@@ -73,24 +70,23 @@ struct Cli {
     cmd: Cmd,
 }
 
-/// 【Cmd — 支持的子命令枚举】
+/// 【LspCmd — LSP 子命令枚举】
 ///
-/// 【#[derive(Subcommand)] 说明】
-/// clap 宏：把枚举的每个变体变成一个 CLI 子命令。
-/// 变体上的属性控制命令名称、参数等。
+/// 通过 `gdcli lsp <subcommand>` 访问。
+/// 这些命令需要连接 Godot LSP 服务器。
 #[derive(Subcommand)]
-enum Cmd {
-    /// 重命名符号：gdcli rename <target> <new_name>
+enum LspCmd {
+    /// 重命名符号：gdcli lsp rename <target> <new_name>
     Rename { target: String, new_name: String },
-    /// 查找引用：gdcli references <target>
+    /// 查找引用：gdcli lsp references <target>
     References { target: String },
-    /// 跳转到定义：gdcli definition <target>
+    /// 跳转到定义：gdcli lsp definition <target>
     Definition { target: String },
-    /// 跳转到声明：gdcli declaration <target>
+    /// 跳转到声明：gdcli lsp declaration <target>
     Declaration { target: String },
-    /// 列出文件中的符号：gdcli symbols <file>
+    /// 列出文件中的符号：gdcli lsp symbols <file>
     Symbols { file: PathBuf },
-    /// 获取悬浮提示：gdcli hover <target>
+    /// 获取悬浮提示：gdcli lsp hover <target>
     Hover { target: String },
     /// 查询 Godot 原生类文档（Godot LSP 扩展）
     #[command(name = "native-symbol")]
@@ -106,8 +102,42 @@ enum Cmd {
     Diagnostics { file: Option<PathBuf> },
     /// 查询服务器能力列表
     Capabilities,
+}
+
+/// 【Cmd — 支持的子命令枚举】
+///
+/// 【#[derive(Subcommand)] 说明】
+/// clap 宏：把枚举的每个变体变成一个 CLI 子命令。
+/// 变体上的属性控制命令名称、参数等。
+#[derive(Subcommand)]
+enum Cmd {
+    /// 与 Godot LSP 服务器交互：gdcli lsp <subcommand>
+    Lsp {
+        #[command(subcommand)]
+        sub: LspCmd,
+    },
     /// 检查与 LSP 服务器的连接状态
     Status,
+    /// 在目标项目安装 gdapi addon
+    Install {
+        /// 覆盖已有安装
+        #[arg(long)]
+        force: bool,
+        /// 不修改 project.godot 启用插件
+        #[arg(long)]
+        no_enable: bool,
+    },
+    /// 通过 HTTP 调用 gdapi 路由
+    Exec {
+        /// gdapi 路由命令名
+        command: String,
+        /// 请求 JSON 数据（字面 JSON、@file 或 - 表示 stdin）
+        #[arg(long)]
+        data: Option<String>,
+        /// HTTP 请求超时秒数
+        #[arg(long, default_value_t = 30)]
+        timeout: u64,
+    },
 }
 
 // ==================== 路径解析工具 ====================
@@ -144,7 +174,7 @@ fn resolve_file(file: &Path, project: Option<&Path>) -> PathBuf {
 ///   - SymbolPath：file:Class.member（符号路径格式，更直观）
 enum TargetMode {
     Position { file: PathBuf, line: u32, col: u32 },
-    SymbolPath { symbol_path: crate::symbol_path::SymbolPath },
+    SymbolPath { symbol_path: lsp::symbol_path::SymbolPath },
 }
 
 /// 解析用户输入的 target 字符串。
@@ -186,8 +216,8 @@ fn parse_target(target: &str, _project: Option<&Path>) -> Result<TargetMode> {
     }
 
     // 不是行列号格式，尝试符号路径
-    if crate::symbol_path::SymbolPath::is_symbol_path(target) {
-        let sp = crate::symbol_path::SymbolPath::parse(target)
+    if lsp::symbol_path::SymbolPath::is_symbol_path(target) {
+        let sp = lsp::symbol_path::SymbolPath::parse(target)
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(TargetMode::SymbolPath { symbol_path: sp })
     } else {
@@ -290,8 +320,8 @@ fn print_symbols(symbols: &[Value], indent: usize) {
         if sym.get("range").is_some() && sym.get("selectionRange").is_some() {
             let r = sym.get("range").cloned().unwrap_or(Value::Null);
             let r_parsed: Range = serde_json::from_value(r).unwrap_or(Range {
-                start: crate::types::Position { line: 0, character: 0 },
-                end: crate::types::Position { line: 0, character: 0 },
+                start: lsp::types::Position { line: 0, character: 0 },
+                end: lsp::types::Position { line: 0, character: 0 },
             });
             println!(
                 "{}{} {} [{}]",
@@ -320,6 +350,31 @@ async fn main() {
     }
 }
 
+/// 发现 LSP 端口。
+///
+/// 优先级：
+/// 1. --port 显式指定
+/// 2. .godot/gdapi.json 的 lsp_port 字段
+/// 3. 默认 6005
+fn discover_lsp_port(explicit_port: Option<u16>, project_root: Option<&Path>) -> u16 {
+    // 1. 显式指定
+    if let Some(p) = explicit_port {
+        return p;
+    }
+
+    // 2. 从 .godot/gdapi.json 读取
+    if let Some(root) = project_root {
+        if let Ok(meta) = gdapi_meta::read(root) {
+            if let Some(lsp_port) = meta.lsp_port {
+                return lsp_port;
+            }
+        }
+    }
+
+    // 3. 默认值
+    6005
+}
+
 /// 主运行逻辑。
 ///
 /// 【流程】
@@ -332,64 +387,90 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
     let project = cli.project.as_deref();
 
+    // Install 子命令不需要 LSP 连接，提前处理
+    if let Cmd::Install { force, no_enable } = cli.cmd {
+        let project_root = project::resolve_project_root(project)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        install::run(install::InstallArgs {
+            project_root,
+            force,
+            no_enable,
+        })?;
+        return Ok(());
+    }
+
+    // Exec 子命令不需要 LSP 连接，提前处理
+    if let Cmd::Exec { ref command, ref data, timeout } = cli.cmd {
+        let project_root = project::resolve_project_root(project)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let code = exec::run(&project_root, command, data.as_deref(), timeout)?;
+        std::process::exit(code);
+    }
+
     // Status 命令单独处理：即使连接失败也要友好输出
     if matches!(cli.cmd, Cmd::Status) {
-        return handle_status_command(&cli.host, cli.port, project, cli.json).await;
+        let project_root = project::resolve_project_root(project).ok();
+        let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
+        return handle_status_command(&cli.host, lsp_port, project, cli.json).await;
     }
 
-    let client = match GodotLspClient::connect(&cli.host, cli.port, project).await {
-        Ok(c) => c,
-        Err(_) => {
-            eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, cli.port);
-            eprintln!(
-                "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
-                cli.port
-            );
-            std::process::exit(1);
-        }
-    };
+    // LSP 子命令需要连接服务器
+    if let Cmd::Lsp { ref sub } = cli.cmd {
+        let project_root = project::resolve_project_root(project).ok();
+        let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
 
-    let result: Result<()> = async {
-        match cli.cmd {
-            Cmd::Capabilities => {
-                let caps = client.server_capabilities().await;
-                println!("{}", serde_json::to_string_pretty(&caps)?);
+        let client = match GodotLspClient::connect(&cli.host, lsp_port, project).await {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, lsp_port);
+                eprintln!(
+                    "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
+                    lsp_port
+                );
+                std::process::exit(1);
             }
-            Cmd::Rename { target, new_name } => {
-                handle_rename_command(&client, &target, &new_name, project, cli.json).await?;
+        };
+
+        let result: Result<()> = async {
+            match sub {
+                LspCmd::Capabilities => {
+                    let caps = client.server_capabilities().await;
+                    println!("{}", serde_json::to_string_pretty(&caps)?);
+                }
+                LspCmd::Rename { target, new_name } => {
+                    handle_rename_command(&client, target, new_name, project, cli.json).await?;
+                }
+                LspCmd::References { target } => {
+                    handle_references_command(&client, target, project, cli.json).await?;
+                }
+                LspCmd::Definition { target } => {
+                    handle_definition_command(&client, target, project, cli.json).await?;
+                }
+                LspCmd::Declaration { target } => {
+                    handle_declaration_command(&client, target, project, cli.json).await?;
+                }
+                LspCmd::Symbols { file } => {
+                    handle_symbols_command(&client, file, project, cli.json).await?;
+                }
+                LspCmd::Hover { target } => {
+                    handle_hover_command(&client, target, project, cli.json).await?;
+                }
+                LspCmd::NativeSymbol { members, full, class, member } => {
+                    handle_native_symbol_command(&client, class, member.as_deref(), *members, *full, cli.json).await?;
+                }
+                LspCmd::Diagnostics { file } => {
+                    handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
+                }
             }
-            Cmd::References { target } => {
-                handle_references_command(&client, &target, project, cli.json).await?;
-            }
-            Cmd::Definition { target } => {
-                handle_definition_command(&client, &target, project, cli.json).await?;
-            }
-            Cmd::Declaration { target } => {
-                handle_declaration_command(&client, &target, project, cli.json).await?;
-            }
-            Cmd::Symbols { file } => {
-                handle_symbols_command(&client, &file, project, cli.json).await?;
-            }
-            Cmd::Hover { target } => {
-                handle_hover_command(&client, &target, project, cli.json).await?;
-            }
-            Cmd::NativeSymbol { members, full, class, member } => {
-                handle_native_symbol_command(&client, &class, member.as_deref(), members, full, cli.json).await?;
-            }
-            Cmd::Diagnostics { file } => {
-                handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
-            }
-            Cmd::Status => {
-                // Status 在前面已经处理，这里不可能到达
-                unreachable!()
-            }
+            Ok(())
         }
-        Ok(())
+        .await;
+
+        client.disconnect().await;
+        return result;
     }
-    .await;
 
-    client.disconnect().await;
-    result
+    unreachable!()
 }
 
 // ==================== 命令处理器 ====================
@@ -934,7 +1015,7 @@ fn print_references_result(result: &[Location], json_mode: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Position;
+    use lsp::types::Position;
 
     #[test]
     fn fmt_range_basic() {
