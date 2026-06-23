@@ -46,10 +46,14 @@ pub fn parse_request(buf: &[u8]) -> io::Result<Option<ParsedRequest>> {
             .map_err(|_| invalid("non-utf8 header"))?
             .to_string();
         if name_lc == "content-length" {
-            content_length = value
+            let new_cl = value
                 .trim()
                 .parse::<usize>()
                 .map_err(|_| invalid("invalid Content-Length"))?;
+            if content_length != 0 && new_cl != content_length {
+                return Err(invalid("conflicting Content-Length values"));
+            }
+            content_length = new_cl;
         }
         hdrs.push((name_lc, value));
     }
@@ -186,9 +190,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_multiple_content_length_takes_last() {
-        // Edge case: multiple Content-Length headers
-        let mut buf: Vec<u8> = b"POST /x HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 3\r\n\r\n".to_vec();
+    fn parse_conflicting_content_length_errors() {
+        let buf = b"POST /x HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 3\r\n\r\nabcde";
+        let result = parse_request(buf);
+        assert!(result.is_err(), "expected error for conflicting Content-Length");
+    }
+
+    #[test]
+    fn parse_duplicate_content_length_same_value_ok() {
+        let mut buf: Vec<u8> = b"POST /x HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 3\r\n\r\n".to_vec();
         buf.extend_from_slice(b"abc");
         let parsed = parse_request(&buf).unwrap().unwrap();
         assert_eq!(parsed.body, b"abc".to_vec());
