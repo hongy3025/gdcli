@@ -6,4 +6,10 @@ func handle(_params: Dictionary) -> Dictionary:
 		return {"ok": true, "action": "stop", "message": "not playing"}
 
 	EditorInterface.stop_playing_scene()
+
+	# 记录日志
+	var plugin = Engine.get_meta("gdapi_plugin", null)
+	if plugin:
+		plugin.log_message("Stopped playing scene", "info")
+
 	return {"ok": true, "action": "stop"}

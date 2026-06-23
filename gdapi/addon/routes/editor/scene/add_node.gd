@@ -57,6 +57,11 @@ func handle(params: Dictionary) -> Dictionary:
 	if save_result != OK:
 		return {"error": "failed to save scene: " + str(save_result), "code": "save_failed"}
 
+	# 记录日志
+	var plugin = Engine.get_meta("gdapi_plugin", null)
+	if plugin:
+		plugin.log_message("Added node " + node_name + " (" + node_type + ") to " + scene_path, "info")
+
 	return {
 		"ok": true,
 		"node_name": node_name,

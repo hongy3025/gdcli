@@ -40,6 +40,11 @@ func handle(params: Dictionary) -> Dictionary:
 
 	EditorInterface.reload_scene_from_path(scene_path)
 
+	# 记录日志
+	var plugin = Engine.get_meta("gdapi_plugin", null)
+	if plugin:
+		plugin.log_message("Created scene: " + scene_path, "info")
+
 	return {
 		"ok": true,
 		"path": scene_path,

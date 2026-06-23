@@ -2,12 +2,26 @@
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
 func handle(params: Dictionary) -> Dictionary:
-	var _since: int = params.get("since", 0)
-	var _limit: int = params.get("limit", 100)
+	var since: int = params.get("since", 0)
+	var limit: int = params.get("limit", 100)
+
+	# 从 Engine meta 获取 plugin 实例
+	if not Engine.has_meta("gdapi_plugin"):
+		return {
+			"ok": false,
+			"error": "gdapi plugin not available",
+			"code": "plugin_not_ready",
+		}
+
+	var plugin = Engine.get_meta("gdapi_plugin")
+	var entries: Array = plugin.get_log_since(since, limit)
+
+	var next_since: int = since
+	if entries.size() > 0:
+		next_since = entries[entries.size() - 1].seq
 
 	return {
-		"ok": false,
-		"error": "debug_output not implemented in this version",
-		"code": "not_implemented",
-		"hint": "This feature requires runtime buffer support. Will be implemented in a future version.",
+		"ok": true,
+		"entries": entries,
+		"next_since": next_since,
 	}

@@ -6,6 +6,10 @@ func handle(params: Dictionary) -> Dictionary:
 
 	if scene_path.is_empty():
 		EditorInterface.play_main_scene()
+		# 记录日志
+		var plugin = Engine.get_meta("gdapi_plugin", null)
+		if plugin:
+			plugin.log_message("Started playing main scene", "info")
 		return {"ok": true, "action": "play_main_scene"}
 
 	if not scene_path.begins_with("res://"):
@@ -16,4 +20,10 @@ func handle(params: Dictionary) -> Dictionary:
 		return {"error": "scene not found: " + scene_path, "code": "not_found"}
 
 	EditorInterface.play_custom_scene(scene_path)
+
+	# 记录日志
+	var plugin = Engine.get_meta("gdapi_plugin", null)
+	if plugin:
+		plugin.log_message("Started playing scene: " + scene_path, "info")
+
 	return {"ok": true, "action": "play_custom_scene", "scene": scene_path}
