@@ -102,6 +102,17 @@ enum Cmd {
     Capabilities,
     /// 检查与 LSP 服务器的连接状态
     Status,
+    /// 通过 HTTP 调用 gdapi 路由
+    Exec {
+        /// gdapi 路由命令名
+        command: String,
+        /// 请求 JSON 数据（字面 JSON、@file 或 - 表示 stdin）
+        #[arg(long)]
+        data: Option<String>,
+        /// HTTP 请求超时秒数
+        #[arg(long, default_value_t = 30)]
+        timeout: u64,
+    },
 }
 
 // ==================== 路径解析工具 ====================
@@ -326,6 +337,16 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
     let project = cli.project.as_deref();
 
+    // Exec 子命令不需要 LSP 连接，提前处理
+    if let Cmd::Exec { ref command, ref data, timeout } = cli.cmd {
+        let project_root = match project {
+            Some(p) => p.to_path_buf(),
+            None => std::env::current_dir()?,
+        };
+        let code = exec::run(&project_root, command, data.as_deref(), timeout)?;
+        std::process::exit(code);
+    }
+
     // Status 命令单独处理：即使连接失败也要友好输出
     if matches!(cli.cmd, Cmd::Status) {
         return handle_status_command(&cli.host, cli.port, project, cli.json).await;
@@ -375,6 +396,10 @@ async fn run() -> Result<()> {
             }
             Cmd::Status => {
                 // Status 在前面已经处理，这里不可能到达
+                unreachable!()
+            }
+            Cmd::Exec { .. } => {
+                // Exec 在前面已经处理，这里不可能到达
                 unreachable!()
             }
         }
