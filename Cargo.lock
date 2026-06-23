@@ -650,6 +650,7 @@ dependencies = [
  "godot",
  "httparse",
  "tokio",
+ "ureq",
 ]
 
 [[package]]
