@@ -19,18 +19,12 @@
 
 // ==================== 模块声明与导入 ====================
 
-/// 声明 client 模块（对应 src/client.rs）
-/// mod 语句告诉 Rust 编译器去加载同名的 .rs 文件
-mod client;
-mod symbol_path;
-mod transport;
-mod types;
+mod lsp;
+mod exec;
+mod gdapi_meta;
 
-/// 从 client 模块导入类型
-/// Arc 是共享所有权指针，DiagnosticsResult 和 GodotLspClient 是核心类型
-use crate::client::{DiagnosticsResult, GodotLspClient};
-/// 从 types 模块导入工具函数和类型
-use crate::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
+use lsp::client::{DiagnosticsResult, GodotLspClient};
+use lsp::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
 /// anyhow 提供简洁的错误处理，Result<T> 是 anyhow::Result<T> 的别名
 use anyhow::Result;
 /// clap 是 Rust 最流行的命令行参数解析库
@@ -144,7 +138,7 @@ fn resolve_file(file: &Path, project: Option<&Path>) -> PathBuf {
 ///   - SymbolPath：file:Class.member（符号路径格式，更直观）
 enum TargetMode {
     Position { file: PathBuf, line: u32, col: u32 },
-    SymbolPath { symbol_path: crate::symbol_path::SymbolPath },
+    SymbolPath { symbol_path: lsp::symbol_path::SymbolPath },
 }
 
 /// 解析用户输入的 target 字符串。
@@ -186,8 +180,8 @@ fn parse_target(target: &str, _project: Option<&Path>) -> Result<TargetMode> {
     }
 
     // 不是行列号格式，尝试符号路径
-    if crate::symbol_path::SymbolPath::is_symbol_path(target) {
-        let sp = crate::symbol_path::SymbolPath::parse(target)
+    if lsp::symbol_path::SymbolPath::is_symbol_path(target) {
+        let sp = lsp::symbol_path::SymbolPath::parse(target)
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(TargetMode::SymbolPath { symbol_path: sp })
     } else {
@@ -290,8 +284,8 @@ fn print_symbols(symbols: &[Value], indent: usize) {
         if sym.get("range").is_some() && sym.get("selectionRange").is_some() {
             let r = sym.get("range").cloned().unwrap_or(Value::Null);
             let r_parsed: Range = serde_json::from_value(r).unwrap_or(Range {
-                start: crate::types::Position { line: 0, character: 0 },
-                end: crate::types::Position { line: 0, character: 0 },
+                start: lsp::types::Position { line: 0, character: 0 },
+                end: lsp::types::Position { line: 0, character: 0 },
             });
             println!(
                 "{}{} {} [{}]",
@@ -934,7 +928,7 @@ fn print_references_result(result: &[Location], json_mode: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Position;
+    use lsp::types::Position;
 
     #[test]
     fn fmt_range_basic() {

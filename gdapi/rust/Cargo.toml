@@ -1,0 +1,9 @@
+[package]
+name = "gdapi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GDExtension addon exposing an HTTP server for gdcli exec"
+
+[lib]
+crate-type = ["cdylib"]
