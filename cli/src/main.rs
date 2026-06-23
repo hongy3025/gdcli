@@ -24,6 +24,7 @@ mod exec;
 mod gdapi_meta;
 mod project;
 mod embedded_addon;
+mod install;
 
 use lsp::client::{DiagnosticsResult, GodotLspClient};
 use lsp::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
@@ -104,6 +105,15 @@ enum Cmd {
     Capabilities,
     /// 检查与 LSP 服务器的连接状态
     Status,
+    /// 在目标项目安装 gdapi addon
+    Install {
+        /// 覆盖已有安装
+        #[arg(long)]
+        force: bool,
+        /// 不修改 project.godot 启用插件
+        #[arg(long)]
+        no_enable: bool,
+    },
     /// 通过 HTTP 调用 gdapi 路由
     Exec {
         /// gdapi 路由命令名
@@ -339,6 +349,18 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
     let project = cli.project.as_deref();
 
+    // Install 子命令不需要 LSP 连接，提前处理
+    if let Cmd::Install { force, no_enable } = cli.cmd {
+        let project_root = project::resolve_project_root(project)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        install::run(install::InstallArgs {
+            project_root,
+            force,
+            no_enable,
+        })?;
+        return Ok(());
+    }
+
     // Exec 子命令不需要 LSP 连接，提前处理
     if let Cmd::Exec { ref command, ref data, timeout } = cli.cmd {
         let project_root = project::resolve_project_root(project)
@@ -400,6 +422,10 @@ async fn run() -> Result<()> {
             }
             Cmd::Exec { .. } => {
                 // Exec 在前面已经处理，这里不可能到达
+                unreachable!()
+            }
+            Cmd::Install { .. } => {
+                // Install 在前面已经处理，这里不可能到达
                 unreachable!()
             }
         }
