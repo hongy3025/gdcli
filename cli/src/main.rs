@@ -22,6 +22,7 @@
 mod lsp;
 mod exec;
 mod gdapi_meta;
+mod project;
 
 use lsp::client::{DiagnosticsResult, GodotLspClient};
 use lsp::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
@@ -339,10 +340,8 @@ async fn run() -> Result<()> {
 
     // Exec 子命令不需要 LSP 连接，提前处理
     if let Cmd::Exec { ref command, ref data, timeout } = cli.cmd {
-        let project_root = match project {
-            Some(p) => p.to_path_buf(),
-            None => std::env::current_dir()?,
-        };
+        let project_root = project::resolve_project_root(project)
+            .map_err(|e| anyhow::anyhow!(e))?;
         let code = exec::run(&project_root, command, data.as_deref(), timeout)?;
         std::process::exit(code);
     }
