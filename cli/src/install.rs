@@ -99,6 +99,9 @@ fn enable_plugin_in_project_godot(root: &Path) -> Result<()> {
         return Ok(());
     }
 
+    // 检测原始行尾符
+    let line_ending = if content.contains("\r\n") { "\r\n" } else { "\n" };
+
     let new_content = if content.contains("[editor_plugins]") {
         // [editor_plugins] 段已存在，找到 enabled= 行并追加
         let mut lines: Vec<String> = content.lines().map(String::from).collect();
@@ -132,15 +135,15 @@ fn enable_plugin_in_project_godot(root: &Path) -> Result<()> {
                     new_lines.push(format!("enabled=PackedStringArray(\"{}\")", plugin_entry));
                 }
             }
-            new_lines.join("\n")
+            new_lines.join(line_ending)
         } else {
-            lines.join("\n")
+            lines.join(line_ending)
         }
     } else {
         // [editor_plugins] 段不存在，追加
         let mut new_content = content.trim_end().to_string();
-        new_content.push_str("\n\n[editor_plugins]\n\n");
-        new_content.push_str(&format!("enabled=PackedStringArray(\"{}\")\n", plugin_entry));
+        new_content.push_str(&format!("{}{}[editor_plugins]{}{}", line_ending, line_ending, line_ending, line_ending));
+        new_content.push_str(&format!("enabled=PackedStringArray(\"{}\"){}", plugin_entry, line_ending));
         new_content
     };
 
@@ -245,5 +248,19 @@ mod tests {
         assert!(content.contains("res://addons/gdapi/plugin.cfg"));
         // Should not have leading comma
         assert!(!content.contains("(,\""));
+    }
+
+    #[test]
+    fn enable_plugin_preserves_crlf() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("project.godot"),
+            "config_version=5\r\n\r\n[application]\r\nconfig/name=\"test\"\r\n",
+        )
+        .unwrap();
+        enable_plugin_in_project_godot(dir.path()).unwrap();
+        let content = fs::read_to_string(dir.path().join("project.godot")).unwrap();
+        assert!(content.contains("\r\n"));
+        assert!(content.contains("res://addons/gdapi/plugin.cfg"));
     }
 }
