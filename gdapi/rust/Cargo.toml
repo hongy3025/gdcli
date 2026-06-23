@@ -3,7 +3,12 @@ name = "gdapi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "GDExtension addon exposing an HTTP server for gdcli exec"
 
 [lib]
 crate-type = ["cdylib"]
+name = "gdapi"
+
+[dependencies]
+godot = { version = "0.5", features = ["api-4-3"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "time"] }
+httparse = "1"
