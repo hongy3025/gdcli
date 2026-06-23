@@ -107,7 +107,10 @@ fn enable_plugin_in_project_godot(root: &Path) -> Result<()> {
             if line.starts_with("enabled=") {
                 // 已有 enabled 行，追加插件
                 // 格式：enabled=PackedStringArray("res://addons/foo/plugin.cfg")
-                if line.ends_with(")") {
+                if line.trim() == "enabled=PackedStringArray()" {
+                    // 空数组，直接替换
+                    *line = format!("enabled=PackedStringArray(\"{}\")", plugin_entry);
+                } else if line.ends_with(")") {
                     // 在 ) 前插入
                     let insert_pos = line.len() - 1;
                     line.insert_str(insert_pos, &format!(",\"{}\"", plugin_entry));
@@ -227,5 +230,20 @@ mod tests {
         // This test just verifies the function is not called
         let content_before = fs::read_to_string(dir.path().join("project.godot")).unwrap();
         assert!(!content_before.contains("gdapi"));
+    }
+
+    #[test]
+    fn enable_plugin_empty_array() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("project.godot"),
+            "[editor_plugins]\nenabled=PackedStringArray()\n",
+        )
+        .unwrap();
+        enable_plugin_in_project_godot(dir.path()).unwrap();
+        let content = fs::read_to_string(dir.path().join("project.godot")).unwrap();
+        assert!(content.contains("res://addons/gdapi/plugin.cfg"));
+        // Should not have leading comma
+        assert!(!content.contains("(,\""));
     }
 }
