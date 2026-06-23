@@ -387,90 +387,84 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
     let project = cli.project.as_deref();
 
-    // Install 子命令不需要 LSP 连接，提前处理
-    if let Cmd::Install { force, no_enable } = cli.cmd {
-        let project_root = project::resolve_project_root(project)
-            .map_err(|e| anyhow::anyhow!(e))?;
-        install::run(install::InstallArgs {
-            project_root,
-            force,
-            no_enable,
-        })?;
-        return Ok(());
-    }
-
-    // Exec 子命令不需要 LSP 连接，提前处理
-    if let Cmd::Exec { ref command, ref data, timeout } = cli.cmd {
-        let project_root = project::resolve_project_root(project)
-            .map_err(|e| anyhow::anyhow!(e))?;
-        let code = exec::run(&project_root, command, data.as_deref(), timeout)?;
-        std::process::exit(code);
-    }
-
-    // Status 命令单独处理：即使连接失败也要友好输出
-    if matches!(cli.cmd, Cmd::Status) {
-        let project_root = project::resolve_project_root(project).ok();
-        let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
-        return handle_status_command(&cli.host, lsp_port, project, cli.json).await;
-    }
-
-    // LSP 子命令需要连接服务器
-    if let Cmd::Lsp { ref sub } = cli.cmd {
-        let project_root = project::resolve_project_root(project).ok();
-        let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
-
-        let client = match GodotLspClient::connect(&cli.host, lsp_port, project).await {
-            Ok(c) => c,
-            Err(_) => {
-                eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, lsp_port);
-                eprintln!(
-                    "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
-                    lsp_port
-                );
-                std::process::exit(1);
-            }
-        };
-
-        let result: Result<()> = async {
-            match sub {
-                LspCmd::Capabilities => {
-                    let caps = client.server_capabilities().await;
-                    println!("{}", serde_json::to_string_pretty(&caps)?);
-                }
-                LspCmd::Rename { target, new_name } => {
-                    handle_rename_command(&client, target, new_name, project, cli.json).await?;
-                }
-                LspCmd::References { target } => {
-                    handle_references_command(&client, target, project, cli.json).await?;
-                }
-                LspCmd::Definition { target } => {
-                    handle_definition_command(&client, target, project, cli.json).await?;
-                }
-                LspCmd::Declaration { target } => {
-                    handle_declaration_command(&client, target, project, cli.json).await?;
-                }
-                LspCmd::Symbols { file } => {
-                    handle_symbols_command(&client, file, project, cli.json).await?;
-                }
-                LspCmd::Hover { target } => {
-                    handle_hover_command(&client, target, project, cli.json).await?;
-                }
-                LspCmd::NativeSymbol { members, full, class, member } => {
-                    handle_native_symbol_command(&client, class, member.as_deref(), *members, *full, cli.json).await?;
-                }
-                LspCmd::Diagnostics { file } => {
-                    handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
-                }
-            }
-            Ok(())
+    match cli.cmd {
+        Cmd::Install { force, no_enable } => {
+            let project_root = project::resolve_project_root(project)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            install::run(install::InstallArgs {
+                project_root,
+                force,
+                no_enable,
+            })?;
         }
-        .await;
+        Cmd::Exec { ref command, ref data, timeout } => {
+            let project_root = project::resolve_project_root(project)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            let code = exec::run(&project_root, command, data.as_deref(), timeout)?;
+            std::process::exit(code);
+        }
+        Cmd::Status => {
+            let project_root = project::resolve_project_root(project).ok();
+            let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
+            return handle_status_command(&cli.host, lsp_port, project, cli.json).await;
+        }
+        Cmd::Lsp { ref sub } => {
+            let project_root = project::resolve_project_root(project).ok();
+            let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
 
-        client.disconnect().await;
-        return result;
+            let client = match GodotLspClient::connect(&cli.host, lsp_port, project).await {
+                Ok(c) => c,
+                Err(_) => {
+                    eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, lsp_port);
+                    eprintln!(
+                        "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
+                        lsp_port
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            let result: Result<()> = async {
+                match sub {
+                    LspCmd::Capabilities => {
+                        let caps = client.server_capabilities().await;
+                        println!("{}", serde_json::to_string_pretty(&caps)?);
+                    }
+                    LspCmd::Rename { target, new_name } => {
+                        handle_rename_command(&client, target, new_name, project, cli.json).await?;
+                    }
+                    LspCmd::References { target } => {
+                        handle_references_command(&client, target, project, cli.json).await?;
+                    }
+                    LspCmd::Definition { target } => {
+                        handle_definition_command(&client, target, project, cli.json).await?;
+                    }
+                    LspCmd::Declaration { target } => {
+                        handle_declaration_command(&client, target, project, cli.json).await?;
+                    }
+                    LspCmd::Symbols { file } => {
+                        handle_symbols_command(&client, file, project, cli.json).await?;
+                    }
+                    LspCmd::Hover { target } => {
+                        handle_hover_command(&client, target, project, cli.json).await?;
+                    }
+                    LspCmd::NativeSymbol { members, full, class, member } => {
+                        handle_native_symbol_command(&client, class, member.as_deref(), *members, *full, cli.json).await?;
+                    }
+                    LspCmd::Diagnostics { file } => {
+                        handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
+                    }
+                }
+                Ok(())
+            }
+            .await;
+
+            client.disconnect().await;
+            return result;
+        }
     }
 
-    unreachable!()
+    Ok(())
 }
 
 // ==================== 命令处理器 ====================
