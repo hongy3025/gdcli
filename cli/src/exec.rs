@@ -88,9 +88,11 @@ fn resolve_data(data: Option<&str>) -> Result<Option<String>> {
     }
 }
 
+const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
+
 fn read_body(resp: ureq::Response) -> Result<String> {
     let mut s = String::new();
-    resp.into_reader().take(64 * 1024 * 1024).read_to_string(&mut s)?;
+    resp.into_reader().take(MAX_RESPONSE_BYTES).read_to_string(&mut s)?;
     Ok(s)
 }
 
