@@ -97,11 +97,21 @@ pub fn parse_request(buf: &[u8]) -> io::Result<Option<ParsedRequest>> {
 ///
 /// # Returns
 /// 完整的 HTTP 响应字节流，可直接写入 TCP 连接
+///
+/// # Panics
+/// 如果 header name 或 value 包含 `\r\n`，会 panic（防止 header 注入）
 pub fn write_response(status: u16, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
     let reason = reason_phrase(status);
     let mut out = Vec::with_capacity(128 + body.len());
     out.extend_from_slice(format!("HTTP/1.1 {} {}\r\n", status, reason).as_bytes());
     for (k, v) in headers {
+        // 防止 header 注入：检查 name 和 value 中的 \r\n
+        if k.contains('\r') || k.contains('\n') {
+            panic!("header name contains CR/LF: {:?}", k);
+        }
+        if v.contains('\r') || v.contains('\n') {
+            panic!("header value contains CR/LF: {:?}", v);
+        }
         out.extend_from_slice(format!("{}: {}\r\n", k, v).as_bytes());
     }
     out.extend_from_slice(format!("content-length: {}\r\n", body.len()).as_bytes());
@@ -251,5 +261,59 @@ mod tests {
         let buf = b"GET /search?q=hello&limit=10 HTTP/1.1\r\nHost: x\r\n\r\n";
         let parsed = parse_request(buf).unwrap().unwrap();
         assert_eq!(parsed.path, "/search?q=hello&limit=10");
+    }
+
+    #[test]
+    #[should_panic(expected = "header value contains CR/LF")]
+    fn write_response_rejects_header_injection_in_value() {
+        let headers = vec![("content-type".into(), "text/html\r\nInjected: evil".into())];
+        write_response(200, &headers, b"ok");
+    }
+
+    #[test]
+    #[should_panic(expected = "header name contains CR/LF")]
+    fn write_response_rejects_header_injection_in_name() {
+        let headers = vec![("content-type\r\nInjected".into(), "text/html".into())];
+        write_response(200, &headers, b"ok");
+    }
+
+    #[test]
+    fn parse_header_value_empty() {
+        let buf = b"GET /x HTTP/1.1\r\nHost: \r\n\r\n";
+        let parsed = parse_request(buf).unwrap().unwrap();
+        assert_eq!(parsed.headers[0].1, "");
+    }
+
+    #[test]
+    fn parse_content_length_with_leading_zero() {
+        let buf = b"POST /x HTTP/1.1\r\nContent-Length: 007\r\n\r\nabcdefg";
+        let parsed = parse_request(buf).unwrap().unwrap();
+        assert_eq!(parsed.body, b"abcdefg".to_vec());
+    }
+
+    #[test]
+    fn parse_content_length_uppercase() {
+        let buf = b"POST /x HTTP/1.1\r\nCONTENT-LENGTH: 3\r\n\r\nabc";
+        let parsed = parse_request(buf).unwrap().unwrap();
+        assert_eq!(parsed.body, b"abc".to_vec());
+    }
+
+    #[test]
+    fn parse_missing_method_errors() {
+        let buf = b"/ping HTTP/1.1\r\nHost: x\r\n\r\n";
+        assert!(parse_request(buf).is_err());
+    }
+
+    #[test]
+    fn parse_missing_path_errors() {
+        let buf = b"GET HTTP/1.1\r\nHost: x\r\n\r\n";
+        assert!(parse_request(buf).is_err());
+    }
+
+    #[test]
+    fn write_response_unknown_status_code() {
+        let bytes = write_response(418, &[], b"");
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.starts_with("HTTP/1.1 418 \r\n"));
     }
 }
