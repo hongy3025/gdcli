@@ -169,6 +169,27 @@ gdcli exec help                    # 列出所有路由
 gdcli exec help editor/scene/save  # 查看路由详情
 ```
 
+### 输出格式
+
+`gdcli exec` 默认以 **TOON** 格式输出 HTTP 响应，便于人类终端阅读和 LLM 消费：
+
+- 对象 → 缩进键值对
+- 字段统一的对象数组 → 紧凑表格（pipe 分隔）
+- 其它结构 → 树状列表
+
+加 `--json` 切回原始的 minified JSON（脚本场景推荐）：
+
+```bash
+# 默认 TOON 输出
+gdcli exec ping
+# ok: true
+# gdapi_version: 0.2.0
+
+# JSON 输出（脚本友好）
+gdcli --json exec ping
+# {"ok":true,"gdapi_version":"0.2.0"}
+```
+
 ---
 
 ## 全局选项
