@@ -8,6 +8,18 @@
 cargo build --workspace
 ```
 
+**开发模式（推荐）：使用符号链接**
+
+```bash
+# 设置 bin 符号链接
+./scripts/setup-dev.sh
+
+# 符号链接插件到目标项目
+ln -s /path/to/gdcli/gdapi/addon /path/to/your/godot/project/addons/gdapi
+```
+
+**传统模式：复制文件**
+
 把 `gdapi/addon/` 拷到目标项目的 `addons/gdapi/`，并把编译产物（如 `target/debug/gdapi.dll`）放到 `addons/gdapi/bin/<platform>/`。在 Godot 编辑器中启用 `gdapi` 插件（Project Settings → Plugins）。
 
 ### 验证

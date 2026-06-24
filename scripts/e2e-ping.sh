@@ -12,21 +12,13 @@ FIXTURE="$REPO_ROOT/tests/fixture_project"
 ADDON_DIR="$FIXTURE/addons/gdapi"
 GDCLI_BIN="$REPO_ROOT/target/debug/gdcli"
 
-# 1. 安装 addon：复制源 + 编译产物
+# 1. 安装 addon：使用符号链接
 rm -rf "$ADDON_DIR"
-mkdir -p "$ADDON_DIR"
-cp -r "$REPO_ROOT/gdapi/addon/"* "$ADDON_DIR/"
+mkdir -p "$FIXTURE/addons"
+ln -sf "$REPO_ROOT/gdapi/addon" "$ADDON_DIR"
 
-mkdir -p "$ADDON_DIR/bin/linux" "$ADDON_DIR/bin/macos" "$ADDON_DIR/bin/windows"
-if [[ -f "$REPO_ROOT/target/debug/libgdapi.so" ]]; then
-    cp "$REPO_ROOT/target/debug/libgdapi.so" "$ADDON_DIR/bin/linux/"
-fi
-if [[ -f "$REPO_ROOT/target/debug/libgdapi.dylib" ]]; then
-    cp "$REPO_ROOT/target/debug/libgdapi.dylib" "$ADDON_DIR/bin/macos/"
-fi
-if [[ -f "$REPO_ROOT/target/debug/gdapi.dll" ]]; then
-    cp "$REPO_ROOT/target/debug/gdapi.dll" "$ADDON_DIR/bin/windows/"
-fi
+# 设置 bin 符号链接
+"$REPO_ROOT/scripts/setup-dev.sh"
 
 # 2. 启动 Godot 编辑器（无头）
 echo "Starting Godot editor..."
