@@ -22,7 +22,7 @@ Tag：v0.3.0（计划）
 | `gdcli status` — 双连通性检测（HTTP + LSP） | ✅ |
 | 14 个 gdapi 路由（godot-mcp 迁移） | ✅ |
 | 项目根自动检测 | ✅ |
-| debug_output 滚动缓冲区 | ✅ |
+| log/output 编辑器控制台日志 | ✅ |
 | main.rs 拆分到 commands/lsp.rs | ✅ |
 | HTTP header 注入防护 | ✅ |
 | HTTP 边界测试补充 | ✅ |
@@ -131,7 +131,7 @@ gdcli/                          # workspace 根
 | `/uid/get` | shared | ✅ |
 | `/project/run` | editor | ✅ |
 | `/project/stop` | editor | ✅ |
-| `/project/debug_output` | editor | ✅ 滚动缓冲区 |
+| `/log/output` | editor | ✅ 编辑器控制台日志 |
 | `/scene/create` | editor | ✅ |
 | `/scene/add_node` | editor | ✅ |
 | `/scene/load_sprite` | editor | ✅ |
