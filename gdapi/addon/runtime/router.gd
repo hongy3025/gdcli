@@ -42,7 +42,6 @@ func scan(root_dir: String, force: bool = false) -> void:
 		_needs_update = true
 	
 	_routes["ping"] = BuiltinPing
-	_needs_update = false
 	
 	_scan_dir_with_mtime(root_dir + "/editor", "", force)
 	_scan_dir_with_mtime(root_dir + "/shared", "", force)
