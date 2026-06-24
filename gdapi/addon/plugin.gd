@@ -16,6 +16,15 @@ const PORT_HINT: int = 7890
 ## 日志缓冲区最大条目数，防止内存无限增长
 const MAX_LOG_ENTRIES: int = 1000
 
+## 日志级别常量
+const LOG_DEBUG := 0
+const LOG_INFO  := 1
+const LOG_WARN  := 2
+const LOG_ERROR := 3
+
+## 级别名称映射
+const LOG_LEVEL_NAMES := {0: "debug", 1: "info", 2: "warn", 3: "error"}
+
 ## HTTP 服务器实例，处理网络请求
 var _server: GdApiServer
 ## 路由系统实例，负责请求分发和处理
@@ -25,6 +34,8 @@ var _router: Router
 var _log_buffer: Array = []
 ## 日志序列号，用于增量获取日志
 var _log_seq: int = 0
+## 当前全局日志级别，默认 INFO
+var _log_level: int = LOG_INFO
 
 ## 插件初始化入口
 ##
