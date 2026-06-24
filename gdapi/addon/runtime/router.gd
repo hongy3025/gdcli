@@ -13,17 +13,25 @@ const GdApiRequest := preload("res://addons/gdapi/runtime/request.gd")
 const GdApiResponse := preload("res://addons/gdapi/runtime/response.gd")
 ## 内置 ping 命令处理器
 const BuiltinPing := preload("res://addons/gdapi/runtime/builtin_ping.gd")
-## 内置命令列表处理器
+## 内置路由名列表处理器
 const BuiltinRoutes := preload("res://addons/gdapi/runtime/builtin_routes.gd")
-## 内置帮助命令处理器
+## 内置路由详情帮助处理器
 const BuiltinHelp := preload("res://addons/gdapi/runtime/builtin_help.gd")
+## 内置命令详细列表处理器
+const BuiltinCommands := preload("res://addons/gdapi/runtime/builtin_commands.gd")
+## 内置单个命令帮助处理器
+const BuiltinCommandHelp := preload("res://addons/gdapi/runtime/builtin_command_help.gd")
 
 ## 命令注册表，键为路径（如 "editor/scene/save"），值为处理器脚本
 var _routes: Dictionary = {}
-## 内置命令列表处理器实例
+## 内置路由名列表处理器实例
 var _builtin_routes_handler: BuiltinRoutes
-## 内置帮助命令处理器实例
+## 内置路由详情帮助处理器实例
 var _builtin_help_handler: BuiltinHelp
+## 内置命令详细列表处理器实例
+var _builtin_commands_handler: BuiltinCommands
+## 内置单个命令帮助处理器实例
+var _builtin_command_help_handler: BuiltinCommandHelp
 ## 命令文件修改时间记录，键为文件路径，值为修改时间戳
 var _file_mtimes: Dictionary = {}
 ## 是否需要更新内置命令处理器（命令列表变化时触发）
@@ -49,17 +57,25 @@ func scan(root_dir: String, force: bool = false) -> void:
 	if _needs_update:
 		_builtin_routes_handler = BuiltinRoutes.new()
 		_builtin_help_handler = BuiltinHelp.new()
+		_builtin_commands_handler = BuiltinCommands.new()
+		_builtin_command_help_handler = BuiltinCommandHelp.new()
 		var names: Array = _routes.keys()
 		names.append("routes")
 		names.append("help")
+		names.append("commands")
+		names.append("command-help")
 		names.sort()
 		_builtin_routes_handler.set_route_names(names)
 
-		# 把所有命令（含内置）注入到 help handler
+		# 把所有命令（含内置）注入到 help / commands / command-help handler
 		var all_routes: Dictionary = _routes.duplicate()
 		all_routes["routes"] = BuiltinRoutes
 		all_routes["help"] = BuiltinHelp
+		all_routes["commands"] = BuiltinCommands
+		all_routes["command-help"] = BuiltinCommandHelp
 		_builtin_help_handler.set_routes(all_routes)
+		_builtin_commands_handler.set_routes(all_routes)
+		_builtin_command_help_handler.set_routes(all_routes)
 		_needs_update = false
 
 ## 获取已注册命令总数
@@ -67,8 +83,8 @@ func scan(root_dir: String, force: bool = false) -> void:
 ## 包含内置的 ping 命令。
 ## @return 命令数量
 func count() -> int:
-	# _routes 已含 ping；额外两个内置命令：routes + help
-	return _routes.size() + 2
+	# _routes 已含 ping；额外四个内置命令：routes + help + commands + command-help
+	return _routes.size() + 4
 
 ## 递归扫描目录注册命令（带 mtime 检查）
 ##
@@ -113,9 +129,11 @@ func _scan_dir_with_mtime(dir_path: String, prefix: String, force: bool) -> void
 ## 分发请求到对应的命令处理器
 ##
 ## 根据请求路径查找处理器并执行。支持以下特殊命令：
-## - /routes：返回所有可用命令列表
+## - /routes：返回所有可用路由名称列表
 ## - /ping：内置健康检查命令
-## 其他路径会查找注册的处理器脚本并实例化执行。
+## - /help：路由详情帮助
+## - /commands：命令详细列表
+## - /command-help：单个命令帮助
 ## @param req_dict 原始请求数据字典
 ## @param server HTTP 服务器实例
 func dispatch(req_dict: Dictionary, server) -> void:
@@ -142,6 +160,20 @@ func dispatch(req_dict: Dictionary, server) -> void:
 		var req_help := GdApiRequest.new(req_dict)
 		var res_help := GdApiResponse.new(server, id)
 		_builtin_help_handler.handle(req_help, res_help)
+		return
+
+	# 处理内置 commands 命令
+	if key == "commands":
+		var req_cmd := GdApiRequest.new(req_dict)
+		var res_cmd := GdApiResponse.new(server, id)
+		_builtin_commands_handler.handle(req_cmd, res_cmd)
+		return
+
+	# 处理内置 command-help 命令
+	if key == "command-help":
+		var req_ch := GdApiRequest.new(req_dict)
+		var res_ch := GdApiResponse.new(server, id)
+		_builtin_command_help_handler.handle(req_ch, res_ch)
 		return
 
 	# 查找注册的命令处理器

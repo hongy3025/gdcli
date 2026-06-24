@@ -15,8 +15,13 @@ pub fn normalize(v: Value) -> Value {
         }
         Value::Object(map) => {
             let mut out = Map::new();
+            if let Some(v) = map.get("ok") {
+                out.insert("ok".to_string(), normalize(v.clone()));
+            }
             for (k, v) in map {
-                out.insert(k, normalize(v));
+                if k != "ok" {
+                    out.insert(k, normalize(v));
+                }
             }
             Value::Object(out)
         }
@@ -149,5 +154,22 @@ mod tests {
         let v = json!([{"a":1,"sub":{"x":2}}, {"a":2,"sub":{"x":3}}]);
         let out = n(v.clone());
         assert_eq!(out, v);
+    }
+
+    #[test]
+    fn ok_field_moved_to_front() {
+        let v = json!({"gdapi_version":"0.2.0","ok":true,"editor_version":"4.3"});
+        let out = n(v);
+        let keys: Vec<&str> = out.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+        assert_eq!(keys, vec!["ok", "gdapi_version", "editor_version"]);
+    }
+
+    #[test]
+    fn nested_object_ok_reordered() {
+        let v = json!({"data":{"version":"1.0","ok":true}});
+        let out = n(v);
+        let inner = out.get("data").unwrap().as_object().unwrap();
+        let keys: Vec<&str> = inner.keys().map(|s| s.as_str()).collect();
+        assert_eq!(keys, vec!["ok", "version"]);
     }
 }

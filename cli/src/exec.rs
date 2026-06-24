@@ -91,7 +91,8 @@ pub fn run(
             let status = r.status();
             let body = read_body(r)?;
             if json_mode {
-                print!("{}", body);
+                let reordered = format::reorder_ok_json(&body);
+                print!("{}", reordered);
             } else {
                 let rendered = format::render_exec_body(&body);
                 print!("{}", rendered);
@@ -104,7 +105,7 @@ pub fn run(
         Err(ureq::Error::Status(code, r)) => {
             let body = read_body(r)?;
             let rendered: Cow<'_, str> = if json_mode {
-                Cow::Borrowed(body.as_str())
+                format::reorder_ok_json(&body)
             } else {
                 format::render_exec_body(&body)
             };
