@@ -4,7 +4,7 @@
 gdapi/rust/target/
 
 # Addon binaries copied into fixture (not source-controlled)
-tests/fixture_project/addons/gdapi/
+tests/fixture_project/addons/gdapi
 
 # Bin symlinks in addon (created by setup-dev.sh)
 gdapi/addon/bin/linux/
