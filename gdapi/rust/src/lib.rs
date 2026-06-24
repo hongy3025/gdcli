@@ -128,10 +128,8 @@ impl GdApiServer {
                     hdrs.set(&GString::from(k.as_str()), &Variant::from(GString::from(v.as_str())));
                 }
                 dict.set(&GString::from("headers"), &hdrs.to_variant());
-                let mut body = PackedByteArray::new();
-                for b in req.body {
-                    body.push(b);
-                }
+                // 优化：使用 from slice 替代逐字节 push
+                let body = PackedByteArray::from(req.body.as_slice());
                 dict.set(&GString::from("body"), &body.to_variant());
                 dict.to_variant()
             }
@@ -159,10 +157,8 @@ impl GdApiServer {
             let vv: String = v.to_string();
             hdrs.push((kk, vv));
         }
-        let mut body_vec = Vec::with_capacity(body.len());
-        for i in 0..body.len() {
-            body_vec.push(body.get(i).unwrap_or(0));
-        }
+        // 优化：使用 to_vec() 替代逐字节 push
+        let body_vec = body.to_vec();
         self.core.send_response_raw(id as u64, status as u16, hdrs, body_vec);
     }
 }
