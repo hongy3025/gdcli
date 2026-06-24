@@ -30,6 +30,7 @@ mod project;
 mod embedded_addon;
 mod install;
 mod commands;
+mod format;
 
 use lsp::client::GodotLspClient;
 use anyhow::Result;
