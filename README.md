@@ -1,210 +1,184 @@
-## 实验性：gdcli exec（与 gdapi addon 配合）
-
-> 阶段 1：仅支持内置 `/ping` 路由，验证端到端联通。完整命令集见 `docs/superpowers/specs/2026-06-23-gdcli-godot-editor-tool-design.md`。
-
-### 准备
-
-```bash
-cargo build --workspace
-```
-
-**开发模式（推荐）：使用符号链接**
-
-```bash
-# 设置 bin 符号链接
-./scripts/setup-dev.sh
-
-# 符号链接插件到目标项目
-ln -s /path/to/gdcli/gdapi/addon /path/to/your/godot/project/addons/gdapi
-```
-
-**传统模式：复制文件**
-
-把 `gdapi/addon/` 拷到目标项目的 `addons/gdapi/`，并把编译产物（如 `target/debug/gdapi.dll`）放到 `addons/gdapi/bin/<platform>/`。在 Godot 编辑器中启用 `gdapi` 插件（Project Settings → Plugins）。
-
-### 验证
-
-```bash
-gdcli exec ping --project /path/to/your/godot/project
-# 输出：{"editor_version":"4.3.x","gdapi_version":"0.2.0","ok":true}
-```
-
-后续阶段将提供 `gdcli install` 一键完成上述安装步骤。
-
----
-
 # gdcli
 
-与 Godot 内置 LSP 服务器通过 TCP 通信，支持跨项目重命名、查找引用、跳转定义等代码智能能力。
+与 Godot 编辑器交互的命令行工具。支持两种模式：
+
+- **LSP 模式**：通过 Godot 内置 LSP 服务器进行重命名、查找引用、跳转定义等代码智能操作
+- **exec 模式**：通过 gdapi addon 的 HTTP 接口调用编辑器功能
 
 ## 安装
 
-源码构建：
+源码构建（需要 Rust 工具链）：
 
 ```bash
 cargo build --release
-# 产物：target/release/gdcli (Windows 下为 .exe)
+# 产物：target/release/gdcli（Windows 下为 gdcli.exe）
 ```
 
 ## 前置条件
 
-打开 Godot 编辑器即可（LSP 默认监听 6005 端口）。
-
-或者
-
-无头模式：
+LSP 命令需要 Godot 编辑器运行中（默认监听 6005 端口）：
 
 ```bash
+# 有界面模式
+godot --editor --path /path/to/project
+
+# 无头模式
 godot --editor --headless --lsp-port 6005 --path /path/to/project
 ```
 
-## 命令
+exec 命令需要在项目中安装并启用 gdapi 插件（见下方 `gdcli install`）。
+
+## 命令总览
+
+```
+gdcli lsp <subcommand>    # LSP 代码智能操作
+gdcli status              # 检查 LSP 连接状态
+gdcli install             # 安装 gdapi addon 到目标项目
+gdcli exec <command>      # 通过 HTTP 调用 gdapi 路由
+```
+
+---
+
+## gdcli install
+
+将 gdapi addon 安装到目标 Godot 项目，自动修改 `project.godot` 启用插件。
+
+```bash
+gdcli install --project /path/to/project
+```
+
+| Flag | 说明 |
+|---|---|
+| `--force` | 覆盖已有安装 |
+| `--no-enable` | 不修改 `project.godot` 启用插件 |
+
+安装完成后在 Godot 编辑器中打开项目即可。
+
+---
+
+## gdcli status
+
+验证与 LSP 服务器的连接状态。
+
+```bash
+gdcli status --project /path/to/project
+```
+
+---
+
+## gdcli lsp
+
+所有 LSP 相关操作通过 `gdcli lsp <subcommand>` 访问。
 
 支持两种定位方式：**行列号** 和 **符号路径**。
 
-### 行列号模式（传统）
+### 行列号模式
 
 行列号从 1 开始（与编辑器显示一致）。
 
-| 命令 | 说明 |
-|---|---|
-| `rename <file> <line> <col> <new_name>` | 跨项目重命名 |
-| `references <file> <line> <col>` | 查找全部引用 |
-| `definition <file> <line> <col>` | 跳转定义 |
-| `declaration <file> <line> <col>` | 跳转声明 |
-| `symbols <file>` | 列出文件符号 |
-| `hover <file> <line> <col>` | 悬停信息 |
-| `native-symbol <class> [member]` | Godot 内置类文档（支持 `--members` / `--full`） |
-| `diagnostics [file]` | 显示诊断 |
-| `capabilities` | 显示 LSP 服务器能力 |
-| `status` | 验证 LSP 服务器连接状态 |
+```bash
+gdcli lsp rename <file> <line> <col> <new_name>
+gdcli lsp references <file> <line> <col>
+gdcli lsp definition <file> <line> <col>
+gdcli lsp declaration <file> <line> <col>
+gdcli lsp hover <file> <line> <col>
+gdcli lsp symbols <file>
+gdcli lsp diagnostics [file]
+gdcli lsp capabilities
+```
 
-### 符号路径模式（新功能）
+### 符号路径模式
 
 使用 `文件:符号` 格式定位符号，无需手动查找行列号。
 
-| 命令 | 说明 |
-|---|---|
-| `rename <target> <new_name>` | 按符号路径重命名 |
-| `references <target>` | 查找符号的全部引用 |
-| `definition <target>` | 跳转到符号定义 |
-| `declaration <target>` | 跳转到符号声明 |
-| `hover <target>` | 查看符号悬停信息 |
+```bash
+gdcli lsp rename <target> <new_name>
+gdcli lsp references <target>
+gdcli lsp definition <target>
+gdcli lsp declaration <target>
+gdcli lsp hover <target>
+```
 
 **符号路径格式**：`文件路径:符号路径`
 
 ```bash
 # 简写形式（推荐）
-gdcli definition player.gd:counter
+gdcli lsp definition player.gd:counter
 
 # 完整形式（仅当文件名不含 '.' 时可用）
-gdcli definition player.gd:Player.health
+gdcli lsp definition player.gd:Player.health
 
 # 多级形式
-gdcli definition player.gd:Player.Inventory.Item.name
+gdcli lsp definition player.gd:Player.Inventory.Item.name
 
 # res:// 路径
-gdcli definition res://player.gd:Player.health
+gdcli lsp definition res://player.gd:Player.health
 ```
 
-**使用示例**：
-
-```bash
-# 查找定义
-gdcli definition player.gd:counter
-
-# 查找引用
-gdcli references player.gd:counter
-
-# 重命名符号
-gdcli rename player.gd:counter new_counter
-
-# 悬停信息
-gdcli hover player.gd:counter
-
-# JSON 模式输出
-gdcli definition player.gd:counter --json
-```
-
-**错误处理**：
-
-当符号找不到时，gdcli 会提供建议：
+**错误处理**：当符号找不到时，gdcli 会提供建议：
 
 ```
-$ gdcli definition player.gd:count
+$ gdcli lsp definition player.gd:count
 Symbol 'count' not found. Did you mean: counter?
 ```
 
 **限制**：
-
 - 文件名包含 `.`（如 `2d_in_3d.gd`）时，只能使用简写形式
-- 不支持真正的全局符号搜索（需要文件路径）
+- 不支持全局符号搜索（需要文件路径）
 
-## native-symbol 命令
+### native-symbol
 
 查询 Godot 内置类（如 Node、Vector2、Node3D）的文档。支持渐进式披露：
 
-### 默认模式
+```bash
+# 默认：显示类名、签名、描述全文
+gdcli lsp native-symbol Node3D
+
+# --members：按 Constants / Properties / Signals / Methods 分组列表
+gdcli lsp native-symbol --members Node3D
+
+# --full：所有成员完整展开（detail + 全部 documentation）
+gdcli lsp native-symbol --full Node3D
+
+# 查询单个成员
+gdcli lsp native-symbol Node3D get_parent
+```
+
+`--members` 和 `--full` 互斥。`--json` 模式下输出完整 JSON，不受 flag 影响。
+
+---
+
+## gdcli exec
+
+通过 HTTP 调用 gdapi addon 的路由，需要 Godot 编辑器运行中且 gdapi 插件已启用。
 
 ```bash
-gdcli native-symbol Node3D
+gdcli exec ping --project /path/to/project
+# 输出：{"editor_version":"4.3.x","gdapi_version":"0.2.0","ok":true}
 ```
 
-显示类名、签名、描述全文。
+| Flag | 默认 | 说明 |
+|---|---|---|
+| `--data <json>` | `{}` | 请求 JSON 数据：字面 JSON、`@file` 或 `-`（stdin） |
+| `--timeout <secs>` | `30` | HTTP 请求超时秒数 |
 
-### `--members` 成员列表
+`help` 命令使用位置参数而非 `--data`：
 
 ```bash
-gdcli native-symbol --members Node3D
+gdcli exec help                    # 列出所有路由
+gdcli exec help editor/scene/save  # 查看路由详情
 ```
 
-按 Constants / Properties / Signals / Methods 分组，每行显示成员名、签名、首行简述：
-
-```
-Constants:
-  NOTIFICATION_ENTER_TREE    const ...: int = 10    Constant to notify...
-  NOTIFICATION_EXIT_TREE     const ...: int = 11    Constant to notify...
-
-Properties:
-  position    var position: Vector3    Position in global coordinates
-  rotation    var rotation: Vector3    Rotation in radians
-
-Methods:
-  get_parent       func get_parent() -> Node       Returns the parent node
-  get_child_count  func get_child_count() -> int   Returns the number of children
-```
-
-### `--full` 完整文档
-
-```bash
-gdcli native-symbol --full Node3D
-```
-
-类信息 + 所有成员完整展开（detail + 全部 documentation）。
-
-### 查询单个成员
-
-```bash
-gdcli native-symbol Node3D get_parent
-```
-
-显示该成员的完整签名和描述。`--members` / `--full` 对此无效。
-
-`--members` 和 `--full` 互斥，不可同时使用。`--json` 模式下输出完整 JSON，不受 flag 影响。
+---
 
 ## 全局选项
 
 | Flag | 默认 | 说明 |
 |---|---|---|
 | `--host <host>` | `127.0.0.1` | LSP 主机 |
-| `--port <port>` | `6005` | LSP 端口 |
-| `--project <path>` | — | 项目根，启用相对路径 |
-| `--json` | — | 输出 JSON |
-
-## 与 TS 版差异
-
-- 参数缺失时 clap 退出码为 2（TS 版为 1）；正常错误退出码仍为 1。
-- 其余行为（输出格式、超时、URI 解码）均与 TS 版逐字节一致。
+| `--port <port>` | 自动发现 | LSP 端口（优先 `--port` > `.godot/gdapi.json` > `6005`） |
+| `--project <path>` | — | 项目根目录，用于解析相对路径和发现端口 |
+| `--json` | — | 输出 JSON 格式 |
 
 ## License
 
