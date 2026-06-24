@@ -12,8 +12,8 @@
 //! 通过 `#[gdextension]` 宏将 Rust 代码暴露为 Godot 可调用的类 `GdApiServer`。
 //! GDScript 可以直接调用 `GdApiServer.create()`、`start()`、`poll_request()` 等方法。
 
-pub mod queue;
 pub mod http;
+pub mod queue;
 pub mod server;
 
 use godot::prelude::*;
@@ -56,7 +56,9 @@ impl GdApiServer {
     /// 包装为 Godot 智能指针的服务器实例
     #[func]
     fn create() -> Gd<Self> {
-        Gd::from_object(Self { core: ServerCore::new() })
+        Gd::from_object(Self {
+            core: ServerCore::new(),
+        })
     }
 
     /// 启动 HTTP 服务器。
@@ -69,7 +71,11 @@ impl GdApiServer {
     /// 实际监听的端口号，失败返回 -1
     #[func]
     fn start(&mut self, port_hint: u16, token: GString) -> i32 {
-        let token_opt = if token.is_empty() { None } else { Some(token.to_string()) };
+        let token_opt = if token.is_empty() {
+            None
+        } else {
+            Some(token.to_string())
+        };
         match self.core.start(port_hint, token_opt) {
             Ok(p) => p as i32,
             Err(e) => {
@@ -123,11 +129,20 @@ impl GdApiServer {
             Some(req) => {
                 let mut dict = Dictionary::<GString, Variant>::new();
                 dict.set(&GString::from("id"), &Variant::from(req.id as i64));
-                dict.set(&GString::from("method"), &Variant::from(GString::from(req.method.as_str())));
-                dict.set(&GString::from("path"), &Variant::from(GString::from(req.path.as_str())));
+                dict.set(
+                    &GString::from("method"),
+                    &Variant::from(GString::from(req.method.as_str())),
+                );
+                dict.set(
+                    &GString::from("path"),
+                    &Variant::from(GString::from(req.path.as_str())),
+                );
                 let mut hdrs = Dictionary::<GString, Variant>::new();
                 for (k, v) in req.headers {
-                    hdrs.set(&GString::from(k.as_str()), &Variant::from(GString::from(v.as_str())));
+                    hdrs.set(
+                        &GString::from(k.as_str()),
+                        &Variant::from(GString::from(v.as_str())),
+                    );
                 }
                 dict.set(&GString::from("headers"), &hdrs.to_variant());
                 // 优化：使用 from slice 替代逐字节 push
@@ -161,6 +176,7 @@ impl GdApiServer {
         }
         // 优化：使用 to_vec() 替代逐字节 push
         let body_vec = body.to_vec();
-        self.core.send_response_raw(id as u64, status as u16, hdrs, body_vec);
+        self.core
+            .send_response_raw(id as u64, status as u16, hdrs, body_vec);
     }
 }
