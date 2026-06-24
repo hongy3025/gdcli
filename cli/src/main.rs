@@ -124,6 +124,8 @@ enum Cmd {
     Exec {
         /// gdapi 路由命令名
         command: String,
+        /// 位置参数。仅 help 命令使用：作为查询的路由路径。其他命令必须为空。
+        args: Vec<String>,
         /// 请求 JSON 数据（字面 JSON、@file 或 - 表示 stdin）
         #[arg(long)]
         data: Option<String>,
@@ -279,10 +281,10 @@ async fn run() -> Result<()> {
                 no_enable,
             })?;
         }
-        Cmd::Exec { ref command, ref data, timeout } => {
+        Cmd::Exec { ref command, ref args, ref data, timeout } => {
             let project_root = project::resolve_project_root(project)
                 .map_err(|e| anyhow::anyhow!(e))?;
-            let code = exec::run(&project_root, command, &[], data.as_deref(), timeout)?;
+            let code = exec::run(&project_root, command, args, data.as_deref(), timeout)?;
             std::process::exit(code);
         }
         Cmd::Status => {
