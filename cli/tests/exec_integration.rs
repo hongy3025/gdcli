@@ -377,3 +377,128 @@ fn exec_json_flag_outputs_raw_json() {
 
     mock.assert();
 }
+
+#[test]
+fn exec_toon_tabular_uniform_array() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/help");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"ok":true,"routes":[{"path":"ping","summary":"健康检查"},{"path":"help","summary":"路由列表"}]}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"lsp_port":6005,"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["exec", "help", "--project", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout.contains("ok: true"), "got: {stdout}");
+    assert!(stdout.contains("routes[2|]{path|summary}:"), "expected pipe tabular header, got: {stdout}");
+    assert!(stdout.contains("ping|健康检查"), "got: {stdout}");
+
+    mock.assert();
+}
+
+#[test]
+fn exec_toon_with_r1_empty_array() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/help");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"ok":true,"routes":[{"path":"ping","params":[]},{"path":"help","params":["x"]}]}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"lsp_port":6005,"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["exec", "help", "--project", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("routes[2|]{path|params}:"), "R1 should coerce to tabular, got: {stdout}");
+    assert!(stdout.contains("ping|"), "empty array should become empty cell, got: {stdout}");
+    assert!(stdout.contains("help|x"), "got: {stdout}");
+
+    mock.assert();
+}
+
+#[test]
+fn exec_toon_4xx_error_renders_in_stderr() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/unknown");
+        then.status(404)
+            .header("content-type", "application/json")
+            .body(r#"{"ok":false,"code":"not_found","msg":"route not found: unknown"}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"lsp_port":6005,"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["exec", "unknown", "--project", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "4xx should exit 2; stderr={stderr}");
+    assert!(stderr.starts_with("Error (HTTP 404): "), "got: {stderr}");
+    assert!(stderr.contains("code: not_found"), "stderr should contain TOON-rendered error, got: {stderr}");
+
+    mock.assert();
+}
+
+#[test]
+fn exec_non_json_body_passes_through() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/raw");
+        then.status(200)
+            .header("content-type", "text/plain")
+            .body("hello world");
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["exec", "raw", "--project", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("hello world"), "non-JSON body should pass through, got: {stdout}");
+
+    mock.assert();
+}
