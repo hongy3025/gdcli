@@ -39,6 +39,7 @@ use crate::gdapi_meta;
 pub fn run(
     project: &Path,
     command: &str,
+    args: &[String],
     data: Option<&str>,
     timeout_secs: u64,
 ) -> Result<i32> {
@@ -54,10 +55,13 @@ pub fn run(
         }
     };
 
-    // 2. 准备请求 body
-    let body_text = match resolve_data(data)? {
-        Some(t) => t,
-        None => "{}".to_string(),
+    // 2. 准备请求 body（含 help 命令的位置参数特殊处理）
+    let body_text = match build_body(command, args, data)? {
+        BuildBodyOutcome::Body(t) => t,
+        BuildBodyOutcome::Reject(msg) => {
+            eprintln!("{}", msg);
+            return Ok(2);
+        }
     };
     // 客户端先验证 JSON 合法性
     if let Err(e) = serde_json::from_str::<serde_json::Value>(&body_text) {
@@ -96,6 +100,76 @@ pub fn run(
             Ok(3)
         }
     }
+}
+
+/// build_body 的输出。
+///
+/// 调用方根据变体决定行为：Body 用作 HTTP 请求体；
+/// Reject 表示构造前置校验失败，调用方打印 msg 到 stderr 后退出 2。
+pub(crate) enum BuildBodyOutcome {
+    /// 构造好的 JSON 字符串，可直接发送
+    Body(String),
+    /// 构造前置校验失败，msg 已包含给用户的解释
+    Reject(String),
+}
+
+/// 根据 command/args/data 构造请求体。
+///
+/// 规则：
+/// - command == "help": 必须无 --data；位置参数最多一个作为 path
+///   - 无位置参数 → "{}"
+///   - 一个位置参数 → {"path": "<arg>"}
+///   - 多个位置参数 → Reject
+/// - 其他 command: 位置参数必须为空，否则 Reject；body 来自 resolve_data
+///   - 无 --data → "{}"
+///   - 有 --data → resolve_data 解析（字面 JSON / @file / stdin）
+///
+/// # Arguments
+/// * `command` - 路由命令名
+/// * `args` - 位置参数数组
+/// * `data` - --data 参数原始值
+///
+/// # Returns
+/// BuildBodyOutcome::Body 或 BuildBodyOutcome::Reject
+///
+/// # Errors
+/// resolve_data 失败（文件读取/stdin 错误）时返回 Err
+pub(crate) fn build_body(
+    command: &str,
+    args: &[String],
+    data: Option<&str>,
+) -> Result<BuildBodyOutcome> {
+    if command == "help" {
+        if data.is_some() {
+            return Ok(BuildBodyOutcome::Reject(
+                "'help' command does not accept --data; use positional path argument instead".to_string(),
+            ));
+        }
+        if args.len() > 1 {
+            return Ok(BuildBodyOutcome::Reject(format!(
+                "'help' accepts at most one positional path argument, got {}: {:?}",
+                args.len(),
+                args
+            )));
+        }
+        let body = match args.first() {
+            Some(path) => serde_json::json!({ "path": path }).to_string(),
+            None => "{}".to_string(),
+        };
+        return Ok(BuildBodyOutcome::Body(body));
+    }
+
+    if !args.is_empty() {
+        return Ok(BuildBodyOutcome::Reject(format!(
+            "unexpected positional arguments for '{}': {:?}",
+            command, args
+        )));
+    }
+    let body = match resolve_data(data)? {
+        Some(t) => t,
+        None => "{}".to_string(),
+    };
+    Ok(BuildBodyOutcome::Body(body))
 }
 
 /// 解析用户提供的请求数据。
@@ -175,5 +249,80 @@ fn map_status_to_exit(status: u16, is_error: bool) -> i32 {
         2
     } else {
         1
+    }
+}
+
+#[cfg(test)]
+mod build_body_tests {
+    use super::*;
+
+    fn args(vs: &[&str]) -> Vec<String> {
+        vs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn help_no_args_no_data_yields_empty_object() {
+        let out = build_body("help", &[], None).unwrap();
+        match out {
+            BuildBodyOutcome::Body(s) => assert_eq!(s, "{}"),
+            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
+        }
+    }
+
+    #[test]
+    fn help_with_path_arg_builds_path_object() {
+        let out = build_body("help", &args(&["editor/scene/save"]), None).unwrap();
+        match out {
+            BuildBodyOutcome::Body(s) => assert_eq!(s, r#"{"path":"editor/scene/save"}"#),
+            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
+        }
+    }
+
+    #[test]
+    fn help_with_path_containing_quotes_escapes_safely() {
+        let out = build_body("help", &args(&[r#"weird"name"#]), None).unwrap();
+        match out {
+            BuildBodyOutcome::Body(s) => {
+                let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+                assert_eq!(v["path"], r#"weird"name"#);
+            }
+            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
+        }
+    }
+
+    #[test]
+    fn help_with_data_is_rejected() {
+        let out = build_body("help", &[], Some("{}")).unwrap();
+        match out {
+            BuildBodyOutcome::Reject(m) => assert!(m.contains("--data"), "msg should mention --data: {}", m),
+            BuildBodyOutcome::Body(_) => panic!("should reject"),
+        }
+    }
+
+    #[test]
+    fn non_help_with_extra_positional_is_rejected() {
+        let out = build_body("ping", &args(&["unexpected"]), None).unwrap();
+        match out {
+            BuildBodyOutcome::Reject(m) => assert!(m.contains("positional"), "msg should mention positional: {}", m),
+            BuildBodyOutcome::Body(_) => panic!("should reject"),
+        }
+    }
+
+    #[test]
+    fn non_help_with_data_passes_through() {
+        let out = build_body("foo", &[], Some(r#"{"x":1}"#)).unwrap();
+        match out {
+            BuildBodyOutcome::Body(s) => assert_eq!(s, r#"{"x":1}"#),
+            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
+        }
+    }
+
+    #[test]
+    fn non_help_no_args_no_data_yields_empty_object() {
+        let out = build_body("ping", &[], None).unwrap();
+        match out {
+            BuildBodyOutcome::Body(s) => assert_eq!(s, "{}"),
+            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
+        }
     }
 }
