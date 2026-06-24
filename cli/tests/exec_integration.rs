@@ -314,3 +314,66 @@ fn exec_non_help_with_positional_arg_is_rejected() {
         .code(2)
         .stderr(predicates::str::contains("positional"));
 }
+
+#[test]
+fn exec_default_outputs_toon() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/ping");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"ok":true,"gdapi_version":"0.2.0"}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"lsp_port":6005,"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["exec", "ping", "--project", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "exit code should be 0; stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout.contains("ok: true"), "expected TOON KV form, got: {stdout}");
+    assert!(stdout.contains("gdapi_version:"), "expected TOON key, got: {stdout}");
+    assert!(stdout.contains("0.2.0"), "expected version value, got: {stdout}");
+    assert!(!stdout.contains(r#""ok":true"#), "should NOT contain raw JSON, got: {stdout}");
+
+    mock.assert();
+}
+
+#[test]
+fn exec_json_flag_outputs_raw_json() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/ping");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"ok":true,"gdapi_version":"0.2.0"}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"lsp_port":6005,"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["--json", "exec", "ping", "--project", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert_eq!(stdout.trim(), r#"{"ok":true,"gdapi_version":"0.2.0"}"#);
+
+    mock.assert();
+}

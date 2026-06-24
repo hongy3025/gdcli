@@ -14,10 +14,12 @@
 //!   - 3: 网络错误、超时或元数据缺失
 
 use anyhow::{anyhow, Result};
+use std::borrow::Cow;
 use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
+use crate::format;
 use crate::gdapi_meta;
 
 /// 执行 gdapi exec 命令的主入口函数。
@@ -44,7 +46,6 @@ pub fn run(
     timeout_secs: u64,
     json_mode: bool,
 ) -> Result<i32> {
-    let _ = json_mode; // 临时占位，后续任务会真正接入
     // 1. 读 .godot/gdapi.json
     let meta = match gdapi_meta::read(project) {
         Ok(m) => m,
@@ -97,12 +98,25 @@ pub fn run(
         Ok(r) => {
             let status = r.status();
             let body = read_body(r)?;
-            print!("{}", body);
+            if json_mode {
+                print!("{}", body);
+            } else {
+                let rendered = format::render_exec_body(&body);
+                print!("{}", rendered);
+                if !rendered.ends_with('\n') {
+                    println!();
+                }
+            }
             Ok(map_status_to_exit(status, false))
         }
         Err(ureq::Error::Status(code, r)) => {
             let body = read_body(r)?;
-            eprintln!("Error (HTTP {}): {}", code, body.trim());
+            let rendered: Cow<'_, str> = if json_mode {
+                Cow::Borrowed(body.as_str())
+            } else {
+                format::render_exec_body(&body)
+            };
+            eprintln!("Error (HTTP {}): {}", code, rendered.trim_end());
             Ok(map_status_to_exit(code, true))
         }
         Err(ureq::Error::Transport(t)) => {
