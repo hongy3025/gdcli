@@ -22,6 +22,8 @@ var query: String
 var params: Dictionary
 ## 原始请求体字节数据
 var raw_body: PackedByteArray
+## 插件引用，用于日志记录
+var _plugin = null
 
 ## 初始化请求对象
 ##
@@ -46,6 +48,10 @@ func _init(req_dict: Dictionary) -> void:
 		var parsed = JSON.parse_string(text)
 		if typeof(parsed) == TYPE_DICTIONARY:
 			body = parsed
+
+	# 获取插件引用用于日志
+	if Engine.has_meta("gdapi_plugin"):
+		_plugin = Engine.get_meta("gdapi_plugin")
 
 ## 获取请求体中的指定字段
 ##
@@ -98,3 +104,27 @@ func is_json() -> bool:
 ## @return 客户端 IP 地址字符串
 func client_ip() -> String:
 	return headers.get("x-forwarded-for", headers.get("remote-addr", "127.0.0.1"))
+
+## 记录 debug 级别日志
+## @param text 日志内容
+func log_debug(text: String) -> void:
+	if _plugin and _plugin._log_level <= _plugin.LOG_DEBUG:
+		_plugin.log_message(text, "debug")
+
+## 记录 info 级别日志
+## @param text 日志内容
+func log_info(text: String) -> void:
+	if _plugin and _plugin._log_level <= _plugin.LOG_INFO:
+		_plugin.log_message(text, "info")
+
+## 记录 warn 级别日志
+## @param text 日志内容
+func log_warn(text: String) -> void:
+	if _plugin and _plugin._log_level <= _plugin.LOG_WARN:
+		_plugin.log_message(text, "warn")
+
+## 记录 error 级别日志
+## @param text 日志内容
+func log_error(text: String) -> void:
+	if _plugin and _plugin._log_level <= _plugin.LOG_ERROR:
+		_plugin.log_message(text, "error")
