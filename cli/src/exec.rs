@@ -78,10 +78,18 @@ pub fn run(
         .timeout(Duration::from_secs(timeout_secs))
         .build();
 
-    let resp = agent
+    let mut request = agent
         .post(&url)
-        .set("content-type", "application/json")
-        .send_string(&body_text);
+        .set("content-type", "application/json");
+
+    // 添加 token header
+    if let Some(ref token) = meta.token {
+        if !token.is_empty() {
+            request = request.set("Authorization", &format!("Bearer {}", token));
+        }
+    }
+
+    let resp = request.send_string(&body_text);
 
     match resp {
         Ok(r) => {

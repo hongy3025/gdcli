@@ -45,6 +45,8 @@ pub struct ServerCore {
     pending: PendingMap,
     /// 实际监听的端口号
     actual_port: Option<u16>,
+    /// 期望的认证 token（None 表示不校验）
+    expected_token: Option<String>,
 }
 
 impl Default for ServerCore {
@@ -62,6 +64,7 @@ impl ServerCore {
             in_rx: None,
             pending: PendingMap::default(),
             actual_port: None,
+            expected_token: None,
         }
     }
 
@@ -80,10 +83,11 @@ impl ServerCore {
     /// - 服务器已在运行
     /// - tokio 运行时创建失败
     /// - 在探测范围内无可用端口
-    pub fn start(&mut self, port_hint: u16) -> Result<u16, String> {
+    pub fn start(&mut self, port_hint: u16, token: Option<String>) -> Result<u16, String> {
         if self.runtime.is_some() {
             return Err("already running".into());
         }
+        self.expected_token = token;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -113,7 +117,8 @@ impl ServerCore {
             .unwrap_or(DEFAULT_TIMEOUT_MS);
 
         let id_counter = Arc::new(AtomicU64::new(1));
-        rt.spawn(accept_loop(listener, in_tx, id_counter, timeout_ms, shutdown_rx));
+        let expected_token = self.expected_token.clone();
+        rt.spawn(accept_loop(listener, in_tx, id_counter, timeout_ms, shutdown_rx, expected_token));
 
         self.runtime = Some(rt);
         self.shutdown_tx = Some(shutdown_tx);
@@ -218,6 +223,7 @@ async fn accept_loop(
     id_counter: Arc<AtomicU64>,
     timeout_ms: u64,
     mut shutdown_rx: oneshot::Receiver<()>,
+    expected_token: Option<String>,
 ) {
     loop {
         tokio::select! {
@@ -227,7 +233,8 @@ async fn accept_loop(
                     Ok((stream, _)) => {
                         let tx = in_tx.clone();
                         let id_c = id_counter.clone();
-                        tokio::spawn(handle_connection(stream, tx, id_c, timeout_ms));
+                        let token = expected_token.clone();
+                        tokio::spawn(handle_connection(stream, tx, id_c, timeout_ms, token));
                     }
                     Err(_) => break,
                 }
@@ -248,6 +255,7 @@ async fn handle_connection(
     in_tx: mpsc::Sender<PendingRequest>,
     id_counter: Arc<AtomicU64>,
     timeout_ms: u64,
+    expected_token: Option<String>,
 ) {
     let mut buf = Vec::with_capacity(8192);
     // 带超时的请求读取
@@ -299,6 +307,21 @@ async fn handle_connection(
             return;
         }
     };
+
+    // 校验 token
+    if let Some(ref expected) = expected_token {
+        let auth_header = req.headers.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+            .map(|(_, v)| v.as_str());
+
+        match auth_header {
+            Some(val) if val == format!("Bearer {}", expected) => {},
+            _ => {
+                let _ = stream.write_all(&write_response(401, &[], b"{\"error\":\"unauthorized\"}")).await;
+                return;
+            }
+        }
+    }
 
     // 分配请求 ID 并发送到主线程
     let id = id_counter.fetch_add(1, Ordering::Relaxed);

@@ -35,7 +35,7 @@ unsafe impl ExtensionLibrary for GdApiExtension {}
 /// # GDScript 使用示例
 /// ```gdscript
 /// var server = GdApiServer.create()
-/// server.start(8080)
+/// server.start(8080, "mytoken")
 /// # 在 _process 中轮询请求
 /// var req = server.poll_request()
 /// if req != null:
@@ -63,12 +63,14 @@ impl GdApiServer {
     ///
     /// # Arguments
     /// * `port_hint` - 期望的端口号。如果被占用，会尝试其他端口。
+    /// * `token` - 认证 token，为空字符串时不校验。
     ///
     /// # Returns
     /// 实际监听的端口号，失败返回 -1
     #[func]
-    fn start(&mut self, port_hint: u16) -> i32 {
-        match self.core.start(port_hint) {
+    fn start(&mut self, port_hint: u16, token: GString) -> i32 {
+        let token_opt = if token.is_empty() { None } else { Some(token.to_string()) };
+        match self.core.start(port_hint, token_opt) {
             Ok(p) => p as i32,
             Err(e) => {
                 godot_error!("[gdapi] start failed: {}", e);

@@ -18,7 +18,7 @@ use std::time::Duration;
 #[test]
 fn server_accepts_request_and_routes_to_poll_send() {
     let mut server = ServerCore::new();
-    let port = server.start(17890).expect("start should succeed");
+    let port = server.start(17890, None).expect("start should succeed");
     assert!((17890..17890 + 64).contains(&port));
 
     let handle = thread::spawn(move || {
@@ -58,10 +58,10 @@ fn server_accepts_request_and_routes_to_poll_send() {
 #[test]
 fn server_port_probing_skips_occupied() {
     let mut a = ServerCore::new();
-    let port_a = a.start(17900).expect("first start");
+    let port_a = a.start(17900, None).expect("first start");
 
     let mut b = ServerCore::new();
-    let port_b = b.start(17900).expect("second start should find next port");
+    let port_b = b.start(17900, None).expect("second start should find next port");
 
     assert_eq!(port_a, 17900);
     assert!(port_b > port_a, "expected port probing, got {} vs {}", port_b, port_a);
@@ -72,7 +72,7 @@ fn server_port_probing_skips_occupied() {
 #[test]
 fn server_returns_413_for_oversized_body() {
     let mut server = ServerCore::new();
-    let port = server.start(17910).expect("start");
+    let port = server.start(17910, None).expect("start");
 
     let handle = thread::spawn(move || {
         let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
@@ -95,7 +95,7 @@ fn server_returns_413_for_oversized_body() {
 fn server_504_on_handler_timeout() {
     std::env::set_var("GDAPI_HANDLER_TIMEOUT_MS", "300");
     let mut server = ServerCore::new();
-    let port = server.start(17920).expect("start");
+    let port = server.start(17920, None).expect("start");
 
     let handle = thread::spawn(move || {
         let url = format!("http://127.0.0.1:{}/slow", port);

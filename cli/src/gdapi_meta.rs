@@ -35,6 +35,9 @@ pub struct GdApiMeta {
     #[allow(dead_code)]
     #[serde(default)]
     pub gdapi_version: Option<String>,
+    /// 认证 token（可选，空或 None 表示不校验）
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 /// 读取并解析 gdapi 元数据文件。

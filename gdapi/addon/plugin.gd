@@ -50,13 +50,14 @@ func _enter_tree() -> void:
 	Engine.set_meta("gdapi_plugin", self)
 
 	_server = GdApiServer.create()
-	var port: int = _server.start(PORT_HINT)
+	var token := _generate_token()
+	var port: int = _server.start(PORT_HINT, token)
 	if port < 0:
 		push_error("[gdapi] failed to bind any port in 7890..7953")
 		return
 	_router = Router.new()
 	_router.scan("res://addons/gdapi/routes")
-	_write_meta(port)
+	_write_meta(port, token)
 	set_process(true)
 	print("[gdapi] listening on 127.0.0.1:%d (%d routes)" % [port, _router.count()])
 
@@ -142,7 +143,8 @@ func _read_version_from_plugin_cfg() -> String:
 ## 将服务器连接信息写入 JSON 文件，供外部工具（如 CLI）发现和连接服务。
 ## 包含 HTTP 端口、LSP 端口、进程 ID、启动时间和 API 版本。
 ## @param port 实际绑定的 HTTP 端口号
-func _write_meta(port: int) -> void:
+## @param token 认证 token
+func _write_meta(port: int, token: String) -> void:
 	var lsp_port: int = 6005
 	var es := EditorInterface.get_editor_settings()
 	if es and es.has_setting("network/language_server/remote_port"):
@@ -154,6 +156,7 @@ func _write_meta(port: int) -> void:
 		"pid": OS.get_process_id(),
 		"started_at": Time.get_datetime_string_from_system(true),
 		"gdapi_version": version,
+		"token": token,
 	}
 	var f := FileAccess.open(META_PATH, FileAccess.WRITE)
 	if f == null:
@@ -161,6 +164,16 @@ func _write_meta(port: int) -> void:
 		return
 	f.store_string(JSON.stringify(meta, "  "))
 	f.close()
+
+## 生成随机认证 token
+##
+## 生成 32 字符的十六进制随机字符串，用于 HTTP 请求认证。
+## @return 随机 token 字符串
+func _generate_token() -> String:
+	var token := ""
+	for i in range(32):
+		token += "%x" % (randi() % 16)
+	return token
 
 ## 删除元数据文件
 ##
