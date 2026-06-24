@@ -52,7 +52,7 @@ impl SymbolPath {
     /// Result<T, E> 是 Rust 中处理可能失败的操作的标准方式：
     ///   - Ok(T) 表示成功，携带结果值
     ///   - Err(E) 表示失败，携带错误信息
-    /// 这里用 String 作为错误类型，直接返回人类可读的错误描述。
+    ///     这里用 String 作为错误类型，直接返回人类可读的错误描述。
     pub fn parse(input: &str) -> Result<Self, String> {
         let colon_pos = input.rfind(':').ok_or("missing ':' separator")?;
         let file_part = &input[..colon_pos];

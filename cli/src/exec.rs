@@ -101,8 +101,6 @@ fn map_status_to_exit(status: u16, is_error: bool) -> i32 {
         0
     } else if (400..500).contains(&status) {
         2
-    } else if (500..600).contains(&status) {
-        1
     } else {
         1
     }

@@ -63,10 +63,7 @@ impl ServerCore {
             }
             Err("no available port in probe range".to_string())
         });
-        let (listener, port) = match listener {
-            Ok(x) => x,
-            Err(e) => return Err(e),
-        };
+        let (listener, port) = listener?;
 
         let (in_tx, in_rx) = mpsc::channel::<PendingRequest>(256);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -109,10 +106,7 @@ impl ServerCore {
     /// 主线程 poll：非阻塞 try_recv。返回原始 PendingRequest 供测试用。
     pub fn poll_request_raw(&mut self) -> Option<PendingRequest> {
         let rx = self.in_rx.as_mut()?;
-        match rx.try_recv() {
-            Ok(req) => Some(req),
-            Err(_) => None,
-        }
+        rx.try_recv().ok()
     }
 
     pub fn send_response_raw(

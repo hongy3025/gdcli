@@ -119,7 +119,7 @@ impl GodotLspClient {
     /// 【rootUri / rootPath】
     /// 告诉服务器项目根目录在哪里，服务器据此解析相对路径、加载项目配置。
     async fn initialize(&self, project: Option<&Path>) -> Result<()> {
-        let root_uri = project.map(|p| file_to_uri(p));
+        let root_uri = project.map(file_to_uri);
         let root_path = project.map(|p| p.to_string_lossy().to_string());
         let params = json!({
             "processId": std::process::id(),
@@ -553,11 +553,11 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     let len2 = s2.len();
     let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
 
-    for i in 0..=len1 {
-        matrix[i][0] = i;
+    for (i, row) in matrix.iter_mut().enumerate().take(len1 + 1) {
+        row[0] = i;
     }
-    for j in 0..=len2 {
-        matrix[0][j] = j;
+    for (j, val) in matrix[0].iter_mut().enumerate().take(len2 + 1) {
+        *val = j;
     }
 
     for (i, c1) in s1.chars().enumerate() {

@@ -7,7 +7,9 @@ pub struct GdApiMeta {
     pub http_port: u16,
     #[serde(default)]
     pub lsp_port: Option<u16>,
+    #[allow(dead_code)]
     pub pid: Option<u32>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub gdapi_version: Option<String>,
 }

@@ -214,7 +214,7 @@ const SYMBOL_KINDS: [&str; 27] = [
 /// 数组的 get 方法返回 Option<&T>：
 ///   - 如果索引在范围内，返回 Some(&元素)
 ///   - 如果越界，返回 None
-/// 这里配合 unwrap_or_else 处理越界情况，返回 "Unknown(编号)"。
+///     这里配合 unwrap_or_else 处理越界情况，返回 "Unknown(编号)"。
 pub fn symbol_kind_name(kind: u32) -> String {
     SYMBOL_KINDS
         .get(kind as usize)

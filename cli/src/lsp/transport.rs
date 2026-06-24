@@ -112,12 +112,7 @@ fn find_double_crlf(buf: &[u8]) -> Option<usize> {
     if buf.len() < 4 {
         return None;
     }
-    for i in 0..=buf.len() - 4 {
-        if buf[i] == b'\r' && buf[i + 1] == b'\n' && buf[i + 2] == b'\r' && buf[i + 3] == b'\n' {
-            return Some(i);
-        }
-    }
-    None
+    (0..=buf.len() - 4).find(|&i| buf[i] == b'\r' && buf[i + 1] == b'\n' && buf[i + 2] == b'\r' && buf[i + 3] == b'\n')
 }
 
 // ==================== LSP 消息结构 ====================

@@ -11,6 +11,7 @@ use std::path::Path;
 static ADDON_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../gdapi/addon");
 
 /// 获取嵌入的 addon 目录。
+#[allow(dead_code)]
 pub fn addon_dir() -> &'static Dir<'static> {
     &ADDON_DIR
 }
@@ -24,6 +25,7 @@ pub fn extract_to(target_dir: &Path) -> Result<(), std::io::Error> {
 }
 
 /// 返回嵌入的 addon 文件列表（用于调试/日志）。
+#[allow(dead_code)]
 pub fn file_list() -> Vec<String> {
     ADDON_DIR
         .files()
