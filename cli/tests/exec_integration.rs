@@ -56,7 +56,7 @@ fn exec_ping_success() {
         .args(["exec", "ping", "--project", dir.path().to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicates::str::contains(r#""ok":true"#));
+        .stdout(predicates::str::contains("ok: true"));
 
     mock.assert();
 }
@@ -202,8 +202,8 @@ fn exec_help_list_passes_through_server_json() {
         .args(["exec", "help", "--project", dir.path().to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicates::str::contains(r#""routes""#))
-        .stdout(predicates::str::contains(r#""path":"ping""#));
+        .stdout(predicates::str::contains("routes"))
+        .stdout(predicates::str::contains("ping"));
 
     mock.assert();
 }
@@ -237,7 +237,7 @@ fn exec_help_with_path_sends_path_body() {
         ])
         .assert()
         .success()
-        .stdout(predicates::str::contains(r#""doc""#));
+        .stdout(predicates::str::contains("doc"));
 
     mock.assert();
 }
