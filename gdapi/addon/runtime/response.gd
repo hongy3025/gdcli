@@ -42,7 +42,7 @@ func status(code: int) -> GdApiResponse:
 ## @param key 头部名称
 ## @param value 头部值
 ## @return 响应对象自身，支持链式调用
-func set(key: String, value: String) -> GdApiResponse:
+func set_header(key: String, value: String) -> GdApiResponse:
 	_headers[key] = value
 	return self
 

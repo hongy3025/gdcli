@@ -41,7 +41,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 
 	# 实例化场景并查找父节点
-	var scene_root := scene.instantiate()
+	var scene_root: Node = scene.instantiate()
 
 	var parent: Node = scene_root
 	if parent_path != "root":

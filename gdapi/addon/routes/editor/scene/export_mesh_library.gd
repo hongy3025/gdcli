@@ -39,7 +39,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 
 	# 实例化场景并创建网格库
-	var scene_root := scene.instantiate()
+	var scene_root: Node = scene.instantiate()
 
 	var mesh_library := MeshLibrary.new()
 	var item_id := 0

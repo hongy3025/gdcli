@@ -44,7 +44,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var generated_uids := 0
 
 	for script_path in scripts:
-		var uid_path := script_path + ".uid"
+		var uid_path: String = script_path + ".uid"
 		if not FileAccess.file_exists(uid_path):
 			missing_uids += 1
 			var res_load = load(script_path)

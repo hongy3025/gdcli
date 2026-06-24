@@ -41,7 +41,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 
 	# 实例化场景并查找目标节点
-	var scene_root := scene.instantiate()
+	var scene_root: Node = scene.instantiate()
 
 	var sprite_path := node_path.replace("root/", "")
 	var sprite_node = scene_root.get_node(sprite_path)
