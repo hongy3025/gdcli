@@ -63,3 +63,14 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		"ok": true,
 		"path": save_path,
 	})
+
+## 返回该路由的帮助文档
+func doc() -> GdApiRouteDoc:
+	return GdApiRouteDoc.make("保存 Godot 场景文件") \
+		.desc("支持保存到原路径或另存为新路径，自动创建不存在的目录") \
+		.param("scene_path", "String", true, "场景路径，可省略 res:// 前缀") \
+		.param("new_path", "String", false, "另存目标路径，留空则覆盖原路径", "") \
+		.returns("保存成功后返回路径信息", {
+			"ok": "bool",
+			"path": "String, 实际保存路径",
+		})

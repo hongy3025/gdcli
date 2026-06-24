@@ -40,3 +40,14 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 	# 返回成功响应
 	res.json({"ok": true, "action": "play_custom_scene", "scene": scene_path})
+
+## 返回该路由的帮助文档
+func doc() -> GdApiRouteDoc:
+	return GdApiRouteDoc.make("运行 Godot 场景") \
+		.desc("不带 scene_path 时运行主场景；带 scene_path 时运行指定路径的自定义场景；用于自动化测试和快速预览") \
+		.param("scene_path", "String", false, "要运行的场景路径，留空则运行主场景", "") \
+		.returns("运行结果", {
+			"ok": "bool",
+			"action": "String, play_main_scene 或 play_custom_scene",
+			"scene": "String, 仅自定义场景模式存在，运行的场景路径",
+		})

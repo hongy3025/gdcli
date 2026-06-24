@@ -24,3 +24,13 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 	# 返回成功响应
 	res.json({"ok": true, "action": "stop"})
+
+## 返回该路由的帮助文档
+func doc() -> GdApiRouteDoc:
+	return GdApiRouteDoc.make("停止当前正在运行的场景") \
+		.desc("如果当前有场景正在运行则停止；如果没有运行中的场景则返回成功并标记为未运行状态") \
+		.returns("停止结果", {
+			"ok": "bool",
+			"action": "String, 固定为 stop",
+			"message": "String, 仅无运行场景时存在，值为 'not playing'",
+		})

@@ -37,3 +37,15 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		"entries": entries,
 		"next_since": next_since,
 	})
+
+## 返回该路由的帮助文档
+func doc() -> GdApiRouteDoc:
+	return GdApiRouteDoc.make("获取编辑器日志输出") \
+		.desc("从插件日志缓冲区获取指定序列号之后的日志条目；支持分页和增量获取，避免重复获取已读日志；用于调试和日志收集") \
+		.param("since", "int", false, "起始序列号，只返回此号之后的日志", 0) \
+		.param("limit", "int", false, "最大返回条目数", 100) \
+		.returns("日志条目和分页信息", {
+			"ok": "bool",
+			"entries": "Array, 日志条目数组（每条含 seq, time, level, text）",
+			"next_since": "int, 下一次请求的起始序列号",
+		})

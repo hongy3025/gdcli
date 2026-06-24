@@ -68,3 +68,15 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		"path": scene_path,
 		"root_type": root_type,
 	})
+
+## 返回该路由的帮助文档
+func doc() -> GdApiRouteDoc:
+	return GdApiRouteDoc.make("创建新 Godot 场景文件") \
+		.desc("创建指定类型的根节点，打包为场景并保存到指定路径；自动创建不存在的目录；创建后自动重新加载场景到编辑器中") \
+		.param("scene_path", "String", true, "新场景的保存路径，可省略 res:// 前缀") \
+		.param("root_node_type", "String", false, "根节点类型名称，默认为 Node2D", "Node2D") \
+		.returns("创建结果", {
+			"ok": "bool",
+			"path": "String, 场景保存路径",
+			"root_type": "String, 根节点类型",
+		})
