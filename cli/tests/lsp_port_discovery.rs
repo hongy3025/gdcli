@@ -98,6 +98,6 @@ fn status_uses_port_from_gdapi_meta() {
         .timeout(Duration::from_secs(10))
         .args(["status", "--project", dir.path().to_str().unwrap()])
         .assert()
-        .failure()
+        .success()
         .stderr(predicates::str::contains("39123"));
 }

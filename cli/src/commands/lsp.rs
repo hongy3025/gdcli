@@ -240,7 +240,7 @@ fn print_references_result(result: &[Location], json_mode: bool) -> Result<()> {
 
 /// 处理 status 子命令。
 ///
-/// 尝试连接服务器，根据结果输出连接状态。
+/// 同时检测 HTTP（gdapi）和 LSP 连通性，输出双状态。
 /// 与其他命令不同：连接失败时不会直接 panic，而是输出友好的错误信息。
 pub(crate) async fn handle_status_command(
     host: &str,
@@ -248,45 +248,63 @@ pub(crate) async fn handle_status_command(
     project: Option<&Path>,
     json_mode: bool,
 ) -> Result<()> {
-    match GodotLspClient::connect(host, port, project).await {
-        Ok(client) => {
-            if json_mode {
-                let status = json!({
-                    "connected": true,
-                    "host": host,
-                    "port": port,
-                    "project": project.map(|p| p.to_string_lossy().to_string()),
-                });
-                println!("{}", serde_json::to_string_pretty(&status)?);
-            } else {
-                println!("Connected to Godot LSP at {}:{}", host, port);
-                if let Some(p) = project {
-                    println!("Project: {}", p.display());
+    let http_status = if let Some(root) = project {
+        match crate::gdapi_meta::read(root) {
+            Ok(meta) => {
+                let url = format!("http://{}:{}/ping", host, meta.http_port);
+                match ureq::get(&url).timeout(std::time::Duration::from_secs(3)).call() {
+                    Ok(_) => (true, meta.http_port, None),
+                    Err(e) => (false, meta.http_port, Some(e.to_string())),
                 }
             }
-            client.disconnect().await;
-            Ok(())
+            Err(e) => (false, 0, Some(format!("no gdapi meta: {}", e))),
         }
-        Err(e) => {
-            if json_mode {
-                let status = json!({
-                    "connected": false,
-                    "host": host,
-                    "port": port,
-                    "error": e.to_string(),
-                });
-                println!("{}", serde_json::to_string_pretty(&status)?);
-            } else {
-                eprintln!("Failed to connect to Godot LSP at {}:{}", host, port);
-                eprintln!("Error: {}", e);
-                eprintln!(
-                    "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
-                    port
-                );
-            }
-            std::process::exit(1);
+    } else {
+        (false, 0, Some("no project specified".to_string()))
+    };
+
+    let lsp_status = match GodotLspClient::connect(host, port, project).await {
+        Ok(client) => {
+            client.disconnect().await;
+            (true, port, None)
+        }
+        Err(e) => (false, port, Some(e.to_string())),
+    };
+
+    if json_mode {
+        let status = json!({
+            "gdapi": {
+                "connected": http_status.0,
+                "host": host,
+                "port": http_status.1,
+                "error": http_status.2,
+            },
+            "lsp": {
+                "connected": lsp_status.0,
+                "host": host,
+                "port": lsp_status.1,
+                "error": lsp_status.2,
+            },
+            "project": project.map(|p| p.to_string_lossy().to_string()),
+        });
+        println!("{}", serde_json::to_string_pretty(&status)?);
+    } else {
+        let http_icon = if http_status.0 { "✅" } else { "❌" };
+        let lsp_icon = if lsp_status.0 { "✅" } else { "❌" };
+        println!("gdapi (HTTP):  {} connected ({}:{})", http_icon, host, http_status.1);
+        println!("LSP:           {} connected ({}:{})", lsp_icon, host, lsp_status.1);
+        if let Some(p) = project {
+            println!("Project:       {}", p.display());
+        }
+        if let Some(e) = &http_status.2 {
+            eprintln!("gdapi error:   {}", e);
+        }
+        if let Some(e) = &lsp_status.2 {
+            eprintln!("LSP error:     {}", e);
         }
     }
+
+    Ok(())
 }
 
 /// 处理 rename 子命令。
