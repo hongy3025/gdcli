@@ -102,14 +102,28 @@ fn enable_plugin_in_project_godot(root: &Path) -> Result<()> {
     // 检测原始行尾符
     let line_ending = if content.contains("\r\n") { "\r\n" } else { "\n" };
 
-    let new_content = if content.contains("[editor_plugins]") {
-        // [editor_plugins] 段已存在，找到 enabled= 行并追加
+    // 检测是否存在 [editor_plugins] 段（需要段感知匹配）
+    let has_editor_plugins_section = content.lines().any(|l| l.trim() == "[editor_plugins]");
+
+    let new_content = if has_editor_plugins_section {
+        // [editor_plugins] 段已存在，找到段内的 enabled= 行并追加
         let mut lines: Vec<String> = content.lines().map(String::from).collect();
+        let mut in_editor_plugins = false;
         let mut found_enabled = false;
+        let mut found_section = false;
         for line in &mut lines {
-            if line.starts_with("enabled=") {
+            let trimmed = line.trim();
+            if trimmed == "[editor_plugins]" {
+                in_editor_plugins = true;
+                found_section = true;
+                continue;
+            }
+            // 遇到新段头时离开 [editor_plugins]
+            if found_section && in_editor_plugins && trimmed.starts_with('[') {
+                in_editor_plugins = false;
+            }
+            if in_editor_plugins && line.starts_with("enabled=") {
                 // 已有 enabled 行，追加插件
-                // 格式：enabled=PackedStringArray("res://addons/foo/plugin.cfg")
                 if line.trim() == "enabled=PackedStringArray()" {
                     // 空数组，直接替换
                     *line = format!("enabled=PackedStringArray(\"{}\")", plugin_entry);
@@ -126,7 +140,7 @@ fn enable_plugin_in_project_godot(root: &Path) -> Result<()> {
             }
         }
         if !found_enabled {
-            // [editor_plugins] 存在但没有 enabled 行
+            // [editor_plugins] 存在但段内没有 enabled 行
             // 在 [editor_plugins] 之后插入
             let mut new_lines = Vec::new();
             for line in lines {
@@ -261,6 +275,48 @@ mod tests {
         enable_plugin_in_project_godot(dir.path()).unwrap();
         let content = fs::read_to_string(dir.path().join("project.godot")).unwrap();
         assert!(content.contains("\r\n"));
+        assert!(content.contains("res://addons/gdapi/plugin.cfg"));
+    }
+
+    #[test]
+    fn enable_plugin_with_spaces_in_value() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("project.godot"),
+            "[editor_plugins]\nenabled=PackedStringArray( \"res://addons/foo/plugin.cfg\" )\n",
+        )
+        .unwrap();
+        enable_plugin_in_project_godot(dir.path()).unwrap();
+        let content = fs::read_to_string(dir.path().join("project.godot")).unwrap();
+        assert!(content.contains("res://addons/gdapi/plugin.cfg"));
+        assert!(content.contains("res://addons/foo/plugin.cfg"));
+    }
+
+    #[test]
+    fn enable_plugin_with_multiple_enabled_lines() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("project.godot"),
+            "[editor_plugins]\nenabled=PackedStringArray(\"res://addons/foo/plugin.cfg\")\nenabled=PackedStringArray(\"res://addons/bar/plugin.cfg\")\n",
+        )
+        .unwrap();
+        enable_plugin_in_project_godot(dir.path()).unwrap();
+        let content = fs::read_to_string(dir.path().join("project.godot")).unwrap();
+        // 应该只修改第一个 enabled 行
+        assert!(content.contains("res://addons/gdapi/plugin.cfg"));
+    }
+
+    #[test]
+    fn enable_plugin_enabled_outside_section() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("project.godot"),
+            "enabled=PackedStringArray(\"res://addons/foo/plugin.cfg\")\n[editor_plugins]\n",
+        )
+        .unwrap();
+        enable_plugin_in_project_godot(dir.path()).unwrap();
+        let content = fs::read_to_string(dir.path().join("project.godot")).unwrap();
+        // 应该在 [editor_plugins] 段内添加新的 enabled 行
         assert!(content.contains("res://addons/gdapi/plugin.cfg"));
     }
 }
