@@ -32,8 +32,8 @@ use std::sync::Arc;
 use std::time::Duration;
 /// tokio 提供的异步 IO trait：AsyncReadExt（扩展读取）、AsyncWriteExt（扩展写入）
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::net::TcpStream;
 /// broadcast：一对多广播通道；oneshot：一次性发送/接收通道；Mutex：异步互斥锁
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -55,7 +55,9 @@ pub struct MessageBuffer {
 
 impl MessageBuffer {
     pub fn new() -> Self {
-        Self { buf: BytesMut::new() }
+        Self {
+            buf: BytesMut::new(),
+        }
     }
 
     /// 把新收到的字节追加到缓冲区尾部
@@ -80,8 +82,8 @@ impl MessageBuffer {
             Some(i) => i,
             None => return Ok(None),
         };
-        let header_str = std::str::from_utf8(&self.buf[..sep])
-            .map_err(|_| anyhow!("invalid header bytes"))?;
+        let header_str =
+            std::str::from_utf8(&self.buf[..sep]).map_err(|_| anyhow!("invalid header bytes"))?;
         let mut content_length: Option<usize> = None;
         for line in header_str.split("\r\n") {
             if let Some((k, v)) = line.split_once(':') {
@@ -112,7 +114,9 @@ fn find_double_crlf(buf: &[u8]) -> Option<usize> {
     if buf.len() < 4 {
         return None;
     }
-    (0..=buf.len() - 4).find(|&i| buf[i] == b'\r' && buf[i + 1] == b'\n' && buf[i + 2] == b'\r' && buf[i + 3] == b'\n')
+    (0..=buf.len() - 4).find(|&i| {
+        buf[i] == b'\r' && buf[i + 1] == b'\n' && buf[i + 2] == b'\r' && buf[i + 3] == b'\n'
+    })
 }
 
 // ==================== LSP 消息结构 ====================
@@ -196,13 +200,10 @@ impl LspTransport {
     /// 【Arc<Self>】
     /// 返回 Arc 是因为调用者通常需要把 Transport 共享给多个异步任务使用。
     pub async fn connect(host: &str, port: u16) -> Result<Arc<Self>> {
-        let stream = tokio::time::timeout(
-            Duration::from_secs(5),
-            TcpStream::connect((host, port)),
-        )
-        .await
-        .map_err(|_| anyhow!("Connection to {}:{} timed out after 5000ms", host, port))?
-        .map_err(|e| anyhow!("Connection to {}:{} failed: {}", host, port, e))?;
+        let stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect((host, port)))
+            .await
+            .map_err(|_| anyhow!("Connection to {}:{} timed out after 5000ms", host, port))?
+            .map_err(|e| anyhow!("Connection to {}:{} failed: {}", host, port, e))?;
 
         let (read_half, write_half) = stream.into_split();
         let (notif_tx, _) = broadcast::channel(64);
@@ -333,7 +334,10 @@ async fn reader_loop(
     // 连接关闭：reject 所有还在等待响应的请求
     let mut p = pending.lock().await;
     for (_, tx) in p.drain() {
-        let _ = tx.send(Err(LspError { code: -1, message: "Connection closed".into() }));
+        let _ = tx.send(Err(LspError {
+            code: -1,
+            message: "Connection closed".into(),
+        }));
     }
 }
 
@@ -451,7 +455,9 @@ mod tests {
             assert!(req.contains("\"method\":\"ping\""));
             let resp = r#"{"jsonrpc":"2.0","id":1,"result":{"pong":true}}"#;
             let frame = format!("Content-Length: {}\r\n\r\n{}", resp.len(), resp);
-            tokio::io::AsyncWriteExt::write_all(&mut s, frame.as_bytes()).await.unwrap();
+            tokio::io::AsyncWriteExt::write_all(&mut s, frame.as_bytes())
+                .await
+                .unwrap();
         });
 
         let t = LspTransport::connect("127.0.0.1", port).await.unwrap();
@@ -469,13 +475,18 @@ mod tests {
             let (mut s, _) = listener.accept().await.unwrap();
             let notif = r#"{"jsonrpc":"2.0","method":"hello","params":{"x":1}}"#;
             let frame = format!("Content-Length: {}\r\n\r\n{}", notif.len(), notif);
-            tokio::io::AsyncWriteExt::write_all(&mut s, frame.as_bytes()).await.unwrap();
+            tokio::io::AsyncWriteExt::write_all(&mut s, frame.as_bytes())
+                .await
+                .unwrap();
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
 
         let t = LspTransport::connect("127.0.0.1", port).await.unwrap();
         let mut rx = t.subscribe();
-        let n = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+        let n = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(n.method, "hello");
         assert_eq!(n.params["x"], json!(1));
         server.await.unwrap();

@@ -42,7 +42,10 @@ fn install_creates_addon_directory() {
     assert!(dir.path().join("addons/gdapi/plugin.gd").exists());
     assert!(dir.path().join("addons/gdapi/gdapi.gdextension").exists());
     assert!(dir.path().join("addons/gdapi/runtime/router.gd").exists());
-    assert!(dir.path().join("addons/gdapi/runtime/route_handler.gd").exists());
+    assert!(dir
+        .path()
+        .join("addons/gdapi/runtime/route_handler.gd")
+        .exists());
 }
 
 #[test]
@@ -68,7 +71,12 @@ fn install_no_enable_flag() {
 
     Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["install", "--project", dir.path().to_str().unwrap(), "--no-enable"])
+        .args([
+            "install",
+            "--project",
+            dir.path().to_str().unwrap(),
+            "--no-enable",
+        ])
         .assert()
         .success();
 
@@ -112,7 +120,12 @@ fn install_force_overwrites() {
     // Second install with --force
     Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["install", "--project", dir.path().to_str().unwrap(), "--force"])
+        .args([
+            "install",
+            "--project",
+            dir.path().to_str().unwrap(),
+            "--force",
+        ])
         .assert()
         .success()
         .stdout(predicates::str::contains("Installed gdapi"));

@@ -25,23 +25,27 @@ struct Buf {
 }
 
 impl Buf {
-    fn new() -> Self { Self { data: vec![] } }
-    fn append(&mut self, b: &[u8]) { self.data.extend_from_slice(b); }
+    fn new() -> Self {
+        Self { data: vec![] }
+    }
+    fn append(&mut self, b: &[u8]) {
+        self.data.extend_from_slice(b);
+    }
     fn try_read(&mut self) -> Option<String> {
         let pos = self.data.windows(4).position(|w| w == b"\r\n\r\n")?;
         let header = std::str::from_utf8(&self.data[..pos]).ok()?;
-        let len: usize = header
-            .lines()
-            .find_map(|l| {
-                let (k, v) = l.split_once(':')?;
-                if k.eq_ignore_ascii_case("Content-Length") {
-                    v.trim().parse().ok()
-                } else {
-                    None
-                }
-            })?;
+        let len: usize = header.lines().find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            if k.eq_ignore_ascii_case("Content-Length") {
+                v.trim().parse().ok()
+            } else {
+                None
+            }
+        })?;
         let body_start = pos + 4;
-        if self.data.len() < body_start + len { return None; }
+        if self.data.len() < body_start + len {
+            return None;
+        }
         let body = String::from_utf8_lossy(&self.data[body_start..body_start + len]).to_string();
         self.data.drain(..body_start + len);
         Some(body)
@@ -90,7 +94,11 @@ where
                     Ok(v) => v,
                     Err(_) => continue,
                 };
-                let method = v.get("method").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let method = v
+                    .get("method")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let id = v.get("id").and_then(|x| x.as_i64());
                 let params = v.get("params").cloned().unwrap_or(serde_json::Value::Null);
 
@@ -183,7 +191,11 @@ async fn rename_json_decodes_uris() {
             .assert()
             .success();
         let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-        assert!(!stdout.contains("file:///"), "URI should be decoded: {}", stdout);
+        assert!(
+            !stdout.contains("file:///"),
+            "URI should be decoded: {}",
+            stdout
+        );
         assert!(stdout.contains("tmp/x.gd"));
     })
     .await
@@ -225,7 +237,9 @@ fn connection_failure_prints_hint() {
         .timeout(Duration::from_secs(15))
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Failed to connect to Godot LSP at 127.0.0.1:1"))
+        .stderr(predicate::str::contains(
+            "Failed to connect to Godot LSP at 127.0.0.1:1",
+        ))
         .stderr(predicate::str::contains(
             "Make sure Godot is running with: godot --editor --headless --lsp-port 1",
         ));

@@ -1,7 +1,9 @@
 //! LSP 命令处理器和格式化工具。
 
 use crate::lsp::client::{DiagnosticsResult, GodotLspClient};
-use crate::lsp::types::{uri_to_file, symbol_kind_name, Diagnostic, Location, Range, WorkspaceEdit};
+use crate::lsp::types::{
+    symbol_kind_name, uri_to_file, Diagnostic, Location, Range, WorkspaceEdit,
+};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -15,7 +17,10 @@ use std::time::Duration;
 pub(crate) fn format_range(r: &Range) -> String {
     format!(
         "{}:{}-{}:{}",
-        r.start.line + 1, r.start.character + 1, r.end.line + 1, r.end.character + 1
+        r.start.line + 1,
+        r.start.character + 1,
+        r.end.line + 1,
+        r.end.character + 1
     )
 }
 
@@ -101,8 +106,14 @@ fn print_symbols(symbols: &[Value], indent: usize) {
         if sym.get("range").is_some() && sym.get("selectionRange").is_some() {
             let r = sym.get("range").cloned().unwrap_or(Value::Null);
             let r_parsed: Range = serde_json::from_value(r).unwrap_or(Range {
-                start: crate::lsp::types::Position { line: 0, character: 0 },
-                end: crate::lsp::types::Position { line: 0, character: 0 },
+                start: crate::lsp::types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: crate::lsp::types::Position {
+                    line: 0,
+                    character: 0,
+                },
             });
             println!(
                 "{}{} {} [{}]",
@@ -297,8 +308,14 @@ pub(crate) async fn handle_status_command(
     } else {
         let http_icon = if http_status.0 { "✅" } else { "❌" };
         let lsp_icon = if lsp_status.0 { "✅" } else { "❌" };
-        println!("gdapi (HTTP):  {} connected ({}:{})", http_icon, host, http_status.1);
-        println!("LSP:           {} connected ({}:{})", lsp_icon, host, lsp_status.1);
+        println!(
+            "gdapi (HTTP):  {} connected ({}:{})",
+            http_icon, host, http_status.1
+        );
+        println!(
+            "LSP:           {} connected ({}:{})",
+            lsp_icon, host, lsp_status.1
+        );
         if let Some(p) = project {
             println!("Project:       {}", p.display());
         }
@@ -334,7 +351,9 @@ pub(crate) async fn handle_rename_command(
         }
         crate::TargetMode::SymbolPath { symbol_path } => {
             let f = crate::resolve_file(&symbol_path.file, project);
-            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let (pos, name) = client
+                .resolve_symbol_path(&f, &symbol_path.segments)
+                .await?;
             let result = client.rename(&f, pos.line, pos.character, new_name).await?;
             if json_mode {
                 let v = json!({
@@ -344,7 +363,12 @@ pub(crate) async fn handle_rename_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
             } else {
-                println!("Renaming symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
+                println!(
+                    "Renaming symbol '{}' at {}:{}",
+                    name,
+                    pos.line + 1,
+                    pos.character + 1
+                );
                 print_rename_result(result, false)?;
             }
         }
@@ -368,7 +392,9 @@ pub(crate) async fn handle_references_command(
         }
         crate::TargetMode::SymbolPath { symbol_path } => {
             let f = crate::resolve_file(&symbol_path.file, project);
-            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let (pos, name) = client
+                .resolve_symbol_path(&f, &symbol_path.segments)
+                .await?;
             let result = client.references(&f, pos.line, pos.character).await?;
             if json_mode {
                 let v = json!({
@@ -378,7 +404,12 @@ pub(crate) async fn handle_references_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
             } else {
-                println!("References for symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
+                println!(
+                    "References for symbol '{}' at {}:{}",
+                    name,
+                    pos.line + 1,
+                    pos.character + 1
+                );
                 print_references_result(&result, false)?;
             }
         }
@@ -402,7 +433,9 @@ pub(crate) async fn handle_definition_command(
         }
         crate::TargetMode::SymbolPath { symbol_path } => {
             let f = crate::resolve_file(&symbol_path.file, project);
-            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let (pos, name) = client
+                .resolve_symbol_path(&f, &symbol_path.segments)
+                .await?;
             let v = client.definition(&f, pos.line, pos.character).await?;
             if json_mode {
                 let result = json!({
@@ -412,7 +445,12 @@ pub(crate) async fn handle_definition_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
             } else {
-                println!("Definition for symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
+                println!(
+                    "Definition for symbol '{}' at {}:{}",
+                    name,
+                    pos.line + 1,
+                    pos.character + 1
+                );
                 handle_locations(&v, false, "No definition found.")?;
             }
         }
@@ -436,7 +474,9 @@ pub(crate) async fn handle_declaration_command(
         }
         crate::TargetMode::SymbolPath { symbol_path } => {
             let f = crate::resolve_file(&symbol_path.file, project);
-            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let (pos, name) = client
+                .resolve_symbol_path(&f, &symbol_path.segments)
+                .await?;
             let v = client.declaration(&f, pos.line, pos.character).await?;
             if json_mode {
                 let result = json!({
@@ -446,7 +486,12 @@ pub(crate) async fn handle_declaration_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(result))?);
             } else {
-                println!("Declaration for symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
+                println!(
+                    "Declaration for symbol '{}' at {}:{}",
+                    name,
+                    pos.line + 1,
+                    pos.character + 1
+                );
                 handle_locations(&v, false, "No declaration found.")?;
             }
         }
@@ -492,12 +537,17 @@ pub(crate) async fn handle_hover_command(
                 let v = json!({ "hover": result });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
             } else {
-                println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
+                println!(
+                    "{}",
+                    result.unwrap_or_else(|| "No hover info available.".into())
+                );
             }
         }
         crate::TargetMode::SymbolPath { symbol_path } => {
             let f = crate::resolve_file(&symbol_path.file, project);
-            let (pos, name) = client.resolve_symbol_path(&f, &symbol_path.segments).await?;
+            let (pos, name) = client
+                .resolve_symbol_path(&f, &symbol_path.segments)
+                .await?;
             let result = client.hover(&f, pos.line, pos.character).await?;
             if json_mode {
                 let v = json!({
@@ -507,8 +557,16 @@ pub(crate) async fn handle_hover_command(
                 });
                 println!("{}", serde_json::to_string_pretty(&decode_uris(v))?);
             } else {
-                println!("Hover info for symbol '{}' at {}:{}", name, pos.line + 1, pos.character + 1);
-                println!("{}", result.unwrap_or_else(|| "No hover info available.".into()));
+                println!(
+                    "Hover info for symbol '{}' at {}:{}",
+                    name,
+                    pos.line + 1,
+                    pos.character + 1
+                );
+                println!(
+                    "{}",
+                    result.unwrap_or_else(|| "No hover info available.".into())
+                );
             }
         }
     }
@@ -558,7 +616,10 @@ fn format_native_members_table(children: &[Value]) {
         for m in members {
             let name = m.get("name").and_then(|x| x.as_str()).unwrap_or("?");
             let detail = m.get("detail").and_then(|x| x.as_str()).unwrap_or("");
-            let docs = m.get("documentation").and_then(|x| x.as_str()).unwrap_or("");
+            let docs = m
+                .get("documentation")
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
             let brief = first_line(docs);
             if brief.is_empty() {
                 println!("  {:<28} {}", name, detail);
@@ -694,8 +755,14 @@ mod tests {
     #[test]
     fn fmt_range_basic() {
         let r = Range {
-            start: Position { line: 1, character: 2 },
-            end: Position { line: 3, character: 4 },
+            start: Position {
+                line: 1,
+                character: 2,
+            },
+            end: Position {
+                line: 3,
+                character: 4,
+            },
         };
         assert_eq!(format_range(&r), "2:3-4:5");
     }
@@ -704,8 +771,14 @@ mod tests {
     fn fmt_diagnostic_error() {
         let d = Diagnostic {
             range: Range {
-                start: Position { line: 5, character: 0 },
-                end: Position { line: 5, character: 10 },
+                start: Position {
+                    line: 5,
+                    character: 0,
+                },
+                end: Position {
+                    line: 5,
+                    character: 10,
+                },
             },
             severity: Some(1),
             code: None,
@@ -719,8 +792,14 @@ mod tests {
     fn fmt_diagnostic_default_severity() {
         let d = Diagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 1 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 1,
+                },
             },
             severity: None,
             code: None,

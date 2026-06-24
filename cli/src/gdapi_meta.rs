@@ -55,7 +55,7 @@ pub struct GdApiMeta {
 /// - JSON 格式错误或字段缺失
 pub fn read(project_root: &Path) -> Result<GdApiMeta> {
     let p = project_root.join(".godot").join("gdapi.json");
-    let s = std::fs::read_to_string(&p)
-        .map_err(|e| anyhow!("cannot read {}: {}", p.display(), e))?;
+    let s =
+        std::fs::read_to_string(&p).map_err(|e| anyhow!("cannot read {}: {}", p.display(), e))?;
     serde_json::from_str(&s).map_err(|e| anyhow!("parse {}: {}", p.display(), e))
 }

@@ -38,7 +38,10 @@ mod tests {
             ]
         });
         let s = encode(&v).unwrap();
-        assert!(s.contains("rows[2|]{id|name}:"), "expected pipe-delim tabular header, got: {s}");
+        assert!(
+            s.contains("rows[2|]{id|name}:"),
+            "expected pipe-delim tabular header, got: {s}"
+        );
         assert!(s.contains("1|alpha"), "got: {s}");
         assert!(s.contains("2|beta"), "got: {s}");
     }
@@ -47,7 +50,10 @@ mod tests {
     fn primitive_array_inline() {
         let v = json!({"tags": ["a", "b", "c"]});
         let s = encode(&v).unwrap();
-        assert!(s.contains("tags[3|]: a|b|c"), "expected pipe-delim inline array, got: {s}");
+        assert!(
+            s.contains("tags[3|]: a|b|c"),
+            "expected pipe-delim inline array, got: {s}"
+        );
     }
 
     #[test]

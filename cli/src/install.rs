@@ -33,10 +33,7 @@ pub fn run(args: InstallArgs) -> Result<()> {
                 Some(v) => format!("gdapi {} is already installed at {}", v, target.display()),
                 None => format!("gdapi is already installed at {}", target.display()),
             };
-            return Err(anyhow!(
-                "{}. Use --force to overwrite.",
-                msg
-            ));
+            return Err(anyhow!("{}. Use --force to overwrite.", msg));
         }
         // --force：删除现有安装
         fs::remove_dir_all(&target)
@@ -108,7 +105,11 @@ fn enable_plugin_in_project_godot(root: &Path) -> Result<()> {
     }
 
     // 检测原始行尾符
-    let line_ending = if content.contains("\r\n") { "\r\n" } else { "\n" };
+    let line_ending = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
 
     // 检测是否存在 [editor_plugins] 段（需要段感知匹配）
     let has_editor_plugins_section = content.lines().any(|l| l.trim() == "[editor_plugins]");
@@ -164,8 +165,14 @@ fn enable_plugin_in_project_godot(root: &Path) -> Result<()> {
     } else {
         // [editor_plugins] 段不存在，追加
         let mut new_content = content.trim_end().to_string();
-        new_content.push_str(&format!("{}{}[editor_plugins]{}{}", line_ending, line_ending, line_ending, line_ending));
-        new_content.push_str(&format!("enabled=PackedStringArray(\"{}\"){}", plugin_entry, line_ending));
+        new_content.push_str(&format!(
+            "{}{}[editor_plugins]{}{}",
+            line_ending, line_ending, line_ending, line_ending
+        ));
+        new_content.push_str(&format!(
+            "enabled=PackedStringArray(\"{}\"){}",
+            plugin_entry, line_ending
+        ));
         new_content
     };
 
@@ -237,20 +244,13 @@ mod tests {
         enable_plugin_in_project_godot(dir.path()).unwrap();
         let content = fs::read_to_string(dir.path().join("project.godot")).unwrap();
         // Should not duplicate
-        assert_eq!(
-            content.matches("res://addons/gdapi/plugin.cfg").count(),
-            1
-        );
+        assert_eq!(content.matches("res://addons/gdapi/plugin.cfg").count(), 1);
     }
 
     #[test]
     fn enable_plugin_no_enable_flag() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("project.godot"),
-            "config_version=5\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("project.godot"), "config_version=5\n").unwrap();
         // --no-enable: don't modify project.godot
         // This test just verifies the function is not called
         let content_before = fs::read_to_string(dir.path().join("project.godot")).unwrap();

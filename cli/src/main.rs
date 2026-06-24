@@ -23,18 +23,18 @@ include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
 // ==================== 模块声明与导入 ====================
 
-mod lsp;
-mod exec;
-mod gdapi_meta;
-mod project;
-mod embedded_addon;
-mod install;
 mod commands;
+mod embedded_addon;
+mod exec;
 mod format;
+mod gdapi_meta;
+mod install;
+mod lsp;
+mod project;
 
-use lsp::client::GodotLspClient;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use lsp::client::GodotLspClient;
 use std::path::{Path, PathBuf};
 
 // ==================== 命令行参数定义 ====================
@@ -173,8 +173,14 @@ pub(crate) fn resolve_file(file: &Path, project: Option<&Path>) -> PathBuf {
 ///   - Position：file:line:col（传统的行列号格式）
 ///   - SymbolPath：file:Class.member（符号路径格式，更直观）
 pub(crate) enum TargetMode {
-    Position { file: PathBuf, line: u32, col: u32 },
-    SymbolPath { symbol_path: lsp::symbol_path::SymbolPath },
+    Position {
+        file: PathBuf,
+        line: u32,
+        col: u32,
+    },
+    SymbolPath {
+        symbol_path: lsp::symbol_path::SymbolPath,
+    },
 }
 
 /// 解析用户输入的 target 字符串。
@@ -204,7 +210,8 @@ pub(crate) fn parse_target(target: &str, _project: Option<&Path>) -> Result<Targ
             if line == 0 || col == 0 {
                 return Err(anyhow::anyhow!(
                     "Line and column numbers are 1-based and must be >= 1, got {}:{}",
-                    line, col
+                    line,
+                    col
                 ));
             }
             return Ok(TargetMode::Position {
@@ -217,8 +224,7 @@ pub(crate) fn parse_target(target: &str, _project: Option<&Path>) -> Result<Targ
 
     // 不是行列号格式，尝试符号路径
     if lsp::symbol_path::SymbolPath::is_symbol_path(target) {
-        let sp = lsp::symbol_path::SymbolPath::parse(target)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let sp = lsp::symbol_path::SymbolPath::parse(target).map_err(|e| anyhow::anyhow!(e))?;
         Ok(TargetMode::SymbolPath { symbol_path: sp })
     } else {
         Err(anyhow::anyhow!(
@@ -226,8 +232,6 @@ pub(crate) fn parse_target(target: &str, _project: Option<&Path>) -> Result<Targ
         ))
     }
 }
-
-
 
 // ==================== 程序入口 ====================
 
@@ -278,19 +282,28 @@ async fn run() -> Result<()> {
 
     match cli.cmd {
         Cmd::Install { force, no_enable } => {
-            let project_root = project::resolve_project_root(project)
-                .map_err(|e| anyhow::anyhow!(e))?;
+            let project_root =
+                project::resolve_project_root(project).map_err(|e| anyhow::anyhow!(e))?;
             install::run(install::InstallArgs {
                 project_root,
                 force,
                 no_enable,
             })?;
         }
-        Cmd::Exec { ref command, ref args, ref data, timeout } => {
-            let project_root = project::resolve_project_root(project)
-                .map_err(|e| anyhow::anyhow!(e))?;
+        Cmd::Exec {
+            ref command,
+            ref args,
+            ref data,
+            timeout,
+        } => {
+            let project_root =
+                project::resolve_project_root(project).map_err(|e| anyhow::anyhow!(e))?;
             let code = exec::run(
-                &project_root, command, args, data.as_deref(), timeout,
+                &project_root,
+                command,
+                args,
+                data.as_deref(),
+                timeout,
                 cli.json,
             )?;
             std::process::exit(code);
@@ -298,7 +311,13 @@ async fn run() -> Result<()> {
         Cmd::Status => {
             let project_root = project::resolve_project_root(project).ok();
             let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
-            return commands::lsp::handle_status_command(&cli.host, lsp_port, project_root.as_deref(), cli.json).await;
+            return commands::lsp::handle_status_command(
+                &cli.host,
+                lsp_port,
+                project_root.as_deref(),
+                cli.json,
+            )
+            .await;
         }
         Cmd::Lsp { ref sub } => {
             let project_root = project::resolve_project_root(project).ok();
@@ -307,7 +326,10 @@ async fn run() -> Result<()> {
             let client = match GodotLspClient::connect(&cli.host, lsp_port, project).await {
                 Ok(c) => c,
                 Err(_) => {
-                    eprintln!("Failed to connect to Godot LSP at {}:{}", cli.host, lsp_port);
+                    eprintln!(
+                        "Failed to connect to Godot LSP at {}:{}",
+                        cli.host, lsp_port
+                    );
                     eprintln!(
                         "Make sure Godot is running with: godot --editor --headless --lsp-port {} --path /your/project",
                         lsp_port
@@ -323,28 +345,61 @@ async fn run() -> Result<()> {
                         println!("{}", serde_json::to_string_pretty(&caps)?);
                     }
                     LspCmd::Rename { target, new_name } => {
-                        commands::lsp::handle_rename_command(&client, target, new_name, project, cli.json).await?;
+                        commands::lsp::handle_rename_command(
+                            &client, target, new_name, project, cli.json,
+                        )
+                        .await?;
                     }
                     LspCmd::References { target } => {
-                        commands::lsp::handle_references_command(&client, target, project, cli.json).await?;
+                        commands::lsp::handle_references_command(
+                            &client, target, project, cli.json,
+                        )
+                        .await?;
                     }
                     LspCmd::Definition { target } => {
-                        commands::lsp::handle_definition_command(&client, target, project, cli.json).await?;
+                        commands::lsp::handle_definition_command(
+                            &client, target, project, cli.json,
+                        )
+                        .await?;
                     }
                     LspCmd::Declaration { target } => {
-                        commands::lsp::handle_declaration_command(&client, target, project, cli.json).await?;
+                        commands::lsp::handle_declaration_command(
+                            &client, target, project, cli.json,
+                        )
+                        .await?;
                     }
                     LspCmd::Symbols { file } => {
-                        commands::lsp::handle_symbols_command(&client, file, project, cli.json).await?;
+                        commands::lsp::handle_symbols_command(&client, file, project, cli.json)
+                            .await?;
                     }
                     LspCmd::Hover { target } => {
-                        commands::lsp::handle_hover_command(&client, target, project, cli.json).await?;
+                        commands::lsp::handle_hover_command(&client, target, project, cli.json)
+                            .await?;
                     }
-                    LspCmd::NativeSymbol { members, full, class, member } => {
-                        commands::lsp::handle_native_symbol_command(&client, class, member.as_deref(), *members, *full, cli.json).await?;
+                    LspCmd::NativeSymbol {
+                        members,
+                        full,
+                        class,
+                        member,
+                    } => {
+                        commands::lsp::handle_native_symbol_command(
+                            &client,
+                            class,
+                            member.as_deref(),
+                            *members,
+                            *full,
+                            cli.json,
+                        )
+                        .await?;
                     }
                     LspCmd::Diagnostics { file } => {
-                        commands::lsp::handle_diagnostics_command(&client, file.as_deref(), project, cli.json).await?;
+                        commands::lsp::handle_diagnostics_command(
+                            &client,
+                            file.as_deref(),
+                            project,
+                            cli.json,
+                        )
+                        .await?;
                     }
                 }
                 Ok(())
@@ -358,8 +413,6 @@ async fn run() -> Result<()> {
 
     Ok(())
 }
-
-
 
 // ==================== 单元测试 ====================
 

@@ -28,7 +28,11 @@ use tempfile::TempDir;
 fn setup_fake_project(meta_json: &str) -> TempDir {
     let dir = TempDir::new().unwrap();
     let project_path = dir.path();
-    fs::write(project_path.join("project.godot"), "; fake\nconfig_version=5\n").unwrap();
+    fs::write(
+        project_path.join("project.godot"),
+        "; fake\nconfig_version=5\n",
+    )
+    .unwrap();
     fs::create_dir(project_path.join(".godot")).unwrap();
     fs::write(project_path.join(".godot").join("gdapi.json"), meta_json).unwrap();
     dir
@@ -144,9 +148,7 @@ fn exec_500_exits_with_code_1() {
 
 #[test]
 fn exec_invalid_json_data_fails_client_side() {
-    let dir = setup_fake_project(
-        r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#,
-    );
+    let dir = setup_fake_project(r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#);
 
     Command::cargo_bin("gdcli")
         .unwrap()
@@ -247,7 +249,8 @@ fn exec_help_nonexistent_path_returns_exit_code_2() {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/help");
-        then.status(404).body(r#"{"ok":false,"code":"not_found","msg":"route not found: foo"}"#);
+        then.status(404)
+            .body(r#"{"ok":false,"code":"not_found","msg":"route not found: foo"}"#);
     });
 
     let meta = format!(
@@ -274,9 +277,7 @@ fn exec_help_nonexistent_path_returns_exit_code_2() {
 
 #[test]
 fn exec_help_with_data_flag_is_rejected() {
-    let dir = setup_fake_project(
-        r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#,
-    );
+    let dir = setup_fake_project(r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#);
 
     Command::cargo_bin("gdcli")
         .unwrap()
@@ -296,9 +297,7 @@ fn exec_help_with_data_flag_is_rejected() {
 
 #[test]
 fn exec_non_help_with_positional_arg_is_rejected() {
-    let dir = setup_fake_project(
-        r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#,
-    );
+    let dir = setup_fake_project(r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#);
 
     Command::cargo_bin("gdcli")
         .unwrap()
@@ -339,11 +338,27 @@ fn exec_default_outputs_toon() {
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "exit code should be 0; stderr={}", String::from_utf8_lossy(&output.stderr));
-    assert!(stdout.contains("ok: true"), "expected TOON KV form, got: {stdout}");
-    assert!(stdout.contains("gdapi_version:"), "expected TOON key, got: {stdout}");
-    assert!(stdout.contains("0.2.0"), "expected version value, got: {stdout}");
-    assert!(!stdout.contains(r#""ok":true"#), "should NOT contain raw JSON, got: {stdout}");
+    assert!(
+        output.status.success(),
+        "exit code should be 0; stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("ok: true"),
+        "expected TOON KV form, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("gdapi_version:"),
+        "expected TOON key, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("0.2.0"),
+        "expected version value, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains(r#""ok":true"#),
+        "should NOT contain raw JSON, got: {stdout}"
+    );
 
     mock.assert();
 }
@@ -367,7 +382,13 @@ fn exec_json_flag_outputs_raw_json() {
 
     let output = Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["--json", "exec", "ping", "--project", dir.path().to_str().unwrap()])
+        .args([
+            "--json",
+            "exec",
+            "ping",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
         .output()
         .unwrap();
 
@@ -402,9 +423,16 @@ fn exec_toon_tabular_uniform_array() {
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(stdout.contains("ok: true"), "got: {stdout}");
-    assert!(stdout.contains("routes[2|]{path|summary}:"), "expected pipe tabular header, got: {stdout}");
+    assert!(
+        stdout.contains("routes[2|]{path|summary}:"),
+        "expected pipe tabular header, got: {stdout}"
+    );
     assert!(stdout.contains("ping|健康检查"), "got: {stdout}");
 
     mock.assert();
@@ -435,8 +463,14 @@ fn exec_toon_with_r1_empty_array() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("routes[2|]{path|params}:"), "R1 should coerce to tabular, got: {stdout}");
-    assert!(stdout.contains("ping|"), "empty array should become empty cell, got: {stdout}");
+    assert!(
+        stdout.contains("routes[2|]{path|params}:"),
+        "R1 should coerce to tabular, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("ping|"),
+        "empty array should become empty cell, got: {stdout}"
+    );
     assert!(stdout.contains("help|x"), "got: {stdout}");
 
     mock.assert();
@@ -466,9 +500,16 @@ fn exec_toon_4xx_error_renders_in_stderr() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(2), "4xx should exit 2; stderr={stderr}");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "4xx should exit 2; stderr={stderr}"
+    );
     assert!(stderr.starts_with("Error (HTTP 404): "), "got: {stderr}");
-    assert!(stderr.contains("code: not_found"), "stderr should contain TOON-rendered error, got: {stderr}");
+    assert!(
+        stderr.contains("code: not_found"),
+        "stderr should contain TOON-rendered error, got: {stderr}"
+    );
 
     mock.assert();
 }
@@ -498,7 +539,10 @@ fn exec_non_json_body_passes_through() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("hello world"), "non-JSON body should pass through, got: {stdout}");
+    assert!(
+        stdout.contains("hello world"),
+        "non-JSON body should pass through, got: {stdout}"
+    );
 
     mock.assert();
 }

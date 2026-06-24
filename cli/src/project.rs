@@ -92,8 +92,7 @@ pub fn resolve_project_root(explicit: Option<&Path>) -> Result<PathBuf, String> 
         }
         None => {
             // 自动查找模式：从当前工作目录开始
-            let cwd = std::env::current_dir()
-                .map_err(|e| format!("cannot get cwd: {}", e))?;
+            let cwd = std::env::current_dir().map_err(|e| format!("cannot get cwd: {}", e))?;
             find_root(&cwd).ok_or_else(|| {
                 format!(
                     "no Godot project found from {} (searched up {} levels). \

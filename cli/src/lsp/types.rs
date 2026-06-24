@@ -98,7 +98,11 @@ pub struct WorkspaceEdit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// 传统格式：键为文件 URI，值为该文件的编辑列表
     pub changes: Option<std::collections::HashMap<String, Vec<TextEdit>>>,
-    #[serde(rename = "documentChanges", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "documentChanges",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     /// LSP 3.16+ 格式：支持创建/删除/重命名文档的变更列表
     pub document_changes: Option<serde_json::Value>,
 }
@@ -200,12 +204,33 @@ pub fn uri_to_file(uri: &str) -> String {
 /// 例如：1=File, 5=Class, 12=Function, 13=Variable。
 /// 这个数组按索引 0~26 存放名称，方便把数字转成人可读的名字。
 const SYMBOL_KINDS: [&str; 27] = [
-    "Unknown", "File", "Module", "Namespace", "Package", "Class",
-    "Method", "Property", "Field", "Constructor", "Enum",
-    "Interface", "Function", "Variable", "Constant",
-    "String", "Number", "Boolean", "Array", "Object",
-    "Key", "Null", "EnumMember", "Struct", "Event",
-    "Operator", "TypeParameter",
+    "Unknown",
+    "File",
+    "Module",
+    "Namespace",
+    "Package",
+    "Class",
+    "Method",
+    "Property",
+    "Field",
+    "Constructor",
+    "Enum",
+    "Interface",
+    "Function",
+    "Variable",
+    "Constant",
+    "String",
+    "Number",
+    "Boolean",
+    "Array",
+    "Object",
+    "Key",
+    "Null",
+    "EnumMember",
+    "Struct",
+    "Event",
+    "Operator",
+    "TypeParameter",
 ];
 
 /// 将 LSP SymbolKind 编号转换为人可读的名称。
@@ -253,7 +278,11 @@ mod tests {
             PathBuf::from("/游戏 项目/player.gd")
         };
         let uri = file_to_uri(&p);
-        assert!(uri.contains("%20"), "space should be percent-encoded: {}", uri);
+        assert!(
+            uri.contains("%20"),
+            "space should be percent-encoded: {}",
+            uri
+        );
         assert!(
             uri.contains("%E6%B8%B8") || uri.contains("%e6%b8%b8"),
             "chinese should be encoded: {}",

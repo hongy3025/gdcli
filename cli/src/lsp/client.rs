@@ -272,12 +272,7 @@ impl GodotLspClient {
     ///
     /// 返回 Value 而不是具体的 Location/Vec<Location>，
     /// 因为不同服务器返回的格式可能略有差异（单个对象或数组）。
-    pub async fn definition(
-        &self,
-        file: &Path,
-        line: u32,
-        character: u32,
-    ) -> Result<Value> {
+    pub async fn definition(&self, file: &Path, line: u32, character: u32) -> Result<Value> {
         let uri = self.ensure_open(file).await?;
         self.transport
             .request(
@@ -294,12 +289,7 @@ impl GodotLspClient {
     ///
     /// 与 definition 的区别：declaration 是符号首次声明的位置，
     /// definition 是符号实际定义/实现的位置。某些语言中二者可能不同。
-    pub async fn declaration(
-        &self,
-        file: &Path,
-        line: u32,
-        character: u32,
-    ) -> Result<Value> {
+    pub async fn declaration(&self, file: &Path, line: u32, character: u32) -> Result<Value> {
         let uri = self.ensure_open(file).await?;
         self.transport
             .request(
@@ -411,7 +401,11 @@ impl GodotLspClient {
 
         // 尝试在顶层符号的子符号中查找
         for sym in symbols {
-            let children = sym.get("children").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            let children = sym
+                .get("children")
+                .and_then(|x| x.as_array())
+                .cloned()
+                .unwrap_or_default();
             if let Some(result) = find_symbol_in_list(&children, segment) {
                 return Ok(result);
             }
@@ -474,10 +468,7 @@ impl GodotLspClient {
     ///
     /// 如果指定了文件，返回该文件的诊断列表；
     /// 如果没有指定文件，返回所有缓存的诊断信息。
-    pub async fn diagnostics_for(
-        &self,
-        file: Option<&Path>,
-    ) -> DiagnosticsResult {
+    pub async fn diagnostics_for(&self, file: Option<&Path>) -> DiagnosticsResult {
         let map = self.diagnostics.lock().await.clone();
         match file {
             Some(p) => {
@@ -634,7 +625,11 @@ fn collect_all_symbol_names(symbols: &[Value]) -> Vec<String> {
     for sym in symbols {
         let name = sym.get("name").and_then(|x| x.as_str()).unwrap_or("");
         candidates.push(name.to_string());
-        let children = sym.get("children").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+        let children = sym
+            .get("children")
+            .and_then(|x| x.as_array())
+            .cloned()
+            .unwrap_or_default();
         for child in &children {
             let name = child.get("name").and_then(|x| x.as_str()).unwrap_or("");
             candidates.push(name.to_string());

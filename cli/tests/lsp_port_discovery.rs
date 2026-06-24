@@ -35,7 +35,12 @@ fn lsp_uses_port_from_gdapi_meta() {
     Command::cargo_bin("gdcli")
         .unwrap()
         .timeout(Duration::from_secs(10))
-        .args(["lsp", "capabilities", "--project", dir.path().to_str().unwrap()])
+        .args([
+            "lsp",
+            "capabilities",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
         .assert()
         .failure()
         .stderr(predicates::str::contains("39123"));
@@ -71,7 +76,12 @@ fn lsp_falls_back_to_default_6005() {
     let output = Command::cargo_bin("gdcli")
         .unwrap()
         .timeout(Duration::from_secs(10))
-        .args(["lsp", "capabilities", "--project", dir.path().to_str().unwrap()])
+        .args([
+            "lsp",
+            "capabilities",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
         .output()
         .unwrap();
 
