@@ -11,11 +11,18 @@ use std::io;
 pub const MAX_BODY: usize = 16 * 1024 * 1024;
 const MAX_HEADERS: usize = 64;
 
+/// 已解析的 HTTP 请求结构体。
+///
+/// 包含从原始字节流中解析出的 HTTP 请求各组成部分。
 #[derive(Debug, PartialEq)]
 pub struct ParsedRequest {
+    /// HTTP 方法（GET、POST 等）
     pub method: String,
+    /// 请求路径（包含 query string，不解析）
     pub path: String,
+    /// 请求头列表（键已转为小写）
     pub headers: Vec<(String, String)>,
+    /// 请求体字节
     pub body: Vec<u8>,
 }
 
@@ -79,7 +86,17 @@ pub fn parse_request(buf: &[u8]) -> io::Result<Option<ParsedRequest>> {
     }))
 }
 
-/// 序列化为 HTTP/1.1 响应字节流。总是带 Connection: close 和 Content-Length。
+/// 序列化为 HTTP/1.1 响应字节流。
+///
+/// 自动生成 `Content-Length` 和 `Connection: close` 头部。
+///
+/// # Arguments
+/// * `status` - HTTP 状态码（如 200、404）
+/// * `headers` - 自定义响应头列表
+/// * `body` - 响应体字节
+///
+/// # Returns
+/// 完整的 HTTP 响应字节流，可直接写入 TCP 连接
 pub fn write_response(status: u16, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
     let reason = reason_phrase(status);
     let mut out = Vec::with_capacity(128 + body.len());
@@ -94,10 +111,21 @@ pub fn write_response(status: u16, headers: &[(String, String)], body: &[u8]) ->
     out
 }
 
+/// 创建 InvalidData 类型的 IO 错误。
+///
+/// # Arguments
+/// * `msg` - 错误描述信息
 fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg.to_string())
 }
 
+/// 根据 HTTP 状态码返回对应的 Reason Phrase。
+///
+/// # Arguments
+/// * `s` - HTTP 状态码
+///
+/// # Returns
+/// 对应的 Reason Phrase 字符串，未知状态码返回空字符串
 fn reason_phrase(s: u16) -> &'static str {
     match s {
         200 => "OK",

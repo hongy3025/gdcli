@@ -1,9 +1,22 @@
 //! gdcli install 子命令集成测试。
+//!
+//! 测试 addon 安装功能：
+//! - addon 目录和文件创建
+//! - project.godot 插件启用
+//! - --no-enable 标志
+//! - 重复安装检测
+//! - --force 强制覆盖
+//! - 项目目录验证
+//! - 自动项目根目录检测
 
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+/// 创建临时的 Godot 项目目录（包含 project.godot）。
+///
+/// # Arguments
+/// * `dir` - 目标目录路径
 fn make_godot_project(dir: &std::path::Path) {
     fs::write(
         dir.join("project.godot"),

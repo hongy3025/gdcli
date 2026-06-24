@@ -4,12 +4,27 @@
 //! - .godot/gdapi.json 读取
 //! - HTTP 调用
 //! - stdout/stderr/退出码
+//!
+//! 测试覆盖：
+//! - 成功的 exec 调用（200 响应）
+//! - 带 JSON 数据的 exec 调用
+//! - 404 响应（退出码 2）
+//! - 500 响应（退出码 1）
+//! - 无效 JSON 数据（客户端错误，退出码 2）
+//! - 元数据文件缺失（退出码 3）
 
 use assert_cmd::Command;
 use httpmock::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
+/// 创建带有 gdapi 元数据的临时 Godot 项目目录。
+///
+/// # Arguments
+/// * `meta_json` - gdapi.json 文件内容
+///
+/// # Returns
+/// 临时目录（包含 project.godot 和 .godot/gdapi.json）
 fn setup_fake_project(meta_json: &str) -> TempDir {
     let dir = TempDir::new().unwrap();
     let project_path = dir.path();

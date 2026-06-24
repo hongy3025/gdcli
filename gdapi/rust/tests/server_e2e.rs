@@ -1,4 +1,12 @@
 //! gdapi server 集成测试——不依赖 Godot。
+//!
+//! 测试 ServerCore 的端到端功能：
+//! - 请求接收和响应发送
+//! - 端口探测机制
+//! - 超大请求体处理（413 错误）
+//! - 处理超时（504 错误）
+//!
+//! 这些测试直接使用 ServerCore，不依赖 Godot 引擎。
 
 use gdapi::queue::HttpResponse;
 use gdapi::server::ServerCore;

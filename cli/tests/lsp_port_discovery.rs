@@ -1,10 +1,23 @@
 //! LSP 端口发现集成测试。
+//!
+//! 测试 gdcli 的 LSP 端口发现机制：
+//! - 从 .godot/gdapi.json 读取 lsp_port
+//! - --port 显式指定覆盖元数据
+//! - 无元数据时回退到默认端口 6005
+//! - status 命令也使用相同的端口发现逻辑
 
 use assert_cmd::Command;
 use std::fs;
 use std::time::Duration;
 use tempfile::TempDir;
 
+/// 创建带有 gdapi 元数据的临时 Godot 项目目录。
+///
+/// # Arguments
+/// * `meta_json` - gdapi.json 文件内容
+///
+/// # Returns
+/// 临时目录（包含 project.godot 和 .godot/gdapi.json）
 fn setup_project_with_gdapi_meta(meta_json: &str) -> TempDir {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("project.godot"), "config_version=5\n").unwrap();

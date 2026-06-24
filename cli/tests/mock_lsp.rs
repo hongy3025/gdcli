@@ -1,4 +1,14 @@
 //! 集成测试：mock 一个 LSP TCP 服务器，跑 gdcli 子进程对拍输出。
+//!
+//! 本模块包含 gdcli 与 mock LSP 服务器的集成测试。
+//! 通过模拟 Godot LSP 服务器的行为，验证 gdcli 的各个子命令是否正确工作。
+//!
+//! 测试覆盖：
+//! - rename 命令的人类可读输出
+//! - rename 命令的 JSON 输出（URI 解码）
+//! - diagnostics 命令的推送诊断接收
+//! - 连接失败时的友好提示
+//! - native-symbol 命令的参数冲突检测
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -45,8 +55,17 @@ fn frame(body: &str) -> Vec<u8> {
 
 /// 启动一个 mock LSP TCP 服务器。
 ///
-/// responder：根据请求 method、id、params 返回可选的响应 JSON 字符串。
-/// 在应答 initialize 后，会自动推送一条诊断通知（测试 diagnostics 命令用）。
+/// 创建一个简单的 TCP 服务器，模拟 Godot LSP 的行为。
+/// 接收 LSP 请求，调用 responder 回调生成响应。
+///
+/// # Arguments
+/// * `responder` - 响应回调函数，接收 (method, id, params) 返回可选的响应 JSON
+///
+/// # Returns
+/// 服务器监听的端口号
+///
+/// # 特殊行为
+/// 在应答 initialize 请求后，会自动推送一条诊断通知（用于测试 diagnostics 命令）。
 async fn start_mock<F>(responder: F) -> u16
 where
     F: Fn(&str, i64, &serde_json::Value) -> Option<String> + Send + Sync + 'static,
