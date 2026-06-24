@@ -294,7 +294,7 @@ async fn run() -> Result<()> {
         Cmd::Status => {
             let project_root = project::resolve_project_root(project).ok();
             let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
-            return commands::lsp::handle_status_command(&cli.host, lsp_port, project, cli.json).await;
+            return commands::lsp::handle_status_command(&cli.host, lsp_port, project_root.as_deref(), cli.json).await;
         }
         Cmd::Lsp { ref sub } => {
             let project_root = project::resolve_project_root(project).ok();

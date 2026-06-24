@@ -252,7 +252,13 @@ pub(crate) async fn handle_status_command(
         match crate::gdapi_meta::read(root) {
             Ok(meta) => {
                 let url = format!("http://{}:{}/ping", host, meta.http_port);
-                match ureq::get(&url).timeout(std::time::Duration::from_secs(3)).call() {
+                let mut req = ureq::post(&url).timeout(std::time::Duration::from_secs(3));
+                if let Some(ref token) = meta.token {
+                    if !token.is_empty() {
+                        req = req.set("Authorization", &format!("Bearer {}", token));
+                    }
+                }
+                match req.call() {
                     Ok(_) => (true, meta.http_port, None),
                     Err(e) => (false, meta.http_port, Some(e.to_string())),
                 }
