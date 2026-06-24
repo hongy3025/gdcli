@@ -32,15 +32,16 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if offset > text_len:
 		offset = 0
 
-	var content: String = full_text.substr(offset)
-	var new_offset: int = offset + content.length()
-
-	var raw_lines := content.split("\n")
 	var lines: Array = []
-	for line in raw_lines:
-		if lines.size() >= limit:
-			break
-		lines.append(line)
+	var new_offset: int = offset
+	while lines.size() < limit and new_offset < text_len:
+		var next_newline: int = full_text.find("\n", new_offset)
+		if next_newline == -1:
+			lines.append(full_text.substr(new_offset))
+			new_offset = text_len
+		else:
+			lines.append(full_text.substr(new_offset, next_newline - new_offset))
+			new_offset = next_newline + 1
 
 	var eof: bool = new_offset >= text_len
 
