@@ -56,6 +56,14 @@ pub fn run(args: InstallArgs) -> Result<()> {
     embedded_addon::extract_to(&target)
         .map_err(|e| anyhow!("cannot extract addon to {}: {}", target.display(), e))?;
 
+    // 3b. 用 Cargo.toml 中的版本号覆盖 plugin.cfg（嵌入的模板版本可能是旧的）
+    let plugin_cfg_content = format!(
+        "[plugin]\n\nname=\"gdapi\"\ndescription=\"HTTP API for gdcli to control this Godot editor instance\"\nauthor=\"gdcli\"\nversion=\"{}\"\nscript=\"plugin.gd\"\n",
+        crate::GDAPI_VERSION
+    );
+    fs::write(target.join("plugin.cfg"), plugin_cfg_content)
+        .map_err(|e| anyhow!("cannot write plugin.cfg: {}", e))?;
+
     // 4. 启用插件（修改 project.godot）
     if !args.no_enable {
         enable_plugin_in_project_godot(root)?;

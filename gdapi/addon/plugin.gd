@@ -121,6 +121,22 @@ func get_log_since(since: int, limit: int) -> Array:
 				break
 	return entries
 
+## 从 plugin.cfg 读取版本号
+##
+## 解析插件配置文件中的 version 字段，避免在 GDScript 中硬编码版本号。
+## @return 版本号字符串，读取失败时返回 "unknown"
+func _read_version_from_plugin_cfg() -> String:
+	var cfg_path := "res://addons/gdapi/plugin.cfg"
+	var f := FileAccess.open(cfg_path, FileAccess.READ)
+	if f == null:
+		return "unknown"
+	var content := f.get_as_text()
+	f.close()
+	for line in content.split("\n"):
+		if line.begins_with("version="):
+			return line.substr(8).strip_edges().trim_prefix("\"").trim_suffix("\"")
+	return "unknown"
+
 ## 写入元数据文件
 ##
 ## 将服务器连接信息写入 JSON 文件，供外部工具（如 CLI）发现和连接服务。
@@ -131,12 +147,13 @@ func _write_meta(port: int) -> void:
 	var es := EditorInterface.get_editor_settings()
 	if es and es.has_setting("network/language_server/remote_port"):
 		lsp_port = int(es.get_setting("network/language_server/remote_port"))
+	var version := _read_version_from_plugin_cfg()
 	var meta := {
 		"http_port": port,
 		"lsp_port": lsp_port,
 		"pid": OS.get_process_id(),
 		"started_at": Time.get_datetime_string_from_system(true),
-		"gdapi_version": "0.2.0",
+		"gdapi_version": version,
 	}
 	var f := FileAccess.open(META_PATH, FileAccess.WRITE)
 	if f == null:
