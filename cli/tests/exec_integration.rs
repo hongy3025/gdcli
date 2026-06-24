@@ -243,7 +243,7 @@ fn exec_help_with_path_sends_path_body() {
 }
 
 #[test]
-fn exec_help_missing_path_returns_exit_code_2() {
+fn exec_help_nonexistent_path_returns_exit_code_2() {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/help");
