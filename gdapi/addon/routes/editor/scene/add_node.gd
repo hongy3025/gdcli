@@ -97,16 +97,18 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("向场景中添加新节点") \
-		.desc("在指定场景的父节点下创建新节点，支持设置节点属性（支持 res:// 资源路径自动加载），添加后设置 owner 并保存场景；用于自动化场景构建和批量节点操作") \
-		.param("scene_path", "String", true, "场景路径，可省略 res:// 前缀") \
-		.param("node_type", "String", true, "节点类型名称（如 Sprite2D、Node2D、CharacterBody3D 等）") \
-		.param("node_name", "String", true, "新节点名称") \
-		.param("parent_node_path", "String", false, "父节点路径，默认为 root", "root") \
-		.param("properties", "Dictionary", false, "要设置的节点属性字典，支持 res:// 路径自动加载资源", {}) \
+	return (
+		GdApiRouteDoc.make("向场景中添加新节点")
+		.desc("在指定场景的父节点下创建新节点，支持设置节点属性（支持 res:// 资源路径自动加载），添加后设置 owner 并保存场景；用于自动化场景构建和批量节点操作")
+		.param("scene_path", "String", true, "场景路径，可省略 res:// 前缀")
+		.param("node_type", "String", true, "节点类型名称（如 Sprite2D、Node2D、CharacterBody3D 等）")
+		.param("node_name", "String", true, "新节点名称")
+		.param("parent_node_path", "String", false, "父节点路径，默认为 root", "root")
+		.param("properties", "Dictionary", false, "要设置的节点属性字典，支持 res:// 路径自动加载资源", {})
 		.returns("添加结果", {
 			"ok": "bool",
 			"node_name": "String, 新节点名称",
 			"node_type": "String, 节点类型",
 			"parent": "String, 父节点路径",
 		})
+	)

@@ -61,11 +61,13 @@ func _build_list() -> Array:
 ##
 ## @return GdApiRouteDoc 描述 /help 路由的语义
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("列出可用路由或查询单个路由的帮助文档") \
-		.desc("不带 path 参数返回所有路由的简要列表；带 path 参数返回该路由的完整文档") \
-		.param("path", "String", false, "要查询的路由路径，留空返回全部路由列表", "") \
+	return (
+		GdApiRouteDoc.make("列出可用路由或查询单个路由的帮助文档")
+		.desc("不带 path 参数返回所有路由的简要列表；带 path 参数返回该路由的完整文档")
+		.param("path", "String", false, "要查询的路由路径，留空返回全部路由列表", "")
 		.returns("列表模式返回 routes 数组；详情模式返回 doc 对象", {
 			"ok": "bool, 是否成功",
 			"routes": "Array, 仅列表模式存在",
 			"doc": "Dictionary, 仅详情模式存在",
 		})
+	)

@@ -112,12 +112,14 @@ func test_route_doc_example_fluent() -> void:
 	assert_eq(rd.examples[0], '{"x":1}', "example content")
 
 func test_route_doc_to_dict_complete() -> void:
-	var rd := RouteDoc.make("save scene") \
-		.desc("save to disk") \
-		.param("scene_path", "String", true, "path") \
-		.param("new_path", "String", false, "alt path", "") \
-		.returns("save result", {"ok": "bool", "path": "String"}) \
+	var rd = (
+		RouteDoc.make("save scene")
+		.desc("save to disk")
+		.param("scene_path", "String", true, "path")
+		.param("new_path", "String", false, "alt path", "")
+		.returns("save result", {"ok": "bool", "path": "String"})
 		.example('{"scene_path":"res://a.tscn"}')
+	)
 	var d := rd.to_dict()
 	assert_eq(d.get("summary"), "save scene", "dict summary")
 	assert_eq(d.get("description"), "save to disk", "dict description")
@@ -129,11 +131,13 @@ func test_route_doc_to_dict_complete() -> void:
 	assert_eq(d.get("examples").size(), 1, "dict examples length")
 
 func test_route_doc_to_summary_dict_minimal() -> void:
-	var rd := RouteDoc.make("s") \
-		.desc("long desc") \
-		.param("a", "String", true, "desc-a") \
-		.param("b", "int", false, "desc-b", 0) \
+	var rd = (
+		RouteDoc.make("s")
+		.desc("long desc")
+		.param("a", "String", true, "desc-a")
+		.param("b", "int", false, "desc-b", 0)
 		.returns("r")
+	)
 	var d := rd.to_summary_dict()
 	assert_eq(d.get("summary"), "s", "summary present")
 	assert_eq(d.has("description"), false, "summary dict has no description")

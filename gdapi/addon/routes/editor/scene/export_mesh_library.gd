@@ -103,13 +103,15 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("从场景导出 MeshLibrary 资源") \
-		.desc("从场景中的 MeshInstance3D 节点提取网格和碰撞形状，生成可用于 GridMap 等节点的网格库资源；支持指定要导出的网格项名称，或导出所有网格") \
-		.param("scene_path", "String", true, "源场景路径，可省略 res:// 前缀") \
-		.param("output_path", "String", true, "MeshLibrary 输出路径，可省略 res:// 前缀") \
-		.param("mesh_item_names", "Array", false, "要导出的网格项名称列表，留空则导出所有", []) \
+	return (
+		GdApiRouteDoc.make("从场景导出 MeshLibrary 资源")
+		.desc("从场景中的 MeshInstance3D 节点提取网格和碰撞形状，生成可用于 GridMap 等节点的网格库资源；支持指定要导出的网格项名称，或导出所有网格")
+		.param("scene_path", "String", true, "源场景路径，可省略 res:// 前缀")
+		.param("output_path", "String", true, "MeshLibrary 输出路径，可省略 res:// 前缀")
+		.param("mesh_item_names", "Array", false, "要导出的网格项名称列表，留空则导出所有", [])
 		.returns("导出结果", {
 			"ok": "bool",
 			"output": "String, 输出路径",
 			"item_count": "int, 导出的网格项数",
 		})
+	)

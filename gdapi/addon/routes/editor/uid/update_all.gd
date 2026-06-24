@@ -87,9 +87,10 @@ func _find_files(path: String, extension: String) -> Array:
 
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("批量更新项目中所有资源的 UID") \
-		.desc("扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题") \
-		.param("project_path", "String", false, "要扫描的项目子目录路径，默认为 res://", "res://") \
+	return (
+		GdApiRouteDoc.make("批量更新项目中所有资源的 UID")
+		.desc("扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题")
+		.param("project_path", "String", false, "要扫描的项目子目录路径，默认为 res://", "res://")
 		.returns("处理结果统计", {
 			"ok": "bool",
 			"scenes_processed": "int, 处理的场景文件数",
@@ -98,3 +99,4 @@ func doc() -> GdApiRouteDoc:
 			"scripts_missing_uids": "int, 缺少 UID 的脚本数",
 			"uids_generated": "int, 新生成的 UID 数",
 		})
+	)

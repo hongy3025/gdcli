@@ -51,9 +51,10 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("查询资源文件的 UID") \
-		.desc("读取指定资源文件的 .uid 文件内容，返回 UID 信息；用于资源管理和依赖分析") \
-		.param("file_path", "String", true, "资源文件路径，可省略 res:// 前缀") \
+	return (
+		GdApiRouteDoc.make("查询资源文件的 UID")
+		.desc("读取指定资源文件的 .uid 文件内容，返回 UID 信息；用于资源管理和依赖分析")
+		.param("file_path", "String", true, "资源文件路径，可省略 res:// 前缀")
 		.returns("文件路径、绝对路径和 UID 信息", {
 			"ok": "bool",
 			"file": "String, 资源路径",
@@ -61,3 +62,4 @@ func doc() -> GdApiRouteDoc:
 			"uid": "String, UID 内容（不存在时为空字符串）",
 			"uid_exists": "bool, UID 文件是否存在",
 		})
+	)

@@ -85,13 +85,15 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("为精灵节点加载纹理") \
-		.desc("加载指定场景，找到目标精灵节点（Sprite2D/Sprite3D/TextureRect），设置新纹理并保存场景；用于批量更新精灵纹理或自动化资源替换") \
-		.param("scene_path", "String", true, "场景路径，可省略 res:// 前缀") \
-		.param("node_path", "String", true, "精灵节点路径（如 root/Sprite2D）") \
-		.param("texture_path", "String", true, "纹理资源路径，可省略 res:// 前缀") \
+	return (
+		GdApiRouteDoc.make("为精灵节点加载纹理")
+		.desc("加载指定场景，找到目标精灵节点（Sprite2D/Sprite3D/TextureRect），设置新纹理并保存场景；用于批量更新精灵纹理或自动化资源替换")
+		.param("scene_path", "String", true, "场景路径，可省略 res:// 前缀")
+		.param("node_path", "String", true, "精灵节点路径（如 root/Sprite2D）")
+		.param("texture_path", "String", true, "纹理资源路径，可省略 res:// 前缀")
 		.returns("设置结果", {
 			"ok": "bool",
 			"node": "String, 精灵节点路径",
 			"texture": "String, 纹理资源路径",
 		})
+	)

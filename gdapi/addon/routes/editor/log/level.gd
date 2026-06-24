@@ -39,10 +39,12 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("查询或设置全局日志级别") \
-		.desc("不带 level 参数时查询当前日志级别；带 level 参数时设置新级别。级别可选：debug, info, warn, error") \
-		.param("level", "String", false, "要设置的日志级别（debug/info/warn/error），留空则查询当前级别", "") \
+	return (
+		GdApiRouteDoc.make("查询或设置全局日志级别")
+		.desc("不带 level 参数时查询当前日志级别；带 level 参数时设置新级别。级别可选：debug, info, warn, error")
+		.param("level", "String", false, "要设置的日志级别（debug/info/warn/error），留空则查询当前级别", "")
 		.returns("查询模式返回当前级别；设置模式返回新级别", {
 			"ok": "bool",
 			"level": "String, 当前或新设置的日志级别",
 		})
+	)
