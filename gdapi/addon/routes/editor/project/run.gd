@@ -19,9 +19,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	# 如果未指定场景路径，运行主场景
 	if scene_path.is_empty():
 		EditorInterface.play_main_scene()
-		var plugin = Engine.get_meta("gdapi_plugin", null)
-		if plugin:
-			plugin.log_message("Started playing main scene", "info")
+		req.log_info("Started playing main scene")
 		res.json({"ok": true, "action": "play_main_scene"})
 		return
 
@@ -38,10 +36,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	# 运行指定场景
 	EditorInterface.play_custom_scene(scene_path)
 
-	# 记录日志
-	var plugin = Engine.get_meta("gdapi_plugin", null)
-	if plugin:
-		plugin.log_message("Started playing scene: " + scene_path, "info")
+	req.log_info("Started playing scene: " + scene_path)
 
 	# 返回成功响应
 	res.json({"ok": true, "action": "play_custom_scene", "scene": scene_path})

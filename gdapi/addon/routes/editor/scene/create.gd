@@ -60,10 +60,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	# 重新加载场景到编辑器
 	EditorInterface.reload_scene_from_path(scene_path)
 
-	# 记录日志
-	var plugin = Engine.get_meta("gdapi_plugin", null)
-	if plugin:
-		plugin.log_message("Created scene: " + scene_path, "info")
+	req.log_info("Created scene: " + scene_path)
 
 	# 返回成功响应
 	res.json({

@@ -85,10 +85,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		res.error("failed to save scene: " + str(save_result), "save_failed", 500)
 		return
 
-	# 记录日志
-	var plugin = Engine.get_meta("gdapi_plugin", null)
-	if plugin:
-		plugin.log_message("Added node " + node_name + " (" + node_type + ") to " + scene_path, "info")
+	req.log_info("Added node " + node_name + " (" + node_type + ") to " + scene_path)
 
 	# 返回成功响应
 	res.json({
