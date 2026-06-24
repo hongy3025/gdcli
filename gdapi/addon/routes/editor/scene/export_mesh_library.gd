@@ -1,15 +1,17 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
-func handle(params: Dictionary) -> Dictionary:
-	var scene_path: String = params.get("scene_path", "")
-	var output_path: String = params.get("output_path", "")
-	var mesh_item_names: Array = params.get("mesh_item_names", [])
+func handle(req: GdApiRequest, res: GdApiResponse) -> void:
+	var scene_path: String = req.get_body("scene_path", "")
+	var output_path: String = req.get_body("output_path", "")
+	var mesh_item_names: Array = req.get_body("mesh_item_names", [])
 
 	if scene_path.is_empty():
-		return {"error": "scene_path is required", "code": "missing_param"}
+		res.error("scene_path is required", "missing_param")
+		return
 	if output_path.is_empty():
-		return {"error": "output_path is required", "code": "missing_param"}
+		res.error("output_path is required", "missing_param")
+		return
 
 	if not scene_path.begins_with("res://"):
 		scene_path = "res://" + scene_path
@@ -18,7 +20,8 @@ func handle(params: Dictionary) -> Dictionary:
 
 	var scene := load(scene_path)
 	if not scene:
-		return {"error": "failed to load scene: " + scene_path, "code": "load_failed"}
+		res.error("failed to load scene: " + scene_path, "load_failed", 500)
+		return
 
 	var scene_root := scene.instantiate()
 
@@ -52,7 +55,8 @@ func handle(params: Dictionary) -> Dictionary:
 			item_id += 1
 
 	if item_id == 0:
-		return {"error": "no valid meshes found in scene", "code": "no_meshes"}
+		res.error("no valid meshes found in scene", "no_meshes", 400)
+		return
 
 	var out_dir := output_path.get_base_dir()
 	if out_dir != "res://":
@@ -62,10 +66,11 @@ func handle(params: Dictionary) -> Dictionary:
 
 	var save_result := ResourceSaver.save(mesh_library, output_path)
 	if save_result != OK:
-		return {"error": "failed to save MeshLibrary: " + str(save_result), "code": "save_failed"}
+		res.error("failed to save MeshLibrary: " + str(save_result), "save_failed", 500)
+		return
 
-	return {
+	res.json({
 		"ok": true,
 		"output": output_path,
 		"item_count": item_id,
-	}
+	})

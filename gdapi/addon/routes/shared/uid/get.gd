@@ -1,18 +1,19 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
-func handle(params: Dictionary) -> Dictionary:
-	var file_path: String = params.get("file_path", "")
+func handle(req: GdApiRequest, res: GdApiResponse) -> void:
+	var file_path: String = req.get_body("file_path", "")
 	if file_path.is_empty():
-		return {"error": "file_path is required", "code": "missing_param"}
+		res.error("file_path is required", "missing_param")
+		return
 
-	# 确保路径以 res:// 开头
 	if not file_path.begins_with("res://"):
 		file_path = "res://" + file_path
 
 	var abs_path := ProjectSettings.globalize_path(file_path)
 	if not FileAccess.file_exists(abs_path):
-		return {"error": "file not found: " + file_path, "code": "not_found"}
+		res.error("file not found: " + file_path, "not_found", 404)
+		return
 
 	var uid_path := file_path + ".uid"
 	var uid_content := ""
@@ -25,10 +26,10 @@ func handle(params: Dictionary) -> Dictionary:
 			f.close()
 			uid_exists = true
 
-	return {
+	res.json({
 		"ok": true,
 		"file": file_path,
 		"absolute_path": abs_path,
 		"uid": uid_content,
 		"uid_exists": uid_exists,
-	}
+	})

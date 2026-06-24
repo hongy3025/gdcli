@@ -1,21 +1,19 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
-func handle(params: Dictionary) -> Dictionary:
-	var project_path: String = params.get("project_path", "res://")
+func handle(req: GdApiRequest, res: GdApiResponse) -> void:
+	var project_path: String = req.get_body("project_path", "res://")
 	if not project_path.begins_with("res://"):
 		project_path = "res://" + project_path
 	if not project_path.ends_with("/"):
 		project_path += "/"
 
-	# 查找所有场景文件
 	var scenes := _find_files(project_path, ".tscn")
 	var scripts := _find_files(project_path, ".gd") + _find_files(project_path, ".shader") + _find_files(project_path, ".gdshader")
 
 	var success_count := 0
 	var error_count := 0
 
-	# 重新保存场景以更新 UID
 	for scene_path in scenes:
 		var scene = load(scene_path)
 		if scene:
@@ -27,7 +25,6 @@ func handle(params: Dictionary) -> Dictionary:
 		else:
 			error_count += 1
 
-	# 检查脚本的 UID 文件
 	var missing_uids := 0
 	var generated_uids := 0
 
@@ -35,20 +32,20 @@ func handle(params: Dictionary) -> Dictionary:
 		var uid_path := script_path + ".uid"
 		if not FileAccess.file_exists(uid_path):
 			missing_uids += 1
-			var res = load(script_path)
-			if res:
-				var result := ResourceSaver.save(res, script_path)
+			var res_load = load(script_path)
+			if res_load:
+				var result := ResourceSaver.save(res_load, script_path)
 				if result == OK:
 					generated_uids += 1
 
-	return {
+	res.json({
 		"ok": true,
 		"scenes_processed": scenes.size(),
 		"scenes_saved": success_count,
 		"scenes_errors": error_count,
 		"scripts_missing_uids": missing_uids,
 		"uids_generated": generated_uids,
-	}
+	})
 
 func _find_files(path: String, extension: String) -> Array:
 	var files := []
