@@ -45,6 +45,7 @@ var _log_level: int = LOG_INFO
 ## 3. 初始化路由系统并扫描注册所有路由处理器
 ## 4. 写入元数据文件供外部工具发现服务
 ## 5. 启用进程回调以处理请求轮询
+## 6. 连接文件系统变化信号，实现路由热重载
 func _enter_tree() -> void:
 	# 注册自身到 Engine meta，供路由访问
 	Engine.set_meta("gdapi_plugin", self)
@@ -59,7 +60,21 @@ func _enter_tree() -> void:
 	_router.scan("res://addons/gdapi/routes")
 	_write_meta(port, token)
 	set_process(true)
+	
+	# 连接文件系统变化信号，实现路由热重载
+	var fs = EditorInterface.get_resource_filesystem()
+	fs.filesystem_changed.connect(_on_filesystem_changed)
+	
 	print("[gdapi] listening on 127.0.0.1:%d (%d routes)" % [port, _router.count()])
+
+## 文件系统变化回调
+##
+## 当 Godot 编辑器检测到文件系统变化时调用。
+## 重新扫描路由目录，更新路由表，实现路由热重载。
+func _on_filesystem_changed() -> void:
+	if _router:
+		_router.scan("res://addons/gdapi/routes")
+		print("[gdapi] routes reloaded (%d routes)" % _router.count())
 
 ## 插件卸载清理
 ##
