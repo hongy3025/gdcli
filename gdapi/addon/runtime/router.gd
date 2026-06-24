@@ -15,11 +15,15 @@ const GdApiResponse := preload("res://addons/gdapi/runtime/response.gd")
 const BuiltinPing := preload("res://addons/gdapi/runtime/builtin_ping.gd")
 ## 内置路由列表处理器
 const BuiltinRoutes := preload("res://addons/gdapi/runtime/builtin_routes.gd")
+## 内置帮助路由处理器
+const BuiltinHelp := preload("res://addons/gdapi/runtime/builtin_help.gd")
 
 ## 路由注册表，键为路径（如 "editor/scene/save"），值为处理器脚本
 var _routes: Dictionary = {}
 ## 内置路由列表处理器实例
 var _builtin_routes_handler: BuiltinRoutes
+## 内置帮助路由处理器实例
+var _builtin_help_handler: BuiltinHelp
 
 ## 扫描并注册路由处理器
 ##
@@ -30,19 +34,28 @@ func scan(root_dir: String) -> void:
 	_routes.clear()
 	_routes["ping"] = BuiltinPing
 	_builtin_routes_handler = BuiltinRoutes.new()
+	_builtin_help_handler = BuiltinHelp.new()
 	_scan_dir(root_dir + "/editor", "")
 	_scan_dir(root_dir + "/shared", "")
 	var names: Array = _routes.keys()
 	names.append("routes")
+	names.append("help")
 	names.sort()
 	_builtin_routes_handler.set_route_names(names)
+
+	# 把所有路由（含内置）注入到 help handler
+	var all_routes: Dictionary = _routes.duplicate()
+	all_routes["routes"] = BuiltinRoutes
+	all_routes["help"] = BuiltinHelp
+	_builtin_help_handler.set_routes(all_routes)
 
 ## 获取已注册路由总数
 ##
 ## 包含内置的 ping 路由。
 ## @return 路由数量
 func count() -> int:
-	return _routes.size() + 1
+	# _routes 已含 ping；额外两个内置路由：routes + help
+	return _routes.size() + 2
 
 ## 递归扫描目录注册路由
 ##
@@ -99,6 +112,13 @@ func dispatch(req_dict: Dictionary, server) -> void:
 		var req := GdApiRequest.new(req_dict)
 		var res := GdApiResponse.new(server, id)
 		_builtin_routes_handler.handle(req, res)
+		return
+
+	# 处理内置 help 路由
+	if key == "help":
+		var req_help := GdApiRequest.new(req_dict)
+		var res_help := GdApiResponse.new(server, id)
+		_builtin_help_handler.handle(req_help, res_help)
 		return
 
 	# 查找注册的路由处理器
