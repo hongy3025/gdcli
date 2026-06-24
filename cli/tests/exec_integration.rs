@@ -177,3 +177,140 @@ fn exec_missing_meta_file_fails() {
         .code(3)
         .stderr(predicates::str::contains("gdapi not running"));
 }
+
+#[test]
+fn exec_help_list_passes_through_server_json() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/help")
+            .json_body_obj(&serde_json::json!({}));
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"ok":true,"routes":[{"path":"ping","summary":"健康检查","params":[]}]}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["exec", "help", "--project", dir.path().to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(r#""routes""#))
+        .stdout(predicates::str::contains(r#""path":"ping""#));
+
+    mock.assert();
+}
+
+#[test]
+fn exec_help_with_path_sends_path_body() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/help")
+            .json_body_obj(&serde_json::json!({"path": "editor/scene/save"}));
+        then.status(200)
+            .body(r#"{"ok":true,"doc":{"path":"editor/scene/save","summary":"保存场景"}}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "help",
+            "editor/scene/save",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(r#""doc""#));
+
+    mock.assert();
+}
+
+#[test]
+fn exec_help_missing_path_returns_exit_code_2() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/help");
+        then.status(404).body(r#"{"ok":false,"code":"not_found","msg":"route not found: foo"}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "help",
+            "foo",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("HTTP 404"));
+}
+
+#[test]
+fn exec_help_with_data_flag_is_rejected() {
+    let dir = setup_fake_project(
+        r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#,
+    );
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "help",
+            "--data",
+            "{}",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("--data"));
+}
+
+#[test]
+fn exec_non_help_with_positional_arg_is_rejected() {
+    let dir = setup_fake_project(
+        r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#,
+    );
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "ping",
+            "unexpected",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("positional"));
+}

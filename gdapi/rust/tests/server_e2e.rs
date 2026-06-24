@@ -19,7 +19,7 @@ use std::time::Duration;
 fn server_accepts_request_and_routes_to_poll_send() {
     let mut server = ServerCore::new();
     let port = server.start(17890).expect("start should succeed");
-    assert!(port >= 17890 && port < 17890 + 64);
+    assert!((17890..17890 + 64).contains(&port));
 
     let handle = thread::spawn(move || {
         let url = format!("http://127.0.0.1:{}/ping", port);
@@ -38,7 +38,7 @@ fn server_accepts_request_and_routes_to_poll_send() {
         if let Some(req) = server.poll_request_raw() {
             assert_eq!(req.method, "POST");
             assert_eq!(req.path, "/ping");
-            assert!(req.body.len() > 0);
+            assert!(!req.body.is_empty());
             let _ = req.resp_tx.send(HttpResponse {
                 status: 200,
                 headers: vec![("content-type".into(), "application/json".into())],
