@@ -24,30 +24,44 @@ var _routes: Dictionary = {}
 var _builtin_routes_handler: BuiltinRoutes
 ## 内置帮助路由处理器实例
 var _builtin_help_handler: BuiltinHelp
+## 路由文件修改时间记录，键为文件路径，值为修改时间戳
+var _file_mtimes: Dictionary = {}
+## 是否需要更新内置路由处理器（路由列表变化时触发）
+var _needs_update: bool = false
 
 ## 扫描并注册路由处理器
 ##
-## 清空现有路由，注册内置路由，然后递归扫描指定目录下的所有 .gd 文件。
-## 扫描范围包括 editor 和 shared 两个子目录，分别对应编辑器专用和共享路由。
+## 使用 mtime 检查文件变化，只有变化的文件才重新加载。
+## 首次扫描或强制刷新时加载所有文件。
 ## @param root_dir 路由处理器根目录路径
-func scan(root_dir: String) -> void:
-	_routes.clear()
+## @param force 是否强制全量扫描（忽略 mtime 检查）
+func scan(root_dir: String, force: bool = false) -> void:
+	if force:
+		_routes.clear()
+		_file_mtimes.clear()
+		_needs_update = true
+	
 	_routes["ping"] = BuiltinPing
-	_builtin_routes_handler = BuiltinRoutes.new()
-	_builtin_help_handler = BuiltinHelp.new()
-	_scan_dir(root_dir + "/editor", "")
-	_scan_dir(root_dir + "/shared", "")
-	var names: Array = _routes.keys()
-	names.append("routes")
-	names.append("help")
-	names.sort()
-	_builtin_routes_handler.set_route_names(names)
+	_needs_update = false
+	
+	_scan_dir_with_mtime(root_dir + "/editor", "", force)
+	_scan_dir_with_mtime(root_dir + "/shared", "", force)
+	
+	if _needs_update:
+		_builtin_routes_handler = BuiltinRoutes.new()
+		_builtin_help_handler = BuiltinHelp.new()
+		var names: Array = _routes.keys()
+		names.append("routes")
+		names.append("help")
+		names.sort()
+		_builtin_routes_handler.set_route_names(names)
 
-	# 把所有路由（含内置）注入到 help handler
-	var all_routes: Dictionary = _routes.duplicate()
-	all_routes["routes"] = BuiltinRoutes
-	all_routes["help"] = BuiltinHelp
-	_builtin_help_handler.set_routes(all_routes)
+		# 把所有路由（含内置）注入到 help handler
+		var all_routes: Dictionary = _routes.duplicate()
+		all_routes["routes"] = BuiltinRoutes
+		all_routes["help"] = BuiltinHelp
+		_builtin_help_handler.set_routes(all_routes)
+		_needs_update = false
 
 ## 获取已注册路由总数
 ##
@@ -57,14 +71,15 @@ func count() -> int:
 	# _routes 已含 ping；额外两个内置路由：routes + help
 	return _routes.size() + 2
 
-## 递归扫描目录注册路由
+## 递归扫描目录注册路由（带 mtime 检查）
 ##
-## 递归遍历目录，将所有 .gd 文件注册为路由处理器。
+## 递归遍历目录，检查文件修改时间，只有变化的文件才重新加载。
 ## 文件名（去掉 .gd 后缀）作为路由名称，子目录名作为路径前缀。
 ## 以 _ 开头的文件会被忽略。
 ## @param dir_path 要扫描的目录路径
 ## @param prefix 路径前缀（用于构建完整路由路径）
-func _scan_dir(dir_path: String, prefix: String) -> void:
+## @param force 是否强制全量扫描
+func _scan_dir_with_mtime(dir_path: String, prefix: String, force: bool) -> void:
 	var dir := DirAccess.open(dir_path)
 	if dir == null:
 		return
@@ -77,13 +92,22 @@ func _scan_dir(dir_path: String, prefix: String) -> void:
 		var full := dir_path + "/" + name
 		if dir.current_is_dir():
 			var sub_prefix := (prefix + "/" + name) if prefix != "" else name
-			_scan_dir(full, sub_prefix)
+			_scan_dir_with_mtime(full, sub_prefix, force)
 		elif name.ends_with(".gd") and not name.begins_with("_"):
 			var route_name := name.substr(0, name.length() - 3)
 			var key := (prefix + "/" + route_name) if prefix != "" else route_name
-			var script: Script = load(full) as Script
-			if script != null:
-				_routes[key] = script
+			
+			# 检查文件修改时间
+			var mtime := FileAccess.get_modified_time(full)
+			var old_mtime: int = _file_mtimes.get(full, 0)
+			
+			if force or mtime != old_mtime:
+				# 文件变化或强制刷新，重新加载
+				var script: Script = load(full) as Script
+				if script != null:
+					_routes[key] = script
+					_file_mtimes[full] = mtime
+					_needs_update = true
 		name = dir.get_next()
 	dir.list_dir_end()
 
