@@ -7,9 +7,9 @@
 ## 当前状态
 
 ```
-测试：113/113 全部通过
+测试：136/136 全部通过
 分支：main（已推送）
-Tag：v0.2.0
+Tag：v0.3.0（计划）
 ```
 
 ### 已完成的功能
@@ -19,10 +19,20 @@ Tag：v0.2.0
 | `gdcli install` — 一键安装 gdapi addon | ✅ |
 | `gdcli exec` — HTTP 调用 Godot 编辑器 | ✅ |
 | `gdcli lsp` — LSP 命令（自动端口发现） | ✅ |
+| `gdcli status` — 双连通性检测（HTTP + LSP） | ✅ |
 | 14 个 gdapi 路由（godot-mcp 迁移） | ✅ |
 | 项目根自动检测 | ✅ |
 | debug_output 滚动缓冲区 | ✅ |
 | main.rs 拆分到 commands/lsp.rs | ✅ |
+| HTTP header 注入防护 | ✅ |
+| HTTP 边界测试补充 | ✅ |
+| project.godot 解析健壮性 | ✅ |
+| PackedByteArray 构造优化 | ✅ |
+| dead_code 警告清理 | ✅ |
+| 版本号统一管理 | ✅ |
+| LSP 端口自动重映射 | ✅ |
+| gdapi 路由热重载（mtime 检查） | ✅ |
+| gdapi 认证机制（token） | ✅ |
 
 ---
 
@@ -30,33 +40,40 @@ Tag：v0.2.0
 
 ### 高优先级
 
-| # | 内容 | 来源 | 说明 |
-|---|---|---|---|
-| 1 | **实际 Godot 端到端验证** | 阶段 1 | 在真实 Godot 4.3+ 项目中跑 `gdcli install` + `gdcli exec ping` + `gdcli exec routes`。需要本地安装 Godot。 |
-| 2 | **CI/CD 流水线** | 阶段 5 | GitHub Actions：自动测试 + 全平台构建（Windows/macOS/Linux）+ release 发布。参考设计规格 §10.2。 |
-| 3 | **HTTP header 注入防护** | 阶段 1 代码审查 | `gdapi/rust/src/http.rs` 的 `write_response` 未检查 header value 中的 `\r\n`，存在 header 注入风险。内部使用场景风险低，但应修复。 |
+| # | 内容 | 来源 | 说明 | 状态 |
+|---|---|---|---|---|
+| 1 | **实际 Godot 端到端验证** | 阶段 1 | 在真实 Godot 4.3+ 项目中跑 `gdcli install` + `gdcli exec ping` + `gdcli exec routes`。需要本地安装 Godot。 | ⏳ 待验证 |
+| 2 | **CI/CD 流水线** | 阶段 5 | GitHub Actions：自动测试 + 全平台构建（Windows/macOS/Linux）+ release 发布。参考设计规格 §10.2。 | ⏳ 待实现 |
+| 3 | **HTTP header 注入防护** | 阶段 1 代码审查 | `gdapi/rust/src/http.rs` 的 `write_response` 未检查 header value 中的 `\r\n`，存在 header 注入风险。内部使用场景风险低，但应修复。 | ✅ 已完成 |
 
 ### 中优先级
 
-| # | 内容 | 来源 | 说明 |
-|---|---|---|---|
-| 4 | **gdcli launch 命令** | 设计规格 §7.3 | 新增 `gdcli launch <project>` 启动 Godot 编辑器。godot-mcp 的 `launch_editor` 未迁移，因为 gdapi 在编辑器未启动时不可达。但作为 gdcli 顶层命令有意义。 |
-| 5 | **LSP 端口自动重映射** | 设计规格 §1 | 多 Godot 实例并存时，LSP 端口冲突。当前靠 `--project` 区分。未来可让 gdapi 自动探测可用 LSP 端口并写入 `.godot/gdapi.json`。 |
-| 6 | **gdapi 路由热重载** | 设计规格 §5.7 | 修改路由脚本后需要重启编辑器才能生效。可实现文件监听 + 自动重新扫描。 |
-| 7 | **gdapi 认证机制** | 设计规格 §4.4 | HTTP server 绑定 127.0.0.1 但无认证。可添加简单的 token 认证（gdcli install 时生成随机 token 写入 `.godot/gdapi.json`）。 |
-| 8 | **HTTP 边界测试补充** | 阶段 1 代码审查 | 缺少：header value 为空、Content-Length 带前导零、大写 CONTENT-LENGTH、method/path 缺失、未知状态码等测试场景。 |
-| 9 | **project.godot 解析健壮性** | 阶段 2 代码审查 | `install.rs` 的 `enable_plugin_in_project_godot` 对边界格式容错不足（如空数组、带空格的值、多个 enabled 行）。 |
-| 10 | **gdcli lsp 无子命令帮助** | 阶段 3 代码审查 | `gdcli lsp` 不带子命令时应显示帮助信息，当前会报错。 |
+| # | 内容 | 来源 | 说明 | 状态 |
+|---|---|---|---|---|
+| 4 | **gdcli launch 命令** | 设计规格 §7.3 | 新增 `gdcli launch <project>` 启动 Godot 编辑器。godot-mcp 的 `launch_editor` 未迁移，因为 gdapi 在编辑器未启动时不可达。但作为 gdcli 顶层命令有意义。 | ⏳ 待实现 |
+| 5 | **LSP 端口自动重映射** | 设计规格 §1 | 多 Godot 实例并存时，LSP 端口冲突。当前靠 `--project` 区分。未来可让 gdapi 自动探测可用 LSP 端口并写入 `.godot/gdapi.json`。 | ✅ 已完成 |
+| 6 | **gdapi 路由热重载** | 设计规格 §5.7 | 修改路由脚本后需要重启编辑器才能生效。可实现文件监听 + 自动重新扫描。 | ✅ 已完成 |
+| 7 | **gdapi 认证机制** | 设计规格 §4.4 | HTTP server 绑定 127.0.0.1 但无认证。可添加简单的 token 认证（gdcli install 时生成随机 token 写入 `.godot/gdapi.json`）。 | ✅ 已完成 |
+| 8 | **HTTP 边界测试补充** | 阶段 1 代码审查 | 缺少：header value 为空、Content-Length 带前导零、大写 CONTENT-LENGTH、method/path 缺失、未知状态码等测试场景。 | ✅ 已完成 |
+| 9 | **project.godot 解析健壮性** | 阶段 2 代码审查 | `install.rs` 的 `enable_plugin_in_project_godot` 对边界格式容错不足（如空数组、带空格的值、多个 enabled 行）。 | ✅ 已完成 |
+| 10 | **gdcli lsp 无子命令帮助** | 阶段 3 代码审查 | `gdcli lsp` 不带子命令时应显示帮助信息，当前会报错。 | ✅ 已完成 |
 
 ### 低优先级
 
-| # | 内容 | 来源 | 说明 |
-|---|---|---|---|
-| 11 | **PackedByteArray 构造优化** | 阶段 1 代码审查 | `lib.rs` 中逐字节 push/get，可用 `PackedByteArray::from(&slice)` 替代。 |
-| 12 | **gdextension 补充 arm64 Linux** | 阶段 1 代码审查 | `gdapi.gdextension` 缺少 `linux.debug.arm64` 条目。 |
-| 13 | **版本号统一管理** | 阶段 2 | Cargo.toml、plugin.cfg、plugin.gd 中的版本号分散，可提取为单一来源。 |
-| 14 | **dead_code 警告清理** | 全局 | `embedded_addon.rs` 中 `addon_dir()` 和 `file_list()` 未被调用，有 dead_code 警告。 |
-| 15 | **clippy 警告清理** | 全局 | `lsp/client.rs`、`lsp/transport.rs` 中有 7 个 clippy 警告（冗余闭包、手动 find 等）。 |
+| # | 内容 | 来源 | 说明 | 状态 |
+|---|---|---|---|---|
+| 11 | **PackedByteArray 构造优化** | 阶段 1 代码审查 | `lib.rs` 中逐字节 push/get，可用 `PackedByteArray::from(&slice)` 替代。 | ✅ 已完成 |
+| 12 | **gdextension 补充 arm64 Linux** | 阶段 1 代码审查 | `gdapi.gdextension` 缺少 `linux.debug.arm64` 条目。 | ⏳ 待实现 |
+| 13 | **版本号统一管理** | 阶段 2 | Cargo.toml、plugin.cfg、plugin.gd 中的版本号分散，可提取为单一来源。 | ✅ 已完成 |
+| 14 | **dead_code 警告清理** | 全局 | `embedded_addon.rs` 中 `addon_dir()` 和 `file_list()` 未被调用，有 dead_code 警告。 | ✅ 已完成 |
+| 15 | **clippy 警告清理** | 全局 | `lsp/client.rs`、`lsp/transport.rs` 中有 7 个 clippy 警告（冗余闭包、手动 find 等）。 | ✅ 已完成 |
+
+### 新增功能
+
+| 内容 | 说明 | 状态 |
+|---|---|---|
+| **gdcli status 双检测** | 扩展 status 命令同时检测 HTTP 和 LSP 连通性 | ✅ 已完成 |
+| **路由热重载优化** | 使用 mtime 检查，只有变化的文件才重新加载 | ✅ 已完成 |
 
 ---
 
