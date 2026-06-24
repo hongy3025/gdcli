@@ -22,3 +22,15 @@ extends RefCounted
 ## @param _res 响应对象，用于发送响应
 func handle(_req: GdApiRequest, _res: GdApiResponse) -> void:
 	push_error("handler not implemented")
+
+## 路由帮助文档预加载（供 doc() 默认实现使用）
+const _RouteDoc := preload("res://addons/gdapi/runtime/route_doc.gd")
+
+## 返回该路由的帮助文档
+##
+## 子类可选重载：未重载时返回 summary 为空的占位文档，路由仍可正常工作，
+## 仅在 /help 列表中显示为空描述。
+##
+## @return GdApiRouteDoc 实例
+func doc() -> _RouteDoc:
+	return _RouteDoc.make("")
