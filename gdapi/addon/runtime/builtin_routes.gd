@@ -23,3 +23,12 @@ func set_route_names(names: Array) -> void:
 ## @param res 响应对象
 func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 	res.json({"ok": true, "routes": _route_names})
+
+## 返回该路由的帮助文档
+func doc() -> GdApiRouteDoc:
+	return GdApiRouteDoc.make("列出所有已注册的路由名称") \
+		.desc("返回当前 gdapi 运行时所有可调用路由的扁平名称数组；用于客户端发现 API 端点") \
+		.returns("路由名数组（含内置 ping / routes / help）", {
+			"ok": "bool",
+			"routes": "Array[String], 按字母序排列的路由路径",
+		})

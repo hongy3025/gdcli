@@ -13,8 +13,18 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 ## @param _req 请求对象（未使用）
 ## @param res 响应对象
 func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
-    res.json({
-        "ok": true,
-        "gdapi_version": "0.2.0",
-        "editor_version": Engine.get_version_info().get("string", ""),
-    })
+	res.json({
+		"ok": true,
+		"gdapi_version": "0.2.0",
+		"editor_version": Engine.get_version_info().get("string", ""),
+	})
+
+## 返回该路由的帮助文档
+func doc() -> GdApiRouteDoc:
+	return GdApiRouteDoc.make("健康检查，返回 pong 与版本信息") \
+		.desc("用于验证 API 服务是否正常运行；常用于连接测试和监控探针") \
+		.returns("固定响应", {
+			"ok": "bool, 固定为 true",
+			"gdapi_version": "String, gdapi 插件版本",
+			"editor_version": "String, Godot 编辑器版本",
+		})
