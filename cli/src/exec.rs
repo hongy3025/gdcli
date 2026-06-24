@@ -42,7 +42,9 @@ pub fn run(
     args: &[String],
     data: Option<&str>,
     timeout_secs: u64,
+    json_mode: bool,
 ) -> Result<i32> {
+    let _ = json_mode; // 临时占位，后续任务会真正接入
     // 1. 读 .godot/gdapi.json
     let meta = match gdapi_meta::read(project) {
         Ok(m) => m,

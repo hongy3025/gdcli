@@ -289,7 +289,10 @@ async fn run() -> Result<()> {
         Cmd::Exec { ref command, ref args, ref data, timeout } => {
             let project_root = project::resolve_project_root(project)
                 .map_err(|e| anyhow::anyhow!(e))?;
-            let code = exec::run(&project_root, command, args, data.as_deref(), timeout)?;
+            let code = exec::run(
+                &project_root, command, args, data.as_deref(), timeout,
+                cli.json,
+            )?;
             std::process::exit(code);
         }
         Cmd::Status => {
