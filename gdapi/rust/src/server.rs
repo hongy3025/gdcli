@@ -8,15 +8,17 @@
 //! - 响应通过 oneshot 通道从主线程返回到异步线程
 //! - 支持端口探测：从指定端口开始逐个尝试，直到找到可用端口
 
-use crate::http::{parse_request, write_response, ParsedRequest};
+use crate::http::{
+    parse_request, validate_response_header, write_response, ParsedRequest, MAX_HEADER_BYTES,
+};
 use crate::queue::{HttpResponse, PendingMap, PendingRequest};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Semaphore};
 
 /// 端口探测上限：从 port_hint 开始最多尝试 64 个端口。
 const PORT_PROBE_LIMIT: u16 = 64;
@@ -24,8 +26,23 @@ const PORT_PROBE_LIMIT: u16 = 64;
 /// 默认请求处理超时时间（毫秒）。
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
+/// 请求处理超时时间下限（毫秒）。
+const MIN_HANDLER_TIMEOUT_MS: u64 = 100;
+
+/// 请求处理超时时间上限（毫秒）。
+const MAX_HANDLER_TIMEOUT_MS: u64 = 300_000;
+
+/// 同时处理的连接数上限。
+const MAX_CONNECTIONS: usize = 128;
+
 /// 接受连接后的读取超时时间（毫秒）。
 const ACCEPT_READ_TIMEOUT_MS: u64 = 5_000;
+
+/// 响应写入和关闭连接的超时时间（毫秒）。
+const RESPONSE_WRITE_TIMEOUT_MS: u64 = 5_000;
+
+/// accept 失败后的短退避，避免持续错误时空转。
+const ACCEPT_ERROR_BACKOFF_MS: u64 = 50;
 
 /// HTTP 服务器核心结构体。
 ///
@@ -47,6 +64,8 @@ pub struct ServerCore {
     actual_port: Option<u16>,
     /// 期望的认证 token（None 表示不校验）
     expected_token: Option<String>,
+    /// 请求处理超时时间（毫秒），用于连接等待和 pending 清理。
+    handler_timeout_ms: u64,
 }
 
 impl Default for ServerCore {
@@ -65,6 +84,7 @@ impl ServerCore {
             pending: PendingMap::default(),
             actual_port: None,
             expected_token: None,
+            handler_timeout_ms: DEFAULT_TIMEOUT_MS,
         }
     }
 
@@ -97,7 +117,9 @@ impl ServerCore {
         // bind 同步完成（在 rt.block_on 中），便于上报实际端口
         let listener = rt.block_on(async move {
             for offset in 0..PORT_PROBE_LIMIT {
-                let port = port_hint + offset;
+                let Some(port) = port_hint.checked_add(offset) else {
+                    break;
+                };
                 match TcpListener::bind(("127.0.0.1", port)).await {
                     Ok(l) => return Ok((l, port)),
                     Err(_) => continue,
@@ -111,14 +133,21 @@ impl ServerCore {
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
         // 从环境变量读取超时配置，支持自定义
-        let timeout_ms: u64 = std::env::var("GDAPI_HANDLER_TIMEOUT_MS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(DEFAULT_TIMEOUT_MS);
+        let timeout_ms = handler_timeout_from_env();
+        self.handler_timeout_ms = timeout_ms;
 
         let id_counter = Arc::new(AtomicU64::new(1));
         let expected_token = self.expected_token.clone();
-        rt.spawn(accept_loop(listener, in_tx, id_counter, timeout_ms, shutdown_rx, expected_token));
+        let connection_limit = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+        rt.spawn(accept_loop(
+            listener,
+            in_tx,
+            id_counter,
+            timeout_ms,
+            shutdown_rx,
+            expected_token,
+            connection_limit,
+        ));
 
         self.runtime = Some(rt);
         self.shutdown_tx = Some(shutdown_tx);
@@ -161,6 +190,16 @@ impl ServerCore {
         rx.try_recv().ok()
     }
 
+    fn cleanup_expired_pending(&mut self) {
+        let _ = self.pending.remove_expired(Instant::now());
+    }
+
+    /// 返回当前待响应请求数量，并先清理已超时的 pending 项。
+    pub fn pending_len(&mut self) -> usize {
+        self.cleanup_expired_pending();
+        self.pending.len()
+    }
+
     /// 发送 HTTP 响应（原始数据格式）。
     ///
     /// # Arguments
@@ -174,10 +213,22 @@ impl ServerCore {
         status: u16,
         headers: Vec<(String, String)>,
         body: Vec<u8>,
-    ) {
-        if let Some(tx) = self.pending.take(id) {
-            let _ = tx.send(HttpResponse { status, headers, body });
+    ) -> Result<(), String> {
+        self.cleanup_expired_pending();
+        if !(100..=599).contains(&status) {
+            return Err(format!("invalid HTTP status: {}", status));
         }
+        for (k, v) in &headers {
+            validate_response_header(k, v).map_err(|e| e.to_string())?;
+        }
+        if let Some(tx) = self.pending.take(id) {
+            let _ = tx.send(HttpResponse {
+                status,
+                headers,
+                body,
+            });
+        }
+        Ok(())
     }
 
     /// 供 GdApiServer 调用：poll 并把 resp_tx 转入 pending map，返回不含 resp_tx 的视图。
@@ -185,9 +236,15 @@ impl ServerCore {
     /// 将内部的 PendingRequest 转换为 GDScript 友好的 RequestView，
     /// 同时将响应通道存入 pending 映射表，等待后续 send_response 调用。
     pub fn poll_for_godot(&mut self) -> Option<RequestView> {
+        let now = Instant::now();
+        let _ = self.pending.remove_expired(now);
         let req = self.poll_request_raw()?;
         let id = req.id;
-        self.pending.insert(id, req.resp_tx);
+        self.pending.insert(
+            id,
+            req.resp_tx,
+            now + Duration::from_millis(self.handler_timeout_ms),
+        );
         Some(RequestView {
             id,
             method: req.method,
@@ -196,6 +253,28 @@ impl ServerCore {
             body: req.body,
         })
     }
+}
+
+async fn write_response_with_timeout(
+    stream: &mut TcpStream,
+    status: u16,
+    headers: &[(String, String)],
+    body: &[u8],
+) {
+    let bytes = write_response(status, headers, body);
+    let _ = tokio::time::timeout(Duration::from_millis(RESPONSE_WRITE_TIMEOUT_MS), async {
+        stream.write_all(&bytes).await?;
+        stream.shutdown().await
+    })
+    .await;
+}
+
+fn handler_timeout_from_env() -> u64 {
+    std::env::var("GDAPI_HANDLER_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|v| (MIN_HANDLER_TIMEOUT_MS..=MAX_HANDLER_TIMEOUT_MS).contains(v))
+        .unwrap_or(DEFAULT_TIMEOUT_MS)
 }
 
 /// 给 GdApiServer 用的请求视图：剥离了 resp_tx，剩下纯数据。
@@ -224,19 +303,38 @@ async fn accept_loop(
     timeout_ms: u64,
     mut shutdown_rx: oneshot::Receiver<()>,
     expected_token: Option<String>,
+    connection_limit: Arc<Semaphore>,
 ) {
     loop {
         tokio::select! {
             _ = &mut shutdown_rx => break,
             accept = listener.accept() => {
                 match accept {
-                    Ok((stream, _)) => {
+                    Ok((mut stream, _)) => {
+                        let Ok(permit) = connection_limit.clone().try_acquire_owned() else {
+                            write_response_with_timeout(
+                                &mut stream,
+                                503,
+                                &[],
+                                b"{\"error\":\"too many connections\"}",
+                            )
+                            .await;
+                            continue;
+                        };
                         let tx = in_tx.clone();
                         let id_c = id_counter.clone();
                         let token = expected_token.clone();
-                        tokio::spawn(handle_connection(stream, tx, id_c, timeout_ms, token));
+                        tokio::spawn(async move {
+                            let _permit = permit;
+                            handle_connection(stream, tx, id_c, timeout_ms, token).await;
+                        });
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        tokio::select! {
+                            _ = &mut shutdown_rx => break,
+                            _ = tokio::time::sleep(Duration::from_millis(ACCEPT_ERROR_BACKOFF_MS)) => {}
+                        }
+                    }
                 }
             }
         }
@@ -259,24 +357,27 @@ async fn handle_connection(
 ) {
     let mut buf = Vec::with_capacity(8192);
     // 带超时的请求读取
-    let read_result = tokio::time::timeout(
-        Duration::from_millis(ACCEPT_READ_TIMEOUT_MS),
-        async {
-            loop {
-                let mut chunk = [0u8; 4096];
-                let n = stream.read(&mut chunk).await?;
-                if n == 0 {
-                    return Ok::<(), std::io::Error>(());
-                }
-                buf.extend_from_slice(&chunk[..n]);
-                match parse_request(&buf) {
-                    Ok(Some(_)) => return Ok(()),
-                    Ok(None) => continue,
-                    Err(e) => return Err(e),
-                }
+    let read_result = tokio::time::timeout(Duration::from_millis(ACCEPT_READ_TIMEOUT_MS), async {
+        loop {
+            let mut chunk = [0u8; 4096];
+            let n = stream.read(&mut chunk).await?;
+            if n == 0 {
+                return Ok::<(), std::io::Error>(());
             }
-        },
-    )
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.len() > MAX_HEADER_BYTES && !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "HTTP headers exceed 32 KiB",
+                ));
+            }
+            match parse_request(&buf) {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    })
     .await;
 
     // 处理读取结果
@@ -284,8 +385,7 @@ async fn handle_connection(
         Ok(Ok(())) => parse_request(&buf),
         Ok(Err(e)) => Err(e),
         Err(_) => {
-            let _ = stream
-                .write_all(&write_response(400, &[], b"{\"error\":\"read timeout\"}"))
+            write_response_with_timeout(&mut stream, 400, &[], b"{\"error\":\"read timeout\"}")
                 .await;
             return;
         }
@@ -295,29 +395,40 @@ async fn handle_connection(
     let req: ParsedRequest = match parsed {
         Ok(Some(r)) => r,
         Ok(None) => {
-            let _ = stream
-                .write_all(&write_response(400, &[], b"{\"error\":\"incomplete request\"}"))
-                .await;
+            write_response_with_timeout(
+                &mut stream,
+                400,
+                &[],
+                b"{\"error\":\"incomplete request\"}",
+            )
+            .await;
             return;
         }
         Err(e) => {
-            let status = if e.to_string().contains("16 MiB") { 413 } else { 400 };
+            let status = if e.to_string().contains("16 MiB") {
+                413
+            } else {
+                400
+            };
             let body = format!("{{\"error\":{:?}}}", e.to_string());
-            let _ = stream.write_all(&write_response(status, &[], body.as_bytes())).await;
+            write_response_with_timeout(&mut stream, status, &[], body.as_bytes()).await;
             return;
         }
     };
 
     // 校验 token
     if let Some(ref expected) = expected_token {
-        let auth_header = req.headers.iter()
+        let auth_header = req
+            .headers
+            .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case("authorization"))
             .map(|(_, v)| v.as_str());
 
         match auth_header {
-            Some(val) if val == format!("Bearer {}", expected) => {},
+            Some(val) if val == format!("Bearer {}", expected) => {}
             _ => {
-                let _ = stream.write_all(&write_response(401, &[], b"{\"error\":\"unauthorized\"}")).await;
+                write_response_with_timeout(&mut stream, 401, &[], b"{\"error\":\"unauthorized\"}")
+                    .await;
                 return;
             }
         }
@@ -335,11 +446,28 @@ async fn handle_connection(
         resp_tx,
     };
 
-    if in_tx.send(pending).await.is_err() {
-        let _ = stream
-            .write_all(&write_response(503, &[], b"{\"error\":\"server shutting down\"}"))
+    match in_tx.try_send(pending) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            write_response_with_timeout(
+                &mut stream,
+                503,
+                &[],
+                b"{\"error\":\"server shutting down\"}",
+            )
             .await;
-        return;
+            return;
+        }
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            write_response_with_timeout(
+                &mut stream,
+                503,
+                &[],
+                b"{\"error\":\"server shutting down\"}",
+            )
+            .await;
+            return;
+        }
     }
 
     // 等待响应（带超时）
@@ -358,7 +486,64 @@ async fn handle_connection(
     };
 
     // 发送响应并关闭连接
-    let bytes = write_response(resp.status, &resp.headers, &resp.body);
-    let _ = stream.write_all(&bytes).await;
-    let _ = stream.shutdown().await;
+    write_response_with_timeout(&mut stream, resp.status, &resp.headers, &resp.body).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn handler_timeout_env_invalid_values_fall_back() {
+        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+        std::env::set_var("GDAPI_HANDLER_TIMEOUT_MS", "0");
+        assert_eq!(handler_timeout_from_env(), DEFAULT_TIMEOUT_MS);
+        std::env::set_var("GDAPI_HANDLER_TIMEOUT_MS", "999999999");
+        assert_eq!(handler_timeout_from_env(), DEFAULT_TIMEOUT_MS);
+        std::env::set_var("GDAPI_HANDLER_TIMEOUT_MS", "abc");
+        assert_eq!(handler_timeout_from_env(), DEFAULT_TIMEOUT_MS);
+        std::env::remove_var("GDAPI_HANDLER_TIMEOUT_MS");
+    }
+
+    #[test]
+    fn handler_timeout_env_accepts_safe_value() {
+        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+        std::env::set_var("GDAPI_HANDLER_TIMEOUT_MS", "250");
+        assert_eq!(handler_timeout_from_env(), 250);
+        std::env::remove_var("GDAPI_HANDLER_TIMEOUT_MS");
+    }
+
+    #[test]
+    fn send_response_raw_rejects_invalid_status() {
+        let mut server = ServerCore::new();
+        let result = server.send_response_raw(1, 99, vec![], b"bad".to_vec());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid HTTP status"));
+    }
+
+    #[test]
+    fn send_response_raw_rejects_invalid_header() {
+        let mut server = ServerCore::new();
+        let result = server.send_response_raw(
+            1,
+            200,
+            vec![("x-bad".into(), "ok\r\nInjected: yes".into())],
+            b"bad".to_vec(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("header value contains CR/LF"));
+    }
+
+    #[test]
+    fn start_near_u16_max_does_not_wrap_or_panic() {
+        let mut server = ServerCore::new();
+        let result = server.start(u16::MAX, None);
+        if let Ok(port) = result {
+            assert_eq!(port, u16::MAX);
+            server.stop();
+        }
+    }
 }

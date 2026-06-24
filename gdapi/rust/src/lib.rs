@@ -17,6 +17,7 @@ pub mod queue;
 pub mod server;
 
 use godot::prelude::*;
+use http::validate_response_header;
 use server::ServerCore;
 
 /// GDExtension 入口标记结构体。
@@ -168,15 +169,34 @@ impl GdApiServer {
         headers: Dictionary<GString, Variant>,
         body: PackedByteArray,
     ) {
+        if id < 0 {
+            godot_error!("[gdapi] send_response rejected negative request id: {}", id);
+            return;
+        }
+        if !(100..=599).contains(&status) {
+            godot_error!(
+                "[gdapi] send_response rejected invalid HTTP status: {}",
+                status
+            );
+            return;
+        }
         let mut hdrs: Vec<(String, String)> = Vec::new();
         for (k, v) in headers.iter_shared() {
             let kk = k.to_string();
             let vv: String = v.to_string();
+            if let Err(e) = validate_response_header(&kk, &vv) {
+                godot_error!("[gdapi] send_response rejected invalid header: {}", e);
+                return;
+            }
             hdrs.push((kk, vv));
         }
         // 优化：使用 to_vec() 替代逐字节 push
         let body_vec = body.to_vec();
-        self.core
-            .send_response_raw(id as u64, status as u16, hdrs, body_vec);
+        if let Err(e) = self
+            .core
+            .send_response_raw(id as u64, status as u16, hdrs, body_vec)
+        {
+            godot_error!("[gdapi] send_response failed: {}", e);
+        }
     }
 }

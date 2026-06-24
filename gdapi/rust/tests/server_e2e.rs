@@ -8,12 +8,16 @@
 //!
 //! 这些测试直接使用 ServerCore，不依赖 Godot 引擎。
 
+use gdapi::http::MAX_HEADER_BYTES;
 use gdapi::queue::HttpResponse;
 use gdapi::server::ServerCore;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn server_accepts_request_and_routes_to_poll_send() {
@@ -61,10 +65,17 @@ fn server_port_probing_skips_occupied() {
     let port_a = a.start(17900, None).expect("first start");
 
     let mut b = ServerCore::new();
-    let port_b = b.start(17900, None).expect("second start should find next port");
+    let port_b = b
+        .start(17900, None)
+        .expect("second start should find next port");
 
     assert_eq!(port_a, 17900);
-    assert!(port_b > port_a, "expected port probing, got {} vs {}", port_b, port_a);
+    assert!(
+        port_b > port_a,
+        "expected port probing, got {} vs {}",
+        port_b,
+        port_a
+    );
     a.stop();
     b.stop();
 }
@@ -83,7 +94,44 @@ fn server_returns_413_for_oversized_body() {
         let mut buf = vec![0u8; 4096];
         let n = stream.read(&mut buf).unwrap();
         let resp = String::from_utf8_lossy(&buf[..n]);
-        assert!(resp.starts_with("HTTP/1.1 413"), "expected 413, got: {}", resp);
+        assert!(
+            resp.starts_with("HTTP/1.1 413"),
+            "expected 413, got: {}",
+            resp
+        );
+    });
+
+    thread::sleep(Duration::from_millis(500));
+    handle.join().expect("client thread panicked");
+    server.stop();
+}
+
+#[test]
+fn server_rejects_oversized_incomplete_headers() {
+    let mut server = ServerCore::new();
+    let port = server.start(17930, None).expect("start");
+
+    let handle = thread::spawn(move || {
+        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
+        let oversized = format!(
+            "GET /x HTTP/1.1\r\nX-Fill: {}",
+            "a".repeat(MAX_HEADER_BYTES)
+        );
+        let started = Instant::now();
+        stream.write_all(oversized.as_bytes()).unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        let n = stream.read(&mut buf).unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "oversized incomplete header was not rejected promptly"
+        );
+        let resp = String::from_utf8_lossy(&buf[..n]);
+        assert!(
+            resp.starts_with("HTTP/1.1 400"),
+            "expected 400, got: {}",
+            resp
+        );
     });
 
     thread::sleep(Duration::from_millis(500));
@@ -93,6 +141,7 @@ fn server_returns_413_for_oversized_body() {
 
 #[test]
 fn server_504_on_handler_timeout() {
+    let _guard = ENV_LOCK.lock().expect("env lock poisoned");
     std::env::set_var("GDAPI_HANDLER_TIMEOUT_MS", "300");
     let mut server = ServerCore::new();
     let port = server.start(17920, None).expect("start");
@@ -108,6 +157,39 @@ fn server_504_on_handler_timeout() {
 
     // 主线程故意不调 send_response，让超时触发
     thread::sleep(Duration::from_millis(800));
+    handle.join().expect("client thread panicked");
+    server.stop();
+    std::env::remove_var("GDAPI_HANDLER_TIMEOUT_MS");
+}
+
+#[test]
+fn server_cleans_pending_after_handler_timeout() {
+    let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+    std::env::set_var("GDAPI_HANDLER_TIMEOUT_MS", "300");
+    let mut server = ServerCore::new();
+    let port = server.start(17940, None).expect("start");
+
+    let handle = thread::spawn(move || {
+        let url = format!("http://127.0.0.1:{}/slow-cleanup", port);
+        let resp = ureq::post(&url).send_string("{}");
+        match resp {
+            Err(ureq::Error::Status(code, _)) => assert_eq!(code, 504),
+            other => panic!("expected 504, got {:?}", other),
+        }
+    });
+
+    let mut saw_request = false;
+    for _ in 0..20 {
+        if server.poll_for_godot().is_some() {
+            saw_request = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(saw_request, "did not receive request");
+
+    thread::sleep(Duration::from_millis(700));
+    assert_eq!(server.pending_len(), 0);
     handle.join().expect("client thread panicked");
     server.stop();
     std::env::remove_var("GDAPI_HANDLER_TIMEOUT_MS");

@@ -6,6 +6,7 @@
 //! - `PendingMap`: 待响应请求的映射表，用于异步等待响应
 
 use std::collections::HashMap;
+use std::time::Instant;
 use tokio::sync::oneshot;
 
 /// 待处理的 HTTP 请求。
@@ -50,7 +51,12 @@ pub struct HttpResponse {
 /// 通过 `ServerCore` 的 `pending` 字段持有。
 #[derive(Default)]
 pub struct PendingMap {
-    inner: HashMap<u64, oneshot::Sender<HttpResponse>>,
+    inner: HashMap<u64, PendingEntry>,
+}
+
+struct PendingEntry {
+    tx: oneshot::Sender<HttpResponse>,
+    deadline: Instant,
 }
 
 impl PendingMap {
@@ -59,8 +65,8 @@ impl PendingMap {
     /// # Arguments
     /// * `id` - 请求 ID
     /// * `tx` - 响应发送通道
-    pub fn insert(&mut self, id: u64, tx: oneshot::Sender<HttpResponse>) {
-        self.inner.insert(id, tx);
+    pub fn insert(&mut self, id: u64, tx: oneshot::Sender<HttpResponse>, deadline: Instant) {
+        self.inner.insert(id, PendingEntry { tx, deadline });
     }
 
     /// 取出指定 ID 的响应通道。
@@ -73,19 +79,77 @@ impl PendingMap {
     /// # Returns
     /// 对应的响应发送通道，如果不存在返回 None
     pub fn take(&mut self, id: u64) -> Option<oneshot::Sender<HttpResponse>> {
-        self.inner.remove(&id)
+        self.inner.remove(&id).map(|entry| entry.tx)
+    }
+
+    /// 清理已超过响应期限的请求，返回清理数量。
+    pub fn remove_expired(&mut self, now: Instant) -> usize {
+        let before = self.inner.len();
+        self.inner.retain(|_, entry| entry.deadline > now);
+        before - self.inner.len()
+    }
+
+    /// 返回当前待响应请求数量。
+    pub fn len(&self) -> usize {
+        self.inner.len()
     }
 
     /// 清空所有待响应请求，向每个通道发送 503 响应。
     ///
     /// 在服务器关闭时调用，确保所有等待中的连接能收到错误响应。
     pub fn drain_503(&mut self) {
-        for (_, tx) in self.inner.drain() {
-            let _ = tx.send(HttpResponse {
+        for (_, entry) in self.inner.drain() {
+            let _ = entry.tx.send(HttpResponse {
                 status: 503,
                 headers: vec![("content-type".into(), "application/json".into())],
                 body: br#"{"error":"server shutting down"}"#.to_vec(),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn cleanup_expired_removes_only_deadline_reached_entries() {
+        let mut pending = PendingMap::default();
+        let now = Instant::now();
+        let (expired_tx, mut expired_rx) = oneshot::channel();
+        let (active_tx, mut active_rx) = oneshot::channel();
+
+        pending.insert(1, expired_tx, now - Duration::from_millis(1));
+        pending.insert(2, active_tx, now + Duration::from_secs(60));
+
+        assert_eq!(pending.remove_expired(now), 1);
+
+        assert!(matches!(
+            expired_rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        assert!(matches!(
+            active_rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(pending.take(1).is_none());
+        assert!(pending.take(2).is_some());
+    }
+
+    #[test]
+    fn pending_map_removes_expired_entries() {
+        let mut map = PendingMap::default();
+        let (expired_tx, _expired_rx) = oneshot::channel();
+        let (live_tx, _live_rx) = oneshot::channel();
+        let now = Instant::now();
+
+        map.insert(1, expired_tx, now - Duration::from_millis(1));
+        map.insert(2, live_tx, now + Duration::from_secs(1));
+
+        assert_eq!(map.remove_expired(now), 1);
+        assert_eq!(map.len(), 1);
+        assert!(map.take(1).is_none());
+        assert!(map.take(2).is_some());
     }
 }
