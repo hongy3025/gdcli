@@ -35,6 +35,7 @@ use crate::gdapi_meta;
 ///   - `Some("@path")`: 从文件读取
 ///   - `Some(json_str)`: 直接使用字面 JSON 字符串
 /// * `timeout_secs` - HTTP 请求超时时间（秒）
+/// * `json_mode` - true 时原样透传 minified JSON；false 时渲染为 TOON
 ///
 /// # Returns
 /// 进程退出码（0=成功, 1=5xx, 2=4xx/参数错, 3=网络/超时/meta 缺失）
@@ -81,9 +82,7 @@ pub fn run(
         .timeout(Duration::from_secs(timeout_secs))
         .build();
 
-    let mut request = agent
-        .post(&url)
-        .set("content-type", "application/json");
+    let mut request = agent.post(&url).set("content-type", "application/json");
 
     // 添加 token header
     if let Some(ref token) = meta.token {
@@ -166,7 +165,8 @@ pub(crate) fn build_body(
     if command == "help" {
         if data.is_some() {
             return Ok(BuildBodyOutcome::Reject(
-                "'help' command does not accept --data; use positional path argument instead".to_string(),
+                "'help' command does not accept --data; use positional path argument instead"
+                    .to_string(),
             ));
         }
         if args.len() > 1 {
@@ -249,7 +249,9 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 /// IO 错误或响应体超过大小限制
 fn read_body(resp: ureq::Response) -> Result<String> {
     let mut s = String::new();
-    resp.into_reader().take(MAX_RESPONSE_BYTES).read_to_string(&mut s)?;
+    resp.into_reader()
+        .take(MAX_RESPONSE_BYTES)
+        .read_to_string(&mut s)?;
     Ok(s)
 }
 
@@ -318,7 +320,9 @@ mod build_body_tests {
     fn help_with_data_is_rejected() {
         let out = build_body("help", &[], Some("{}")).unwrap();
         match out {
-            BuildBodyOutcome::Reject(m) => assert!(m.contains("--data"), "msg should mention --data: {}", m),
+            BuildBodyOutcome::Reject(m) => {
+                assert!(m.contains("--data"), "msg should mention --data: {}", m)
+            }
             BuildBodyOutcome::Body(_) => panic!("should reject"),
         }
     }
@@ -327,7 +331,11 @@ mod build_body_tests {
     fn non_help_with_extra_positional_is_rejected() {
         let out = build_body("ping", &args(&["unexpected"]), None).unwrap();
         match out {
-            BuildBodyOutcome::Reject(m) => assert!(m.contains("positional"), "msg should mention positional: {}", m),
+            BuildBodyOutcome::Reject(m) => assert!(
+                m.contains("positional"),
+                "msg should mention positional: {}",
+                m
+            ),
             BuildBodyOutcome::Body(_) => panic!("should reject"),
         }
     }
