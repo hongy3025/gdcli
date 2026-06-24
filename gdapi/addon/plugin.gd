@@ -138,6 +138,17 @@ func _read_version_from_plugin_cfg() -> String:
 			return line.substr(8).strip_edges().trim_prefix("\"").trim_suffix("\"")
 	return "unknown"
 
+## 检测当前 Godot 实例的 LSP 端口
+##
+## 从 EditorSettings 读取当前实例配置的 LSP 端口。
+## 每个 Godot 实例有自己的 EditorSettings，因此可以获取该实例的 LSP 端口。
+## @return LSP 端口号，读取失败时返回默认值 6005
+func _detect_lsp_port() -> int:
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting("network/language_server/remote_port"):
+		return int(es.get_setting("network/language_server/remote_port"))
+	return 6005
+
 ## 写入元数据文件
 ##
 ## 将服务器连接信息写入 JSON 文件，供外部工具（如 CLI）发现和连接服务。
@@ -145,10 +156,7 @@ func _read_version_from_plugin_cfg() -> String:
 ## @param port 实际绑定的 HTTP 端口号
 ## @param token 认证 token
 func _write_meta(port: int, token: String) -> void:
-	var lsp_port: int = 6005
-	var es := EditorInterface.get_editor_settings()
-	if es and es.has_setting("network/language_server/remote_port"):
-		lsp_port = int(es.get_setting("network/language_server/remote_port"))
+	var lsp_port := _detect_lsp_port()
 	var version := _read_version_from_plugin_cfg()
 	var meta := {
 		"http_port": port,
