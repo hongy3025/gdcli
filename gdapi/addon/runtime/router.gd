@@ -1,7 +1,7 @@
-## 路由系统核心模块
+## 命令系统核心模块
 ##
-## 负责扫描、注册和分发 HTTP 请求到对应的路由处理器。
-## 支持自动扫描目录下的 GDScript 文件作为路由处理器，提供内置路由（如 ping 和路由列表）。
+## 负责扫描、注册和分发 HTTP 请求到对应的命令处理器。
+## 支持自动扫描目录下的 GDScript 文件作为命令处理器，提供内置命令（如 ping 和命令列表）。
 ## 使用路径匹配机制，将请求路径映射到处理器脚本。
 
 @tool
@@ -11,29 +11,29 @@ extends RefCounted
 const GdApiRequest := preload("res://addons/gdapi/runtime/request.gd")
 ## 响应类预加载引用
 const GdApiResponse := preload("res://addons/gdapi/runtime/response.gd")
-## 内置 ping 路由处理器
+## 内置 ping 命令处理器
 const BuiltinPing := preload("res://addons/gdapi/runtime/builtin_ping.gd")
-## 内置路由列表处理器
+## 内置命令列表处理器
 const BuiltinRoutes := preload("res://addons/gdapi/runtime/builtin_routes.gd")
-## 内置帮助路由处理器
+## 内置帮助命令处理器
 const BuiltinHelp := preload("res://addons/gdapi/runtime/builtin_help.gd")
 
-## 路由注册表，键为路径（如 "editor/scene/save"），值为处理器脚本
+## 命令注册表，键为路径（如 "editor/scene/save"），值为处理器脚本
 var _routes: Dictionary = {}
-## 内置路由列表处理器实例
+## 内置命令列表处理器实例
 var _builtin_routes_handler: BuiltinRoutes
-## 内置帮助路由处理器实例
+## 内置帮助命令处理器实例
 var _builtin_help_handler: BuiltinHelp
-## 路由文件修改时间记录，键为文件路径，值为修改时间戳
+## 命令文件修改时间记录，键为文件路径，值为修改时间戳
 var _file_mtimes: Dictionary = {}
-## 是否需要更新内置路由处理器（路由列表变化时触发）
+## 是否需要更新内置命令处理器（命令列表变化时触发）
 var _needs_update: bool = false
 
-## 扫描并注册路由处理器
+## 扫描并注册命令处理器
 ##
 ## 使用 mtime 检查文件变化，只有变化的文件才重新加载。
 ## 首次扫描或强制刷新时加载所有文件。
-## @param root_dir 路由处理器根目录路径
+## @param root_dir 命令处理器根目录路径
 ## @param force 是否强制全量扫描（忽略 mtime 检查）
 func scan(root_dir: String, force: bool = false) -> void:
 	if force:
@@ -55,28 +55,28 @@ func scan(root_dir: String, force: bool = false) -> void:
 		names.sort()
 		_builtin_routes_handler.set_route_names(names)
 
-		# 把所有路由（含内置）注入到 help handler
+		# 把所有命令（含内置）注入到 help handler
 		var all_routes: Dictionary = _routes.duplicate()
 		all_routes["routes"] = BuiltinRoutes
 		all_routes["help"] = BuiltinHelp
 		_builtin_help_handler.set_routes(all_routes)
 		_needs_update = false
 
-## 获取已注册路由总数
+## 获取已注册命令总数
 ##
-## 包含内置的 ping 路由。
-## @return 路由数量
+## 包含内置的 ping 命令。
+## @return 命令数量
 func count() -> int:
-	# _routes 已含 ping；额外两个内置路由：routes + help
+	# _routes 已含 ping；额外两个内置命令：routes + help
 	return _routes.size() + 2
 
-## 递归扫描目录注册路由（带 mtime 检查）
+## 递归扫描目录注册命令（带 mtime 检查）
 ##
 ## 递归遍历目录，检查文件修改时间，只有变化的文件才重新加载。
-## 文件名（去掉 .gd 后缀）作为路由名称，子目录名作为路径前缀。
+## 文件名（去掉 .gd 后缀）作为命令名称，子目录名作为路径前缀。
 ## 以 _ 开头的文件会被忽略。
 ## @param dir_path 要扫描的目录路径
-## @param prefix 路径前缀（用于构建完整路由路径）
+## @param prefix 路径前缀（用于构建完整命令路径）
 ## @param force 是否强制全量扫描
 func _scan_dir_with_mtime(dir_path: String, prefix: String, force: bool) -> void:
 	var dir := DirAccess.open(dir_path)
@@ -110,11 +110,11 @@ func _scan_dir_with_mtime(dir_path: String, prefix: String, force: bool) -> void
 		name = dir.get_next()
 	dir.list_dir_end()
 
-## 分发请求到对应的路由处理器
+## 分发请求到对应的命令处理器
 ##
-## 根据请求路径查找处理器并执行。支持以下特殊路由：
-## - /routes：返回所有可用路由列表
-## - /ping：内置健康检查路由
+## 根据请求路径查找处理器并执行。支持以下特殊命令：
+## - /routes：返回所有可用命令列表
+## - /ping：内置健康检查命令
 ## 其他路径会查找注册的处理器脚本并实例化执行。
 ## @param req_dict 原始请求数据字典
 ## @param server HTTP 服务器实例
@@ -130,21 +130,21 @@ func dispatch(req_dict: Dictionary, server) -> void:
 
 	var key: String = path.trim_prefix("/")
 
-	# 处理内置路由列表请求
+	# 处理内置命令列表请求
 	if key == "routes":
 		var req := GdApiRequest.new(req_dict)
 		var res := GdApiResponse.new(server, id)
 		_builtin_routes_handler.handle(req, res)
 		return
 
-	# 处理内置 help 路由
+	# 处理内置 help 命令
 	if key == "help":
 		var req_help := GdApiRequest.new(req_dict)
 		var res_help := GdApiResponse.new(server, id)
 		_builtin_help_handler.handle(req_help, res_help)
 		return
 
-	# 查找注册的路由处理器
+	# 查找注册的命令处理器
 	if not _routes.has(key):
 		_reply_error(server, id, 404, "route not found: /" + key, "not_found")
 		return

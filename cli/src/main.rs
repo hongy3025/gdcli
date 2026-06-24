@@ -116,7 +116,7 @@ enum Cmd {
     },
     /// 检查与 LSP 服务器的连接状态
     Status,
-    /// 在目标项目安装 gdapi addon
+    /// 在目标项目安装编辑器插件
     Install {
         /// 覆盖已有安装
         #[arg(long)]
@@ -125,16 +125,17 @@ enum Cmd {
         #[arg(long)]
         no_enable: bool,
     },
-    /// 通过 HTTP 调用 gdapi 路由
+    /// 调用 Godot 编辑器命令
+    #[command(after_help = "示例:\n  gdcli exec ping                         # 健康检查\n  gdcli exec commands                     # 列出所有命令\n  gdcli exec command-help godot/version   # 查看命令详情\n  gdcli exec scene/create --data '{\"scene_path\":\"new.tscn\"}'  # 创建场景")]
     Exec {
-        /// gdapi 路由命令名
+        /// 命令名
         command: String,
-        /// 位置参数。仅 help 命令使用：作为查询的路由路径。其他命令必须为空。
+        /// 位置参数（command-help 使用：命令路径）
         args: Vec<String>,
         /// 请求 JSON 数据（字面 JSON、@file 或 - 表示 stdin）
         #[arg(long)]
         data: Option<String>,
-        /// HTTP 请求超时秒数
+        /// 请求超时秒数
         #[arg(long, default_value_t = 30)]
         timeout: u64,
     },

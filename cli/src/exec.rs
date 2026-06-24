@@ -1,10 +1,10 @@
-//! gdcli exec — 通过 HTTP 调用 gdapi 路由。
+//! gdcli exec — 调用 Godot 编辑器命令。
 //!
-//! 本模块实现了 `gdcli exec` 命令，用于向运行中的 Godot 项目发送 HTTP 请求。
+//! 本模块实现了 `gdcli exec` 命令，用于向运行中的 Godot 编辑器发送请求。
 //! 核心流程：
-//!   1. 从 `.godot/gdapi.json` 读取 gdapi 元数据（HTTP 端口等）
+//!   1. 从 `.godot/gdapi.json` 读取元数据（端口等）
 //!   2. 解析用户提供的请求数据（字面 JSON、@文件路径或 stdin）
-//!   3. 构造 HTTP POST 请求并发送到 gdapi 服务器
+//!   3. 构造 POST 请求并发送到 Godot 编辑器
 //!   4. 根据响应状态码返回对应的退出码
 //!
 //! 退出码约定：
@@ -22,23 +22,16 @@ use std::time::Duration;
 use crate::format;
 use crate::gdapi_meta;
 
-/// 执行 gdapi exec 命令的主入口函数。
+/// 从项目元数据中获取端口，构造请求并发送，返回进程退出码。
 ///
-/// 从项目元数据中获取 HTTP 端口，构造请求并发送，返回进程退出码。
+/// # 参数
 ///
-/// # Arguments
 /// * `project` - Godot 项目根目录路径
-/// * `command` - gdapi 路由命令名（如 "spawn"、"query" 等）
-/// * `data` - 可选的请求数据，支持三种格式：
-///   - `None`: 使用空 JSON 对象 `{}`
-///   - `Some("-")`: 从 stdin 读取
-///   - `Some("@path")`: 从文件读取
-///   - `Some(json_str)`: 直接使用字面 JSON 字符串
-/// * `timeout_secs` - HTTP 请求超时时间（秒）
-/// * `json_mode` - true 时原样透传 minified JSON；false 时渲染为 TOON
-///
-/// # Returns
-/// 进程退出码（0=成功, 1=5xx, 2=4xx/参数错, 3=网络/超时/meta 缺失）
+/// * `command` - 命令名（如 "ping"、"scene/create" 等）
+/// * `args` - 位置参数（command-help 使用：命令路径）
+/// * `data` - 可选的请求数据（JSON 字符串、@文件路径或 "-" 表示 stdin）
+/// * `timeout_secs` - 请求超时时间（秒）
+/// * `json_mode` - 是否以原始 JSON 格式输出（默认 TOON 格式）
 pub fn run(
     project: &Path,
     command: &str,
@@ -52,14 +45,14 @@ pub fn run(
         Ok(m) => m,
         Err(e) => {
             eprintln!(
-                "gdapi not running: {}\nHint: open the project in Godot editor with gdapi plugin enabled, or run 'gdcli install' first.",
+                "Godot 编辑器未响应: {}\n提示：请在 Godot 编辑器中打开项目并启用 gdapi 插件，或先运行 'gdcli install'",
                 e
             );
             return Ok(3);
         }
     };
 
-    // 2. 准备请求 body（含 help 命令的位置参数特殊处理）
+    // 2. 准备请求 body（含 command-help 命令的位置参数处理）
     let body_text = match build_body(command, args, data)? {
         BuildBodyOutcome::Body(t) => t,
         BuildBodyOutcome::Reject(msg) => {
@@ -115,7 +108,7 @@ pub fn run(
             } else {
                 format::render_exec_body(&body)
             };
-            eprintln!("Error (HTTP {}): {}", code, rendered.trim_end());
+            eprintln!("Error ({}): {}", code, rendered.trim_end());
             Ok(map_status_to_exit(code, true))
         }
         Err(ureq::Error::Transport(t)) => {
@@ -127,8 +120,8 @@ pub fn run(
 
 /// build_body 的输出。
 ///
-/// 调用方根据变体决定行为：Body 用作 HTTP 请求体；
-/// Reject 表示构造前置校验失败，调用方打印 msg 到 stderr 后退出 2。
+/// 调用方根据变体决定行为：Body 用作请求体；
+/// Reject 输出错误信息并以退出码 2 终止。
 pub(crate) enum BuildBodyOutcome {
     /// 构造好的 JSON 字符串，可直接发送
     Body(String),
@@ -136,50 +129,59 @@ pub(crate) enum BuildBodyOutcome {
     Reject(String),
 }
 
-/// 根据 command/args/data 构造请求体。
+/// 构造请求体。
 ///
-/// 规则：
-/// - command == "help": 必须无 --data；位置参数最多一个作为 path
-///   - 无位置参数 → "{}"
-///   - 一个位置参数 → {"path": "<arg>"}
-///   - 多个位置参数 → Reject
-/// - 其他 command: 位置参数必须为空，否则 Reject；body 来自 resolve_data
-///   - 无 --data → "{}"
-///   - 有 --data → resolve_data 解析（字面 JSON / @file / stdin）
+/// 调用方根据变体决定行为：Body 用作请求体；
+/// Reject 输出错误信息并以退出码 2 终止。
 ///
-/// # Arguments
-/// * `command` - 路由命令名
-/// * `args` - 位置参数数组
-/// * `data` - --data 参数原始值
+/// # 参数
 ///
-/// # Returns
-/// BuildBodyOutcome::Body 或 BuildBodyOutcome::Reject
+/// * `command` - 命令名
+/// * `args` - 位置参数（command-help 使用：命令路径）
+/// * `data` - 可选的用户提供的请求数据
 ///
-/// # Errors
-/// resolve_data 失败（文件读取/stdin 错误）时返回 Err
+/// # 特殊命令
+///
+/// * `commands` — 返回空 body，拒绝 `--data` 和位置参数
+/// * `command-help <path>` — 以 `{"command": "<path>"}` 为 body，拒绝 `--data`，要求恰好 1 个位置参数
+/// * 其它命令 — 使用 `--data` 或空 `{}`，拒绝位置参数
 pub(crate) fn build_body(
     command: &str,
     args: &[String],
     data: Option<&str>,
 ) -> Result<BuildBodyOutcome> {
-    if command == "help" {
+    // commands 命令：无参数，返回所有命令列表
+    if command == "commands" {
+        if !args.is_empty() {
+            return Ok(BuildBodyOutcome::Reject(format!(
+                "'commands' does not accept arguments, got {:?}",
+                args
+            )));
+        }
         if data.is_some() {
             return Ok(BuildBodyOutcome::Reject(
-                "'help' command does not accept --data; use positional path argument instead"
+                "'commands' does not accept --data".to_string(),
+            ));
+        }
+        return Ok(BuildBodyOutcome::Body("{}".to_string()));
+    }
+
+    // command-help 命令：需要一个位置参数作为命令路径
+    if command == "command-help" {
+        if data.is_some() {
+            return Ok(BuildBodyOutcome::Reject(
+                "'command-help' does not accept --data; use positional argument instead"
                     .to_string(),
             ));
         }
-        if args.len() > 1 {
+        if args.len() != 1 {
             return Ok(BuildBodyOutcome::Reject(format!(
-                "'help' accepts at most one positional path argument, got {}: {:?}",
+                "'command-help' requires exactly one argument (command path), got {}: {:?}",
                 args.len(),
                 args
             )));
         }
-        let body = match args.first() {
-            Some(path) => serde_json::json!({ "path": path }).to_string(),
-            None => "{}".to_string(),
-        };
+        let body = serde_json::json!({ "command": &args[0] }).to_string();
         return Ok(BuildBodyOutcome::Body(body));
     }
 
@@ -230,17 +232,17 @@ fn resolve_data(data: Option<&str>) -> Result<Option<String>> {
     }
 }
 
-/// HTTP 响应体最大读取字节数（16MB）。
+/// 响应体最大读取字节数（16MB）。
 ///
 /// 防止服务器返回过大响应导致内存溢出。
 const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
-/// 读取 HTTP 响应体内容。
+/// 读取响应体内容。
 ///
 /// 限制最大读取字节数为 MAX_RESPONSE_BYTES，防止内存溢出。
 ///
 /// # Arguments
-/// * `resp` - HTTP 响应对象
+/// * `resp` - 响应对象
 ///
 /// # Returns
 /// 响应体字符串
@@ -255,7 +257,7 @@ fn read_body(resp: ureq::Response) -> Result<String> {
     Ok(s)
 }
 
-/// 根据 HTTP 状态码映射到进程退出码。
+/// 根据状态码映射到进程退出码。
 ///
 /// 退出码约定：
 /// - 0: 成功（2xx 且非错误）
@@ -263,7 +265,7 @@ fn read_body(resp: ureq::Response) -> Result<String> {
 /// - 1: 服务器错误（5xx 或其他）
 ///
 /// # Arguments
-/// * `status` - HTTP 状态码
+/// * `status` - 状态码
 /// * `is_error` - 是否为错误响应（ureq 的 Status 错误）
 ///
 /// # Returns
@@ -284,47 +286,6 @@ mod build_body_tests {
 
     fn args(vs: &[&str]) -> Vec<String> {
         vs.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn help_no_args_no_data_yields_empty_object() {
-        let out = build_body("help", &[], None).unwrap();
-        match out {
-            BuildBodyOutcome::Body(s) => assert_eq!(s, "{}"),
-            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
-        }
-    }
-
-    #[test]
-    fn help_with_path_arg_builds_path_object() {
-        let out = build_body("help", &args(&["editor/scene/save"]), None).unwrap();
-        match out {
-            BuildBodyOutcome::Body(s) => assert_eq!(s, r#"{"path":"editor/scene/save"}"#),
-            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
-        }
-    }
-
-    #[test]
-    fn help_with_path_containing_quotes_escapes_safely() {
-        let out = build_body("help", &args(&[r#"weird"name"#]), None).unwrap();
-        match out {
-            BuildBodyOutcome::Body(s) => {
-                let v: serde_json::Value = serde_json::from_str(&s).unwrap();
-                assert_eq!(v["path"], r#"weird"name"#);
-            }
-            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
-        }
-    }
-
-    #[test]
-    fn help_with_data_is_rejected() {
-        let out = build_body("help", &[], Some("{}")).unwrap();
-        match out {
-            BuildBodyOutcome::Reject(m) => {
-                assert!(m.contains("--data"), "msg should mention --data: {}", m)
-            }
-            BuildBodyOutcome::Body(_) => panic!("should reject"),
-        }
     }
 
     #[test]
@@ -355,6 +316,79 @@ mod build_body_tests {
         match out {
             BuildBodyOutcome::Body(s) => assert_eq!(s, "{}"),
             BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
+        }
+    }
+
+    #[test]
+    fn commands_no_args_no_data_yields_empty_object() {
+        let out = build_body("commands", &[], None).unwrap();
+        match out {
+            BuildBodyOutcome::Body(s) => assert_eq!(s, "{}"),
+            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
+        }
+    }
+
+    #[test]
+    fn commands_with_args_is_rejected() {
+        let out = build_body("commands", &args(&["unexpected"]), None).unwrap();
+        match out {
+            BuildBodyOutcome::Reject(m) => {
+                assert!(m.contains("arguments"), "msg should mention arguments: {}", m)
+            }
+            BuildBodyOutcome::Body(_) => panic!("should reject"),
+        }
+    }
+
+    #[test]
+    fn commands_with_data_is_rejected() {
+        let out = build_body("commands", &[], Some("{}")).unwrap();
+        match out {
+            BuildBodyOutcome::Reject(m) => {
+                assert!(m.contains("--data"), "msg should mention --data: {}", m)
+            }
+            BuildBodyOutcome::Body(_) => panic!("should reject"),
+        }
+    }
+
+    #[test]
+    fn command_help_with_arg_builds_command_object() {
+        let out = build_body("command-help", &args(&["godot/version"]), None).unwrap();
+        match out {
+            BuildBodyOutcome::Body(s) => assert_eq!(s, r#"{"command":"godot/version"}"#),
+            BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
+        }
+    }
+
+    #[test]
+    fn command_help_without_arg_is_rejected() {
+        let out = build_body("command-help", &[], None).unwrap();
+        match out {
+            BuildBodyOutcome::Reject(m) => {
+                assert!(m.contains("requires"), "msg should mention requires: {}", m)
+            }
+            BuildBodyOutcome::Body(_) => panic!("should reject"),
+        }
+    }
+
+    #[test]
+    fn command_help_with_multiple_args_is_rejected() {
+        let out = build_body("command-help", &args(&["a", "b"]), None).unwrap();
+        match out {
+            BuildBodyOutcome::Reject(m) => {
+                assert!(m.contains("exactly one"), "msg should mention exactly one: {}", m)
+            }
+            BuildBodyOutcome::Body(_) => panic!("should reject"),
+        }
+    }
+
+    #[test]
+    fn command_help_with_data_is_rejected() {
+        let out = build_body("command-help", &args(&["godot/version"]), Some("{}")).unwrap();
+        match out {
+            BuildBodyOutcome::Reject(m) => {
+                assert!(m.contains("--data"), "msg should mention --data: {}", m)
+            }
+            BuildBodyOutcome::Body(_) => panic!("should reject"),
         }
     }
 }

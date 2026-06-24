@@ -119,7 +119,7 @@ fn exec_404_exits_with_code_2() {
         .assert()
         .failure()
         .code(2)
-        .stderr(predicates::str::contains("HTTP 404"));
+        .stderr(predicates::str::contains("Error (404)"));
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn exec_500_exits_with_code_1() {
         .assert()
         .failure()
         .code(1)
-        .stderr(predicates::str::contains("HTTP 500"));
+        .stderr(predicates::str::contains("Error (500)"));
 }
 
 #[test]
@@ -177,19 +177,19 @@ fn exec_missing_meta_file_fails() {
         .assert()
         .failure()
         .code(3)
-        .stderr(predicates::str::contains("gdapi not running"));
+        .stderr(predicates::str::contains("Godot 编辑器未响应"));
 }
 
 #[test]
-fn exec_help_list_passes_through_server_json() {
+fn exec_commands_list_passes_through_server_json() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST)
-            .path("/help")
+            .path("/commands")
             .json_body_obj(&serde_json::json!({}));
         then.status(200)
             .header("content-type", "application/json")
-            .body(r#"{"ok":true,"routes":[{"path":"ping","summary":"健康检查","params":[]}]}"#);
+            .body(r#"{"ok":true,"commands":[{"path":"ping","summary":"健康检查","params":[]}]}"#);
     });
 
     let meta = format!(
@@ -201,98 +201,13 @@ fn exec_help_list_passes_through_server_json() {
 
     Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["exec", "help", "--project", dir.path().to_str().unwrap()])
+        .args(["exec", "commands", "--project", dir.path().to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicates::str::contains("routes"))
+        .stdout(predicates::str::contains("commands"))
         .stdout(predicates::str::contains("ping"));
 
     mock.assert();
-}
-
-#[test]
-fn exec_help_with_path_sends_path_body() {
-    let server = MockServer::start();
-    let mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/help")
-            .json_body_obj(&serde_json::json!({"path": "editor/scene/save"}));
-        then.status(200)
-            .body(r#"{"ok":true,"doc":{"path":"editor/scene/save","summary":"保存场景"}}"#);
-    });
-
-    let meta = format!(
-        r#"{{"http_port":{},"pid":{},"gdapi_version":"0.2.0"}}"#,
-        server.port(),
-        std::process::id()
-    );
-    let dir = setup_fake_project(&meta);
-
-    Command::cargo_bin("gdcli")
-        .unwrap()
-        .args([
-            "exec",
-            "help",
-            "editor/scene/save",
-            "--project",
-            dir.path().to_str().unwrap(),
-        ])
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("doc"));
-
-    mock.assert();
-}
-
-#[test]
-fn exec_help_nonexistent_path_returns_exit_code_2() {
-    let server = MockServer::start();
-    server.mock(|when, then| {
-        when.method(POST).path("/help");
-        then.status(404)
-            .body(r#"{"ok":false,"code":"not_found","msg":"route not found: foo"}"#);
-    });
-
-    let meta = format!(
-        r#"{{"http_port":{},"pid":{},"gdapi_version":"0.2.0"}}"#,
-        server.port(),
-        std::process::id()
-    );
-    let dir = setup_fake_project(&meta);
-
-    Command::cargo_bin("gdcli")
-        .unwrap()
-        .args([
-            "exec",
-            "help",
-            "foo",
-            "--project",
-            dir.path().to_str().unwrap(),
-        ])
-        .assert()
-        .failure()
-        .code(2)
-        .stderr(predicates::str::contains("HTTP 404"));
-}
-
-#[test]
-fn exec_help_with_data_flag_is_rejected() {
-    let dir = setup_fake_project(r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#);
-
-    Command::cargo_bin("gdcli")
-        .unwrap()
-        .args([
-            "exec",
-            "help",
-            "--data",
-            "{}",
-            "--project",
-            dir.path().to_str().unwrap(),
-        ])
-        .assert()
-        .failure()
-        .code(2)
-        .stderr(predicates::str::contains("--data"));
 }
 
 #[test]
@@ -403,10 +318,10 @@ fn exec_json_flag_outputs_raw_json() {
 fn exec_toon_tabular_uniform_array() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method(POST).path("/help");
+        when.method(POST).path("/commands");
         then.status(200)
             .header("content-type", "application/json")
-            .body(r#"{"ok":true,"routes":[{"path":"ping","summary":"健康检查"},{"path":"help","summary":"路由列表"}]}"#);
+            .body(r#"{"ok":true,"commands":[{"path":"ping","summary":"健康检查"},{"path":"echo","summary":"回显"}]}"#);
     });
 
     let meta = format!(
@@ -418,7 +333,7 @@ fn exec_toon_tabular_uniform_array() {
 
     let output = Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["exec", "help", "--project", dir.path().to_str().unwrap()])
+        .args(["exec", "commands", "--project", dir.path().to_str().unwrap()])
         .output()
         .unwrap();
 
@@ -430,7 +345,7 @@ fn exec_toon_tabular_uniform_array() {
     );
     assert!(stdout.contains("ok: true"), "got: {stdout}");
     assert!(
-        stdout.contains("routes[2|]{path|summary}:"),
+        stdout.contains("commands[2|]{path|summary}:"),
         "expected pipe tabular header, got: {stdout}"
     );
     assert!(stdout.contains("ping|健康检查"), "got: {stdout}");
@@ -442,10 +357,10 @@ fn exec_toon_tabular_uniform_array() {
 fn exec_toon_with_r1_empty_array() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method(POST).path("/help");
+        when.method(POST).path("/commands");
         then.status(200)
             .header("content-type", "application/json")
-            .body(r#"{"ok":true,"routes":[{"path":"ping","params":[]},{"path":"help","params":["x"]}]}"#);
+            .body(r#"{"ok":true,"commands":[{"path":"ping","params":[]},{"path":"echo","params":["x"]}]}"#);
     });
 
     let meta = format!(
@@ -457,21 +372,21 @@ fn exec_toon_with_r1_empty_array() {
 
     let output = Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["exec", "help", "--project", dir.path().to_str().unwrap()])
+        .args(["exec", "commands", "--project", dir.path().to_str().unwrap()])
         .output()
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
     assert!(
-        stdout.contains("routes[2|]{path|params}:"),
+        stdout.contains("commands[2|]{path|params}:"),
         "R1 should coerce to tabular, got: {stdout}"
     );
     assert!(
         stdout.contains("ping|"),
         "empty array should become empty cell, got: {stdout}"
     );
-    assert!(stdout.contains("help|x"), "got: {stdout}");
+    assert!(stdout.contains("echo|x"), "got: {stdout}");
 
     mock.assert();
 }
@@ -505,7 +420,7 @@ fn exec_toon_4xx_error_renders_in_stderr() {
         Some(2),
         "4xx should exit 2; stderr={stderr}"
     );
-    assert!(stderr.starts_with("Error (HTTP 404): "), "got: {stderr}");
+    assert!(stderr.starts_with("Error (404): "), "got: {stderr}");
     assert!(
         stderr.contains("code: not_found"),
         "stderr should contain TOON-rendered error, got: {stderr}"
@@ -545,4 +460,89 @@ fn exec_non_json_body_passes_through() {
     );
 
     mock.assert();
+}
+
+#[test]
+fn exec_command_help_with_path_sends_command_body() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/command-help")
+            .json_body_obj(&serde_json::json!({"command": "editor/scene/save"}));
+        then.status(200)
+            .body(r#"{"ok":true,"doc":{"path":"editor/scene/save","summary":"保存场景"}}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "command-help",
+            "editor/scene/save",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("doc"));
+
+    mock.assert();
+}
+
+#[test]
+fn exec_command_help_nonexistent_path_returns_exit_code_2() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/command-help");
+        then.status(404)
+            .body(r#"{"ok":false,"code":"not_found","msg":"command not found: foo"}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "command-help",
+            "foo",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("Error (404)"));
+}
+
+#[test]
+fn exec_command_help_with_data_flag_is_rejected() {
+    let dir = setup_fake_project(r#"{"http_port":1,"pid":1,"gdapi_version":"0.2.0"}"#);
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "command-help",
+            "--data",
+            "{}",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("--data"));
 }

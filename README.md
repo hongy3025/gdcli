@@ -3,7 +3,7 @@
 与 Godot 编辑器交互的命令行工具。支持两种模式：
 
 - **LSP 模式**：通过 Godot 内置 LSP 服务器进行重命名、查找引用、跳转定义等代码智能操作
-- **exec 模式**：通过 gdapi addon 的 HTTP 接口调用编辑器功能
+- **exec 模式**：调用 Godot 编辑器功能
 
 ## 安装
 
@@ -26,22 +26,22 @@ godot --editor --path /path/to/project
 godot --editor --headless --lsp-port 6005 --path /path/to/project
 ```
 
-exec 命令需要在项目中安装并启用 gdapi 插件（见下方 `gdcli install`）。
+exec 命令需要在项目中安装并启用编辑器插件（见下方 `gdcli install`）。
 
 ## 命令总览
 
 ```
 gdcli lsp <subcommand>    # LSP 代码智能操作
 gdcli status              # 检查 LSP 连接状态
-gdcli install             # 安装 gdapi addon 到目标项目
-gdcli exec <command>      # 通过 HTTP 调用 gdapi 路由
+gdcli install             # 安装编辑器插件到目标项目
+gdcli exec <command>      # 调用 Godot 编辑器命令
 ```
 
 ---
 
 ## gdcli install
 
-将 gdapi addon 安装到目标 Godot 项目，自动修改 `project.godot` 启用插件。
+将编辑器插件安装到目标 Godot 项目，自动修改 `project.godot` 启用插件。
 
 ```bash
 gdcli install --project /path/to/project
@@ -150,7 +150,7 @@ gdcli lsp native-symbol Node3D get_parent
 
 ## gdcli exec
 
-通过 HTTP 调用 gdapi addon 的路由，需要 Godot 编辑器运行中且 gdapi 插件已启用。
+调用 Godot 编辑器命令，需要 Godot 编辑器运行中且 gdapi 插件已启用。
 
 ```bash
 gdcli exec ping --project /path/to/project
@@ -160,18 +160,18 @@ gdcli exec ping --project /path/to/project
 | Flag | 默认 | 说明 |
 |---|---|---|
 | `--data <json>` | `{}` | 请求 JSON 数据：字面 JSON、`@file` 或 `-`（stdin） |
-| `--timeout <secs>` | `30` | HTTP 请求超时秒数 |
+| `--timeout <secs>` | `30` | 请求超时秒数 |
 
-`help` 命令使用位置参数而非 `--data`：
+`commands` 和 `command-help` 使用位置参数而非 `--data`：
 
 ```bash
-gdcli exec help                    # 列出所有路由
-gdcli exec help editor/scene/save  # 查看路由详情
+gdcli exec commands                     # 列出所有命令
+gdcli exec command-help editor/scene/save  # 查看命令详情
 ```
 
 ### 输出格式
 
-`gdcli exec` 默认以 **TOON** 格式输出 HTTP 响应，便于人类终端阅读和 LLM 消费：
+`gdcli exec` 默认以 **TOON** 格式输出响应，便于人类终端阅读和 LLM 消费：
 
 - 对象 → 缩进键值对
 - 字段统一的对象数组 → 紧凑表格（pipe 分隔）
