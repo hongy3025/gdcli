@@ -45,6 +45,8 @@ func get_query(key: String, default: String = "") -> String:
 
 func is_json() -> bool:
 	var ct := get_header("content-type")
+	if ct.is_empty():
+		return false
 	return ct.begins_with("application/json")
 
 func client_ip() -> String:
