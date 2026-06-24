@@ -19,7 +19,7 @@ config/features=PackedStringArray("4.6")
 
 [editor_plugins]
 
-enabled=PackedStringArray()
+enabled=PackedStringArray("res://addons/gdapi/plugin.cfg")
 
 [rendering]
 

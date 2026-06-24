@@ -80,13 +80,13 @@ func _exit_tree() -> void:
 ## 使用循环确保一次处理所有积压请求，避免请求延迟。
 ## @param _dt 帧时间间隔（未使用）
 func _process(_dt: float) -> void:
-    if _server == null or not _server.is_running():
-        return
-    while true:
-        var req: Variant = _server.poll_request()
-        if req == null:
-            break
-        _router.dispatch(req, _server)
+	if _server == null or not _server.is_running():
+		return
+	while true:
+		var req: Variant = _server.poll_request()
+		if req == null:
+			break
+		_router.dispatch(req, _server)
 
 ## 添加日志条目到缓冲区
 ##
@@ -127,27 +127,27 @@ func get_log_since(since: int, limit: int) -> Array:
 ## 包含 HTTP 端口、LSP 端口、进程 ID、启动时间和 API 版本。
 ## @param port 实际绑定的 HTTP 端口号
 func _write_meta(port: int) -> void:
-    var lsp_port: int = 6005
-    var es := EditorInterface.get_editor_settings()
-    if es and es.has_setting("network/language_server/remote_port"):
-        lsp_port = int(es.get_setting("network/language_server/remote_port"))
-    var meta := {
-        "http_port": port,
-        "lsp_port": lsp_port,
-        "pid": OS.get_process_id(),
-        "started_at": Time.get_datetime_string_from_system(true),
-        "gdapi_version": "0.2.0",
-    }
-    var f := FileAccess.open(META_PATH, FileAccess.WRITE)
-    if f == null:
-        push_error("[gdapi] cannot write " + META_PATH)
-        return
-    f.store_string(JSON.stringify(meta, "  "))
-    f.close()
+	var lsp_port: int = 6005
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting("network/language_server/remote_port"):
+		lsp_port = int(es.get_setting("network/language_server/remote_port"))
+	var meta := {
+		"http_port": port,
+		"lsp_port": lsp_port,
+		"pid": OS.get_process_id(),
+		"started_at": Time.get_datetime_string_from_system(true),
+		"gdapi_version": "0.2.0",
+	}
+	var f := FileAccess.open(META_PATH, FileAccess.WRITE)
+	if f == null:
+		push_error("[gdapi] cannot write " + META_PATH)
+		return
+	f.store_string(JSON.stringify(meta, "  "))
+	f.close()
 
 ## 删除元数据文件
 ##
 ## 在插件卸载时清理元数据文件，防止外部工具尝试连接已停止的服务。
 func _delete_meta() -> void:
-    if FileAccess.file_exists(META_PATH):
-        DirAccess.remove_absolute(ProjectSettings.globalize_path(META_PATH))
+	if FileAccess.file_exists(META_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(META_PATH))
