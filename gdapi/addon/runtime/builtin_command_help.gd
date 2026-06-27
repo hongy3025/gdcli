@@ -9,12 +9,24 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 
 ## 完整路由表：{ path: handler_script }，由 router 注入
 var _routes: Dictionary = {}
+var _route_meta: Dictionary = {}
 
 ## 由 router 在扫描完成后调用，传入完整路由表
 ##
 ## @param routes 路由表字典
 func set_routes(routes: Dictionary) -> void:
 	_routes = routes
+
+func set_route_meta(route_meta: Dictionary) -> void:
+	_route_meta = route_meta
+
+func _apply_meta(path: String, doc: Dictionary) -> Dictionary:
+	var meta: Dictionary = _route_meta.get(path, {"canonical_path": path, "aliases": [], "is_alias": false})
+	doc["path"] = path
+	doc["canonical_path"] = meta.get("canonical_path", path)
+	doc["aliases"] = meta.get("aliases", [])
+	doc["is_alias"] = meta.get("is_alias", false)
+	return doc
 
 ## 处理 /command-help 请求
 ##
@@ -35,8 +47,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 
 	var handler = _routes[command].new()
-	var detail: Dictionary = handler.doc().to_dict()
-	detail["path"] = command
+	var detail: Dictionary = _apply_meta(command, handler.doc().to_dict())
 	res.json({"ok": true, "doc": detail})
 
 ## 自身的帮助文档

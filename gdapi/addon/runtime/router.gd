@@ -24,6 +24,9 @@ const BuiltinCommandHelp := preload("res://addons/gdapi/runtime/builtin_command_
 
 ## 命令注册表，键为路径（如 "editor/scene/save"），值为处理器脚本
 var _routes: Dictionary = {}
+var _route_meta: Dictionary = {}
+var _alias_to_canonical: Dictionary = {}
+var _canonical_to_aliases: Dictionary = {}
 ## 内置路由名列表处理器实例
 var _builtin_routes_handler: BuiltinRoutes
 ## 内置路由详情帮助处理器实例
@@ -46,37 +49,21 @@ var _needs_update: bool = false
 func scan(root_dir: String, force: bool = false) -> void:
 	if force:
 		_routes.clear()
+		_route_meta.clear()
+		_alias_to_canonical.clear()
+		_canonical_to_aliases.clear()
 		_file_mtimes.clear()
 		_needs_update = true
-	
-	_routes["ping"] = BuiltinPing
-	
-	_scan_dir_with_mtime(root_dir + "/editor", "", force)
-	_scan_dir_with_mtime(root_dir + "/shared", "", force)
-	
-	if _needs_update:
-		_builtin_routes_handler = BuiltinRoutes.new()
-		_builtin_help_handler = BuiltinHelp.new()
-		_builtin_commands_handler = BuiltinCommands.new()
-		_builtin_command_help_handler = BuiltinCommandHelp.new()
-		var names: Array = _routes.keys()
-		names.append("routes")
-		names.append("help")
-		names.append("commands")
-		names.append("command-help")
-		names.sort()
-		_builtin_routes_handler.set_route_names(names)
 
-		# 把所有命令（含内置）注入到 help / commands / command-help handler
-		var all_routes: Dictionary = _routes.duplicate()
-		all_routes["routes"] = BuiltinRoutes
-		all_routes["help"] = BuiltinHelp
-		all_routes["commands"] = BuiltinCommands
-		all_routes["command-help"] = BuiltinCommandHelp
-		_builtin_help_handler.set_routes(all_routes)
-		_builtin_commands_handler.set_routes(all_routes)
-		_builtin_command_help_handler.set_routes(all_routes)
-		_needs_update = false
+	_register_builtin_route("ping", BuiltinPing)
+
+	_scan_context_dir(root_dir, "editor", force)
+	_scan_context_dir(root_dir, "shared", force)
+	_scan_context_dir(root_dir, "runtime", force)
+	_scan_context_dir(root_dir, "project", force)
+
+	if _needs_update:
+		_refresh_builtin_handlers()
 
 ## 获取已注册命令总数
 ##
@@ -86,6 +73,78 @@ func count() -> int:
 	# _routes 已含 ping；额外四个内置命令：routes + help + commands + command-help
 	return _routes.size() + 4
 
+func _register_builtin_route(key: String, script: Script) -> void:
+	_routes[key] = script
+	_route_meta[key] = {
+		"canonical_path": key,
+		"aliases": [],
+		"is_alias": false,
+	}
+
+func _scan_context_dir(root_dir: String, context: String, force: bool) -> void:
+	var dir_path := root_dir + "/" + context
+	_scan_dir_with_mtime(dir_path, context, context, force)
+
+func _legacy_key_for(context: String, relative_key: String) -> String:
+	if context == "editor" or context == "shared":
+		return relative_key
+	return ""
+
+func _register_route(key: String, script: Script, canonical_path: String, is_alias: bool) -> void:
+	_routes[key] = script
+	var aliases: Array = _canonical_to_aliases.get(canonical_path, [])
+	_route_meta[key] = {
+		"canonical_path": canonical_path,
+		"aliases": aliases,
+		"is_alias": is_alias,
+	}
+	if is_alias:
+		_alias_to_canonical[key] = canonical_path
+
+func _register_canonical_and_legacy(context: String, relative_key: String, script: Script) -> void:
+	var canonical_path := context + "/" + relative_key
+	var legacy_path := _legacy_key_for(context, relative_key)
+	var aliases: Array = []
+	if legacy_path != "" and legacy_path != canonical_path:
+		aliases.append(legacy_path)
+		_canonical_to_aliases[canonical_path] = aliases
+	_register_route(canonical_path, script, canonical_path, false)
+	for alias in aliases:
+		_register_route(alias, script, canonical_path, true)
+
+func get_route_meta(key: String) -> Dictionary:
+	return _route_meta.get(key, {"canonical_path": key, "aliases": [], "is_alias": false})
+
+func _refresh_builtin_handlers() -> void:
+	_builtin_routes_handler = BuiltinRoutes.new()
+	_builtin_help_handler = BuiltinHelp.new()
+	_builtin_commands_handler = BuiltinCommands.new()
+	_builtin_command_help_handler = BuiltinCommandHelp.new()
+	var names: Array = _routes.keys()
+	names.append("routes")
+	names.append("help")
+	names.append("commands")
+	names.append("command-help")
+	names.sort()
+	_builtin_routes_handler.set_route_names(names)
+	_builtin_routes_handler.set_route_meta(_route_meta, _alias_to_canonical)
+
+	var all_routes: Dictionary = _routes.duplicate()
+	all_routes["routes"] = BuiltinRoutes
+	all_routes["help"] = BuiltinHelp
+	all_routes["commands"] = BuiltinCommands
+	all_routes["command-help"] = BuiltinCommandHelp
+	var all_meta := _route_meta.duplicate()
+	for builtin in ["routes", "help", "commands", "command-help"]:
+		all_meta[builtin] = {"canonical_path": builtin, "aliases": [], "is_alias": false}
+	_builtin_help_handler.set_routes(all_routes)
+	_builtin_help_handler.set_route_meta(all_meta)
+	_builtin_commands_handler.set_routes(all_routes)
+	_builtin_commands_handler.set_route_meta(all_meta)
+	_builtin_command_help_handler.set_routes(all_routes)
+	_builtin_command_help_handler.set_route_meta(all_meta)
+	_needs_update = false
+
 ## 递归扫描目录注册命令（带 mtime 检查）
 ##
 ## 递归遍历目录，检查文件修改时间，只有变化的文件才重新加载。
@@ -94,7 +153,7 @@ func count() -> int:
 ## @param dir_path 要扫描的目录路径
 ## @param prefix 路径前缀（用于构建完整命令路径）
 ## @param force 是否强制全量扫描
-func _scan_dir_with_mtime(dir_path: String, prefix: String, force: bool) -> void:
+func _scan_dir_with_mtime(dir_path: String, prefix: String, context: String, force: bool) -> void:
 	var dir := DirAccess.open(dir_path)
 	if dir == null:
 		return
@@ -107,20 +166,17 @@ func _scan_dir_with_mtime(dir_path: String, prefix: String, force: bool) -> void
 		var full := dir_path + "/" + name
 		if dir.current_is_dir():
 			var sub_prefix := (prefix + "/" + name) if prefix != "" else name
-			_scan_dir_with_mtime(full, sub_prefix, force)
+			_scan_dir_with_mtime(full, sub_prefix, context, force)
 		elif name.ends_with(".gd") and not name.begins_with("_"):
 			var route_name := name.substr(0, name.length() - 3)
 			var key := (prefix + "/" + route_name) if prefix != "" else route_name
-			
-			# 检查文件修改时间
+			var relative_key := key.trim_prefix(context + "/")
 			var mtime := FileAccess.get_modified_time(full)
 			var old_mtime: int = _file_mtimes.get(full, 0)
-			
 			if force or mtime != old_mtime:
-				# 文件变化或强制刷新，重新加载
 				var script: Script = load(full) as Script
 				if script != null:
-					_routes[key] = script
+					_register_canonical_and_legacy(context, relative_key, script)
 					_file_mtimes[full] = mtime
 					_needs_update = true
 		name = dir.get_next()
