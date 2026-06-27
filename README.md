@@ -200,17 +200,27 @@ Commands:
   shared/godot/version  获取 Godot 版本
 
 # 查看命令详情（clap 风格）
-$ gdcli exec command-help editor/scene/save
-保存场景
+$ gdcli exec command-help editor/uid/update_all
+批量更新项目中所有资源的 UID
 
-Usage: gdcli exec editor/scene/save [OPTIONS]
+Usage: gdcli exec editor/uid/update_all [OPTIONS]
 
 Arguments:
-  <scene_path>   场景文件路径 [required]
-  [new_path]     另存为路径
+  [project_path]   要扫描的项目子目录路径，默认为 res:// [default: "res://"]
 
-Example:
-  gdcli exec editor/scene/save --data '{"scene_path":"new.tscn"}'
+Returns:
+  处理结果统计
+
+Return Fields:
+  ok                   bool
+  scenes_processed     int, 处理的场景文件数
+  scenes_saved         int, 成功保存的场景数
+  scenes_errors        int, 保存失败的场景数
+  scripts_missing_uids int, 缺少 UID 的脚本数
+  uids_generated       int, 新生成的 UID 数
+
+Description:
+  扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题
 ```
 
 加 `--json` 切回原始的 minified JSON（脚本场景推荐）：
