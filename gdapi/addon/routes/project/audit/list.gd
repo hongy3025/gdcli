@@ -1,9 +1,10 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
+const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if not Engine.has_meta("gdapi_plugin"):
-		res.error("gdapi plugin is unavailable", "godot_error", 500)
+		res.error("gdapi plugin is unavailable", ErrorCodes.GODOT_ERROR, 500)
 		return
 	var plugin = Engine.get_meta("gdapi_plugin")
 	var since: int = int(req.get_body("since", 0))
