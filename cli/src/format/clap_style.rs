@@ -3,7 +3,6 @@
 //! 提供 `render_commands` 和 `render_command_help` 函数，
 //! 将 gdapi 响应转换为类似 clap 的帮助输出格式。
 
-#[allow(unused_imports)]
 use serde_json::Value;
 use std::borrow::Cow;
 
@@ -24,6 +23,11 @@ pub fn render_commands(body: &str) -> Cow<'_, str> {
         Some(o) => o,
         None => return Cow::Borrowed(body),
     };
+
+    let ok = obj.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !ok {
+        return Cow::Borrowed(body);
+    }
 
     let commands = match obj.get("commands").and_then(|v| v.as_array()) {
         Some(c) => c,
@@ -83,6 +87,11 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
         Some(o) => o,
         None => return Cow::Borrowed(body),
     };
+
+    let ok = obj.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !ok {
+        return Cow::Borrowed(body);
+    }
 
     let doc = match obj.get("doc").and_then(|v| v.as_object()) {
         Some(d) => d,
@@ -172,6 +181,34 @@ mod tests {
     fn render_commands_missing_commands_field() {
         let body = r#"{"ok":true}"#;
         let result = render_commands(body);
+        assert_eq!(result, body);
+    }
+
+    #[test]
+    fn render_commands_ok_false_fallback() {
+        let body = r#"{"ok":false,"commands":[]}"#;
+        let result = render_commands(body);
+        assert_eq!(result, body);
+    }
+
+    #[test]
+    fn render_commands_ok_missing_fallback() {
+        let body = r#"{"commands":[{"path":"ping","summary":"test"}]}"#;
+        let result = render_commands(body);
+        assert_eq!(result, body);
+    }
+
+    #[test]
+    fn render_command_help_ok_false_fallback() {
+        let body = r#"{"ok":false,"doc":{"path":"ping","summary":"test"}}"#;
+        let result = render_command_help(body);
+        assert_eq!(result, body);
+    }
+
+    #[test]
+    fn render_command_help_ok_missing_fallback() {
+        let body = r#"{"doc":{"path":"ping","summary":"test"}}"#;
+        let result = render_command_help(body);
         assert_eq!(result, body);
     }
 
