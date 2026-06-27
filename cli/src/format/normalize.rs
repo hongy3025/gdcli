@@ -160,7 +160,12 @@ mod tests {
     fn ok_field_moved_to_front() {
         let v = json!({"gdapi_version":"0.2.0","ok":true,"editor_version":"4.3"});
         let out = n(v);
-        let keys: Vec<&str> = out.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+        let keys: Vec<&str> = out
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
         assert_eq!(keys, vec!["ok", "gdapi_version", "editor_version"]);
     }
 

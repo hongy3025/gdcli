@@ -189,6 +189,30 @@ gdcli exec command-help editor/scene/save  # 查看命令详情
 - 字段统一的对象数组 → 紧凑表格（pipe 分隔）
 - 其它结构 → 树状列表
 
+`commands` 和 `command-help` 子命令使用 clap 风格输出，便于阅读：
+
+```bash
+# 列出所有命令（clap 风格）
+$ gdcli exec commands
+Commands:
+  ping                  健康检查
+  editor/scene/save     保存场景
+  shared/godot/version  获取 Godot 版本
+
+# 查看命令详情（clap 风格）
+$ gdcli exec command-help editor/scene/save
+保存场景
+
+Usage: gdcli exec editor/scene/save [OPTIONS]
+
+Arguments:
+  <scene_path>   场景文件路径 [required]
+  [new_path]     另存为路径
+
+Example:
+  gdcli exec editor/scene/save --data '{"scene_path":"new.tscn"}'
+```
+
 加 `--json` 切回原始的 minified JSON（脚本场景推荐）：
 
 ```bash

@@ -126,7 +126,9 @@ enum Cmd {
         no_enable: bool,
     },
     /// 调用 Godot 编辑器命令
-    #[command(after_help = "示例:\n  gdcli exec ping                         # 健康检查\n  gdcli exec commands                     # 列出所有命令\n  gdcli exec command-help godot/version   # 查看命令详情\n  gdcli exec scene/create --data '{\"scene_path\":\"new.tscn\"}'  # 创建场景")]
+    #[command(
+        after_help = "示例:\n  gdcli exec ping                         # 健康检查\n  gdcli exec commands                     # 列出所有命令\n  gdcli exec command-help godot/version   # 查看命令详情\n  gdcli exec scene/create --data '{\"scene_path\":\"new.tscn\"}'  # 创建场景"
+    )]
     Exec {
         /// 命令名
         command: String,
