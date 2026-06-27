@@ -100,28 +100,27 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
 
     let summary = doc.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let path = doc.get("path").and_then(|p| p.as_str()).unwrap_or("");
+    let params = doc.get("params").and_then(|p| p.as_array());
+    let has_params = params.map(|p| !p.is_empty()).unwrap_or(false);
 
     let mut output = String::new();
 
+    // 第一行：摘要
     output.push_str(summary);
     output.push('\n');
 
-    output.push_str(&format!("\nUsage: gdcli exec {} [OPTIONS]\n", path));
+    // Usage 行
+    if has_params {
+        output.push_str(&format!("\nUsage: gdcli exec {} --data {{DATA}}\n", path));
+    } else {
+        output.push_str(&format!("\nUsage: gdcli exec {}\n", path));
+    }
 
-    if let Some(params) = doc.get("params").and_then(|p| p.as_array()) {
+    // DATA 部分（JSON 格式）
+    if let Some(params) = params {
         if !params.is_empty() {
-            output.push_str("\nArguments:\n");
-
-            // 计算最长参数名，用于对齐
-            let max_name_len = params
-                .iter()
-                .filter_map(|p| p.as_object())
-                .filter_map(|p| p.get("name").and_then(|n| n.as_str()))
-                .map(|n| n.len())
-                .max()
-                .unwrap_or(0);
-
-            for param in params {
+            output.push_str("\nDATA:\n{\n");
+            for (i, param) in params.iter().enumerate() {
                 let param_obj = match param.as_object() {
                     Some(o) => o,
                     None => continue,
@@ -147,33 +146,41 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
                     }
                 });
 
-                let name_padding = " ".repeat(max_name_len - name.len() + 2);
                 let required_mark = if required { "required" } else { "optional" };
+                let default_value = match default {
+                    Some(d) => d.trim_matches('"').to_string(),
+                    None => "".to_string(),
+                };
+
+                // 构建 JSON 行
+                let comma = if i < params.len() - 1 { "," } else { "" };
                 let type_mark = if !type_name.is_empty() {
                     format!(" {}", type_name)
                 } else {
                     String::new()
                 };
-                let default_mark = match default {
-                    Some(d) => format!(", default: {}", d),
-                    None => String::new(),
-                };
-
                 output.push_str(&format!(
-                    "  {}{}({}{})  {}\n",
-                    name, name_padding, required_mark, type_mark, desc
+                    "  \"{}\": \"{}\"{} // ({}{})  {}\n",
+                    name, default_value, comma, required_mark, type_mark, desc
                 ));
-                if !default_mark.is_empty() {
-                    output.push_str(&format!("  {}{}\n", " ".repeat(max_name_len + 2), default_mark));
-                }
             }
+            output.push_str("}\n");
         }
     }
 
-    // 支持 "returns" 为字符串或对象
+    // 详细描述
+    if let Some(description) = doc.get("description").and_then(|d| d.as_str()) {
+        if !description.is_empty() {
+            output.push_str(&format!("\nDescription:\n  {}\n", description));
+        }
+    }
+
+    // Returns 部分
     match doc.get("returns") {
         Some(Value::String(s)) => {
-            output.push_str(&format!("\nReturns:\n  {}\n", s));
+            if !s.is_empty() {
+                output.push_str(&format!("\nReturns:\n  {}\n", s));
+            }
         }
         Some(Value::Object(obj)) => {
             let returns_desc = obj
@@ -196,7 +203,7 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
         _ => {}
     }
 
-    // 支持 "example" 字符串和 "examples" 数组
+    // Examples 部分
     if let Some(example) = doc.get("example").and_then(|e| e.as_str()) {
         if !example.is_empty() {
             output.push_str(&format!("\nExample:\n  {}\n", example));
@@ -209,13 +216,6 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
                     output.push_str(&format!("  {}\n", s));
                 }
             }
-        }
-    }
-
-    // 支持详细描述
-    if let Some(description) = doc.get("description").and_then(|d| d.as_str()) {
-        if !description.is_empty() {
-            output.push_str(&format!("\nDescription:\n  {}\n", description));
         }
     }
 
@@ -295,14 +295,15 @@ mod tests {
         let result = render_command_help(body);
         assert!(result.contains("保存场景"), "should contain summary");
         assert!(result.contains("Usage:"), "should contain usage");
-        assert!(result.contains("Arguments:"), "should contain arguments");
+        assert!(result.contains("--data {DATA}"), "should contain DATA placeholder");
+        assert!(result.contains("DATA:"), "should contain DATA section");
         assert!(
-            result.contains("scene_path"),
-            "should contain param name"
+            result.contains("\"scene_path\""),
+            "should contain param name in JSON"
         );
         assert!(
-            result.contains("new_path"),
-            "should contain param name"
+            result.contains("\"new_path\""),
+            "should contain param name in JSON"
         );
         assert!(result.contains("(required string)"), "should contain required mark and type");
         assert!(result.contains("(optional string)"), "should contain optional mark and type");
@@ -319,8 +320,12 @@ mod tests {
         assert!(result.contains("健康检查"), "should contain summary");
         assert!(result.contains("Usage:"), "should contain usage");
         assert!(
-            !result.contains("Arguments:"),
-            "should not contain arguments"
+            !result.contains("DATA:"),
+            "should not contain DATA section"
+        );
+        assert!(
+            !result.contains("--data {DATA}"),
+            "should not contain DATA placeholder"
         );
         assert!(!result.contains("Returns:"), "should not contain returns");
         assert!(!result.contains("Example:"), "should not contain example");
@@ -375,11 +380,12 @@ mod tests {
         let result = render_command_help(body);
         assert!(result.contains("批量更新项目中所有资源的 UID"), "should contain summary");
         assert!(result.contains("Usage:"), "should contain usage");
-        assert!(result.contains("Arguments:"), "should contain arguments");
-        assert!(result.contains("project_path"), "should contain param name");
+        assert!(result.contains("--data {DATA}"), "should contain DATA placeholder");
+        assert!(result.contains("DATA:"), "should contain DATA section");
+        assert!(result.contains("\"project_path\""), "should contain param name in JSON");
         assert!(result.contains("(optional String)"), "should contain optional mark and type");
         assert!(result.contains("要扫描的项目子目录路径"), "should contain param description");
-        assert!(result.contains("default:"), "should contain default value");
+        assert!(result.contains("\"res://\""), "should contain default value");
         assert!(result.contains("Returns:"), "should contain returns");
         assert!(result.contains("处理结果统计"), "should contain returns description");
         assert!(result.contains("Return Fields:"), "should contain return fields");

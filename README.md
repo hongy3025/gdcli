@@ -203,11 +203,15 @@ Commands:
 $ gdcli exec command-help editor/uid/update_all
 批量更新项目中所有资源的 UID
 
-Usage: gdcli exec editor/uid/update_all [OPTIONS]
+Usage: gdcli exec editor/uid/update_all --data {DATA}
 
-Arguments:
-  project_path  (optional String)  要扫描的项目子目录路径，默认为 res://
-                                    default: res://
+DATA:
+{
+  "project_path": "res://" // (optional String)  要扫描的项目子目录路径，默认为 res://
+}
+
+Description:
+  扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题
 
 Returns:
   处理结果统计
@@ -219,9 +223,6 @@ Return Fields:
   scenes_errors        int, 保存失败的场景数
   scripts_missing_uids int, 缺少 UID 的脚本数
   uids_generated       int, 新生成的 UID 数
-
-Description:
-  扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题
 ```
 
 加 `--json` 切回原始的 minified JSON（脚本场景推荐）：
