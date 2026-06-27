@@ -138,19 +138,8 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
                     .get("required")
                     .and_then(|r| r.as_bool())
                     .unwrap_or(false);
-                let default = param_obj.get("default").and_then(|d| {
-                    if d.is_null() {
-                        None
-                    } else {
-                        Some(d.to_string())
-                    }
-                });
 
                 let required_mark = if required { "required" } else { "optional" };
-                let default_value = match default {
-                    Some(d) => d.trim_matches('"').to_string(),
-                    None => "".to_string(),
-                };
 
                 // 构建 JSON 行
                 let comma = if i < params.len() - 1 { "," } else { "" };
@@ -159,9 +148,11 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
                 } else {
                     String::new()
                 };
+                // 占位文本：参数名大写，例如 scene_path -> SCENE_PATH
+                let placeholder = name.to_uppercase();
                 output.push_str(&format!(
                     "  \"{}\": \"{}\"{} // ({}{})  {}\n",
-                    name, default_value, comma, required_mark, type_mark, desc
+                    name, placeholder, comma, required_mark, type_mark, desc
                 ));
             }
             output.push_str("}\n");
@@ -385,7 +376,7 @@ mod tests {
         assert!(result.contains("\"project_path\""), "should contain param name in JSON");
         assert!(result.contains("(optional String)"), "should contain optional mark and type");
         assert!(result.contains("要扫描的项目子目录路径"), "should contain param description");
-        assert!(result.contains("\"res://\""), "should contain default value");
+        assert!(result.contains("PROJECT_PATH"), "should contain placeholder text");
         assert!(result.contains("Returns:"), "should contain returns");
         assert!(result.contains("处理结果统计"), "should contain returns description");
         assert!(result.contains("Return Fields:"), "should contain return fields");

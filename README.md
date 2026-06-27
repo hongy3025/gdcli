@@ -207,7 +207,7 @@ Usage: gdcli exec editor/uid/update_all --data {DATA}
 
 DATA:
 {
-  "project_path": "res://" // (optional String)  要扫描的项目子目录路径，默认为 res://
+  "project_path": "PROJECT_PATH" // (optional String)  要扫描的项目子目录路径，默认为 res://
 }
 
 Description:
