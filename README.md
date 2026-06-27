@@ -66,6 +66,23 @@ gdcli status --project /path/to/project
 
 ---
 
+## 开发验证
+
+M1 gdapi 路由基础设施端到端验证需要设置 `GODOT_BIN`：
+
+```bash
+GODOT_BIN=/path/to/godot ./scripts/e2e-m1-smoke.sh
+```
+
+Windows：
+
+```powershell
+$env:GODOT_BIN="C:\path\to\Godot.exe"
+./scripts/e2e-m1-smoke.ps1
+```
+
+---
+
 ## gdcli lsp
 
 所有 LSP 相关操作通过 `gdcli lsp <subcommand>` 访问。
