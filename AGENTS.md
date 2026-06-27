@@ -28,7 +28,6 @@ cargo build -p gdapi
 
 # 一键开发环境搭建（构建 + 符号链接 addon 到 fixture_project）
 python dev.py          # 跨平台
-./dev.sh               # Linux/macOS
 
 # 运行所有测试（单元测试 + 集成测试，不需要 Godot）
 cargo test --workspace
@@ -64,7 +63,8 @@ cargo fmt --check
 
 - `cli/tests/` — 集成测试，使用 mock LSP 和 httpmock，不需要 Godot
 - `gdapi/rust/tests/` — 需要 Godot 编辑器运行的端到端测试
-- `scripts/e2e-ping.ps1` / `e2e-ping.sh` — 手动端到端验证脚本
+- `scripts/e2e-ping.py` — 手动端到端验证脚本
+- `scripts/e2e-m1-smoke.py` — M1 路由基础设施端到端验证
 - 测试用 Godot 项目在 `tests/fixture_project/`，addon 需要先符号链接
 
 ## 注意事项
@@ -74,3 +74,4 @@ cargo fmt --check
 - 行列号参数是 1-based（与编辑器一致），内部转换为 0-based
 - `--project` 参数用于解析相对路径和发现 LSP 端口
 - LSP 端口发现优先级：`--port` > `.godot/gdapi.json` > 默认 6005
+- **所有辅助脚本一律使用 Python（.py）**，不使用 .sh 或 .ps1，确保跨平台兼容

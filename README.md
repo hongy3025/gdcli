@@ -68,18 +68,13 @@ gdcli status --project /path/to/project
 
 ## 开发验证
 
-M1 gdapi 路由基础设施端到端验证需要设置 `GODOT_BIN`：
+M1 gdapi 路由基础设施端到端验证：
 
 ```bash
-GODOT_BIN=/path/to/godot ./scripts/e2e-m1-smoke.sh
+python scripts/e2e-m1-smoke.py
 ```
 
-Windows：
-
-```powershell
-$env:GODOT_BIN="C:\path\to\Godot.exe"
-./scripts/e2e-m1-smoke.ps1
-```
+可选设置 `GODOT_BIN` 环境变量指定 Godot 路径（默认使用 PATH 中的 `godot`）。
 
 ---
 
