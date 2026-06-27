@@ -159,3 +159,28 @@ fn install_auto_detects_project_root() {
 
     assert!(dir.path().join("addons/gdapi/plugin.cfg").exists());
 }
+
+#[test]
+fn install_includes_m1_runtime_helpers() {
+    let dir = TempDir::new().unwrap();
+    make_godot_project(dir.path());
+
+    Command::cargo_bin("gdcli")
+        .unwrap()
+        .args(["install", "--project", dir.path().to_str().unwrap()])
+        .assert()
+        .success();
+
+    for file in [
+        "addons/gdapi/runtime/error_codes.gd",
+        "addons/gdapi/runtime/path_guard.gd",
+        "addons/gdapi/runtime/variant_codec.gd",
+        "addons/gdapi/runtime/edit_action.gd",
+        "addons/gdapi/routes/project/health/path_check.gd",
+    ] {
+        assert!(
+            dir.path().join(file).exists(),
+            "missing installed file: {file}"
+        );
+    }
+}
