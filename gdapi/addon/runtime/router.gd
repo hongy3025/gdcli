@@ -51,10 +51,8 @@ func scan(root_dir: String, force: bool = false) -> void:
 
 	_routes["ping"] = BuiltinPing
 
-	_scan_context_dir(root_dir, "editor", force)
-	_scan_context_dir(root_dir, "shared", force)
-	_scan_context_dir(root_dir, "runtime", force)
-	_scan_context_dir(root_dir, "project", force)
+	# 统一扫描 routes/ 目录下的所有子目录
+	_scan_dir_with_mtime(root_dir, "", force)
 
 	if _needs_update:
 		_refresh_builtin_handlers()
@@ -66,10 +64,6 @@ func scan(root_dir: String, force: bool = false) -> void:
 func count() -> int:
 	# _routes 已含 ping；额外四个内置命令：routes + help + commands + command-help
 	return _routes.size() + 4
-
-func _scan_context_dir(root_dir: String, context: String, force: bool) -> void:
-	var dir_path := root_dir + "/" + context
-	_scan_dir_with_mtime(dir_path, context, force)
 
 func _refresh_builtin_handlers() -> void:
 	_builtin_routes_handler = BuiltinRoutes.new()
