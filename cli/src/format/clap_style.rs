@@ -118,11 +118,23 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
                 };
 
                 let name = param_obj.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                let desc = param_obj.get("desc").and_then(|d| d.as_str()).unwrap_or("");
+                // 支持 "desc" 和 "description" 两种字段名
+                let desc = param_obj
+                    .get("desc")
+                    .or_else(|| param_obj.get("description"))
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
                 let required = param_obj
                     .get("required")
                     .and_then(|r| r.as_bool())
                     .unwrap_or(false);
+                let default = param_obj.get("default").and_then(|d| {
+                    if d.is_null() {
+                        None
+                    } else {
+                        Some(d.to_string())
+                    }
+                });
 
                 let param_format = if required {
                     format!("<{}>", name)
@@ -132,21 +144,66 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
 
                 let padding = " ".repeat(14usize.saturating_sub(param_format.len()));
                 let required_mark = if required { " [required]" } else { "" };
+                let default_mark = match default {
+                    Some(d) => format!(" [default: {}]", d),
+                    None => String::new(),
+                };
 
                 output.push_str(&format!(
-                    "  {}{}{}{}\n",
-                    param_format, padding, desc, required_mark
+                    "  {}{}{}{}{}\n",
+                    param_format, padding, desc, required_mark, default_mark
                 ));
             }
         }
     }
 
-    if let Some(returns) = doc.get("returns").and_then(|r| r.as_str()) {
-        output.push_str(&format!("\nReturns:\n  {}\n", returns));
+    // 支持 "returns" 为字符串或对象
+    match doc.get("returns") {
+        Some(Value::String(s)) => {
+            output.push_str(&format!("\nReturns:\n  {}\n", s));
+        }
+        Some(Value::Object(obj)) => {
+            let returns_desc = obj
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("");
+            if !returns_desc.is_empty() {
+                output.push_str(&format!("\nReturns:\n  {}\n", returns_desc));
+            }
+            if let Some(fields) = obj.get("fields").and_then(|f| f.as_object()) {
+                if !fields.is_empty() {
+                    output.push_str("\nReturn Fields:\n");
+                    for (key, value) in fields {
+                        let field_desc = value.as_str().unwrap_or("");
+                        output.push_str(&format!("  {:<20} {}\n", key, field_desc));
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 
+    // 支持 "example" 字符串和 "examples" 数组
     if let Some(example) = doc.get("example").and_then(|e| e.as_str()) {
-        output.push_str(&format!("\nExample:\n  {}\n", example));
+        if !example.is_empty() {
+            output.push_str(&format!("\nExample:\n  {}\n", example));
+        }
+    } else if let Some(examples) = doc.get("examples").and_then(|e| e.as_array()) {
+        if !examples.is_empty() {
+            output.push_str("\nExamples:\n");
+            for example in examples {
+                if let Some(s) = example.as_str() {
+                    output.push_str(&format!("  {}\n", s));
+                }
+            }
+        }
+    }
+
+    // 支持详细描述
+    if let Some(description) = doc.get("description").and_then(|d| d.as_str()) {
+        if !description.is_empty() {
+            output.push_str(&format!("\nDescription:\n  {}\n", description));
+        }
     }
 
     Cow::Owned(output)
@@ -264,5 +321,88 @@ mod tests {
         let body = "not json";
         let result = render_command_help(body);
         assert_eq!(result, body);
+    }
+
+    #[test]
+    fn render_command_help_gdapi_real_format() {
+        // 模拟实际 gdapi 返回的格式
+        let body = r#"{
+            "ok": true,
+            "doc": {
+                "path": "editor/uid/update_all",
+                "summary": "批量更新项目中所有资源的 UID",
+                "description": "扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题",
+                "params": [
+                    {
+                        "name": "project_path",
+                        "type": "String",
+                        "required": false,
+                        "description": "要扫描的项目子目录路径，默认为 res://",
+                        "default": "res://"
+                    }
+                ],
+                "returns": {
+                    "description": "处理结果统计",
+                    "fields": {
+                        "ok": "bool",
+                        "scenes_processed": "int, 处理的场景文件数",
+                        "scenes_saved": "int, 成功保存的场景数",
+                        "scenes_errors": "int, 保存失败的场景数",
+                        "scripts_missing_uids": "int, 缺少 UID 的脚本数",
+                        "uids_generated": "int, 新生成的 UID 数"
+                    }
+                },
+                "examples": []
+            }
+        }"#;
+        let result = render_command_help(body);
+        assert!(result.contains("批量更新项目中所有资源的 UID"), "should contain summary");
+        assert!(result.contains("Usage:"), "should contain usage");
+        assert!(result.contains("Arguments:"), "should contain arguments");
+        assert!(result.contains("[project_path]"), "should contain optional param");
+        assert!(result.contains("要扫描的项目子目录路径"), "should contain param description");
+        assert!(result.contains("[default: \"res://\"]"), "should contain default value");
+        assert!(result.contains("Returns:"), "should contain returns");
+        assert!(result.contains("处理结果统计"), "should contain returns description");
+        assert!(result.contains("Return Fields:"), "should contain return fields");
+        assert!(result.contains("scenes_processed"), "should contain field name");
+        assert!(result.contains("Description:"), "should contain description section");
+        assert!(result.contains("扫描指定目录下的场景文件"), "should contain description text");
+    }
+
+    #[test]
+    fn render_command_help_with_examples_array() {
+        let body = r#"{
+            "ok": true,
+            "doc": {
+                "path": "editor/scene/save",
+                "summary": "保存场景",
+                "description": "",
+                "params": [],
+                "returns": {"description": "", "fields": {}},
+                "examples": ["gdcli exec editor/scene/save --data '{\"scene_path\":\"new.tscn\"}'"]
+            }
+        }"#;
+        let result = render_command_help(body);
+        assert!(result.contains("Examples:"), "should contain examples header");
+        assert!(result.contains("gdcli exec editor/scene/save"), "should contain example");
+    }
+
+    #[test]
+    fn render_command_help_with_description_field() {
+        let body = r#"{
+            "ok": true,
+            "doc": {
+                "path": "test",
+                "summary": "测试命令",
+                "description": "这是详细描述",
+                "params": [],
+                "returns": {"description": "", "fields": {}},
+                "examples": []
+            }
+        }"#;
+        let result = render_command_help(body);
+        assert!(result.contains("Description:"), "should contain description header");
+        assert!(result.contains("这是详细描述"), "should contain description text");
     }
 }
