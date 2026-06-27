@@ -639,8 +639,12 @@ fn exec_command_help_clap_style_output() {
         "should contain usage, got: {stdout}"
     );
     assert!(
-        stdout.contains("<scene_path>"),
-        "should contain param, got: {stdout}"
+        stdout.contains("scene_path"),
+        "should contain param name, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("(required string)"),
+        "should contain param type, got: {stdout}"
     );
 
     mock.assert();

@@ -206,7 +206,8 @@ $ gdcli exec command-help editor/uid/update_all
 Usage: gdcli exec editor/uid/update_all [OPTIONS]
 
 Arguments:
-  [project_path]   要扫描的项目子目录路径，默认为 res:// (String) [default: "res://"]
+  project_path  (optional String)  要扫描的项目子目录路径，默认为 res://
+                                    default: res://
 
 Returns:
   处理结果统计

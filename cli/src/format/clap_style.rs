@@ -111,6 +111,16 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
     if let Some(params) = doc.get("params").and_then(|p| p.as_array()) {
         if !params.is_empty() {
             output.push_str("\nArguments:\n");
+
+            // 计算最长参数名，用于对齐
+            let max_name_len = params
+                .iter()
+                .filter_map(|p| p.as_object())
+                .filter_map(|p| p.get("name").and_then(|n| n.as_str()))
+                .map(|n| n.len())
+                .max()
+                .unwrap_or(0);
+
             for param in params {
                 let param_obj = match param.as_object() {
                     Some(o) => o,
@@ -137,28 +147,25 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
                     }
                 });
 
-                let param_format = if required {
-                    format!("<{}>", name)
-                } else {
-                    format!("[{}]", name)
-                };
-
-                let padding = " ".repeat(14usize.saturating_sub(param_format.len()));
-                let required_mark = if required { " [required]" } else { "" };
+                let name_padding = " ".repeat(max_name_len - name.len() + 2);
+                let required_mark = if required { "required" } else { "optional" };
                 let type_mark = if !type_name.is_empty() {
-                    format!(" ({})", type_name)
+                    format!(" {}", type_name)
                 } else {
                     String::new()
                 };
                 let default_mark = match default {
-                    Some(d) => format!(" [default: {}]", d),
+                    Some(d) => format!(", default: {}", d),
                     None => String::new(),
                 };
 
                 output.push_str(&format!(
-                    "  {}{}{}{}{}{}\n",
-                    param_format, padding, desc, type_mark, required_mark, default_mark
+                    "  {}{}({}{})  {}\n",
+                    name, name_padding, required_mark, type_mark, desc
                 ));
+                if !default_mark.is_empty() {
+                    output.push_str(&format!("  {}{}\n", " ".repeat(max_name_len + 2), default_mark));
+                }
             }
         }
     }
@@ -290,15 +297,17 @@ mod tests {
         assert!(result.contains("Usage:"), "should contain usage");
         assert!(result.contains("Arguments:"), "should contain arguments");
         assert!(
-            result.contains("<scene_path>"),
-            "should contain required param"
+            result.contains("scene_path"),
+            "should contain param name"
         );
         assert!(
-            result.contains("[new_path]"),
-            "should contain optional param"
+            result.contains("new_path"),
+            "should contain param name"
         );
-        assert!(result.contains("(string)"), "should contain type info");
-        assert!(result.contains("[required]"), "should contain required mark");
+        assert!(result.contains("(required string)"), "should contain required mark and type");
+        assert!(result.contains("(optional string)"), "should contain optional mark and type");
+        assert!(result.contains("场景文件路径"), "should contain param description");
+        assert!(result.contains("另存为路径"), "should contain param description");
         assert!(result.contains("Returns:"), "should contain returns");
         assert!(result.contains("Example:"), "should contain example");
     }
@@ -367,10 +376,10 @@ mod tests {
         assert!(result.contains("批量更新项目中所有资源的 UID"), "should contain summary");
         assert!(result.contains("Usage:"), "should contain usage");
         assert!(result.contains("Arguments:"), "should contain arguments");
-        assert!(result.contains("[project_path]"), "should contain optional param");
+        assert!(result.contains("project_path"), "should contain param name");
+        assert!(result.contains("(optional String)"), "should contain optional mark and type");
         assert!(result.contains("要扫描的项目子目录路径"), "should contain param description");
-        assert!(result.contains("(String)"), "should contain type info");
-        assert!(result.contains("[default: \"res://\"]"), "should contain default value");
+        assert!(result.contains("default:"), "should contain default value");
         assert!(result.contains("Returns:"), "should contain returns");
         assert!(result.contains("处理结果统计"), "should contain returns description");
         assert!(result.contains("Return Fields:"), "should contain return fields");
