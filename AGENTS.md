@@ -27,7 +27,7 @@ cargo build --workspace
 cargo build -p gdapi
 
 # 一键开发环境搭建（构建 + 符号链接 addon 到 fixture_project）
-python dev.py          # 跨平台
+python scripts/setup-dev.py          # 跨平台
 
 # 运行所有测试（单元测试 + 集成测试，不需要 Godot）
 cargo test --workspace
@@ -57,7 +57,7 @@ uv run pytest tests/e2e/ -v -m "not e2e" # 跳过 e2e 测试
 ## 开发环境搭建
 
 1. `cargo build --workspace` — 编译所有产物
-2. `python dev.py` — 自动创建符号链接：
+2. `python scripts/setup-dev.py` — 自动创建符号链接：
    - `target/debug/gdapi.dll` → `gdapi/addon/bin/windows/gdapi.dll`
    - `gdapi/addon/` → `tests/fixture_project/addons/gdapi/`
 3. 打开 Godot 编辑器加载 fixture_project 即可测试

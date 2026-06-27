@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""设置开发环境：创建 bin/ 符号链接指向编译产物。
+"""设置开发环境：编译、创建 bin/ 符号链接、链接 addon 到 fixture_project。
 
 用法：
-  python scripts/setup-dev.py          # 设置当前平台
-  python scripts/setup-dev.py --all    # 设置所有平台
+  python dev.py                    # 构建 + 链接
+  python dev.py --no-build         # 仅链接（跳过 cargo build）
+  python dev.py --no-link          # 仅构建 + bin 链接（不链接 addon 到 fixture）
+  python dev.py --all              # 创建所有平台的 bin 链接
 """
 import argparse
 import os
 import platform
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,68 +38,112 @@ LIB_NAMES = {
 }
 
 
-def create_link(platform_name: str, addon_bin: Path, target_debug: Path) -> None:
-    lib = LIB_NAMES.get(platform_name)
-    if not lib:
-        print(f"  WARN unknown platform: {platform_name}")
-        return
+def _remove_path(p: Path) -> None:
+    if p.is_symlink() or p.exists():
+        try:
+            p.unlink()
+        except OSError:
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                raise
 
-    dest = addon_bin / platform_name / lib
-    src = target_debug / lib
 
-    gitkeep = dest.parent / ".gitkeep"
-    if gitkeep.exists():
-        gitkeep.unlink()
-
-    if not src.exists():
-        print(f"  WARN {platform_name}: {lib} not found in {target_debug}")
-        return
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists() or dest.is_symlink():
-        dest.unlink()
-
-    if platform_name == "windows":
-        shutil.copy2(src, dest)
-        print(f"  OK {platform_name}: {lib} -> {src} (copy)")
+def _create_link(source: Path, target: Path) -> None:
+    """创建符号链接，Windows 目录用 junction（不需要管理员权限），文件用复制。"""
+    _remove_path(target)
+    if sys.platform == "win32":
+        if source.is_dir():
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(target), str(source)],
+                check=True, capture_output=True,
+            )
+        else:
+            shutil.copy2(source, target)
     else:
-        dest.symlink_to(src)
-        print(f"  OK {platform_name}: {lib} -> {src}")
+        if source.is_dir():
+            os.symlink(source, target, target_is_directory=True)
+        else:
+            os.symlink(source, target)
+
+
+def setup_bin_links(root: Path, platform_name: str | None = None) -> None:
+    """将 target/debug 下的 GDExtension 库链接到 addon/bin/<platform>/。"""
+    addon_bin = root / "gdapi" / "addon" / "bin"
+    target_debug = root / "target" / "debug"
+
+    if not target_debug.exists():
+        print(f"Warning: {target_debug} does not exist. Run 'cargo build' first.")
+        return
+
+    platforms = [platform_name] if platform_name else [detect_platform()]
+    for plat in platforms:
+        lib = LIB_NAMES.get(plat)
+        if not lib:
+            print(f"  WARN unknown platform: {plat}")
+            continue
+
+        dest = addon_bin / plat / lib
+        src = target_debug / lib
+
+        gitkeep = dest.parent / ".gitkeep"
+        if gitkeep.exists():
+            gitkeep.unlink()
+
+        if not src.exists():
+            print(f"  WARN {plat}: {lib} not found in {target_debug}")
+            continue
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _create_link(src, dest)
+        print(f"  OK {plat}: {lib} -> {src}")
+
+
+def link_addon_to_fixture(root: Path) -> None:
+    """将 gdapi/addon/ 链接到 tests/fixture_project/addons/gdapi/。"""
+    fixture = root / "tests" / "fixture_project"
+    addon_dir = fixture / "addons" / "gdapi"
+    addon_source = root / "gdapi" / "addon"
+
+    _remove_path(addon_dir)
+    addon_dir.parent.mkdir(parents=True, exist_ok=True)
+    _create_link(addon_source, addon_dir)
+    print(f"  OK addon linked: {addon_dir} -> {addon_source}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Setup gdapi dev environment")
-    parser.add_argument("--all", action="store_true", help="Create links for all platforms")
+    parser.add_argument("--all", action="store_true", help="Create bin links for all platforms")
+    parser.add_argument("--no-build", action="store_true", help="Skip cargo build")
+    parser.add_argument("--no-link", action="store_true", help="Skip addon->fixture link")
     args = parser.parse_args()
 
     root = repo_root()
-    addon_bin = root / "gdapi" / "addon" / "bin"
-    target_debug = root / "target" / "debug"
 
-    print("Setting up gdapi dev environment...")
-    print(f"  Repo root: {root}")
-    print(f"  Addon bin: {addon_bin}")
-    print(f"  Target debug: {target_debug}")
-    print()
-
-    if not target_debug.exists():
-        print(f"Warning: {target_debug} does not exist. Run 'cargo build' first.")
-
-    if args.all:
-        print("Creating symlinks for all platforms:")
-        for p in ("linux", "macos", "windows"):
-            create_link(p, addon_bin, target_debug)
+    # 1. Build
+    if not args.no_build:
+        print("Building workspace...")
+        result = subprocess.run(["cargo", "build", "--workspace"], cwd=root)
+        if result.returncode != 0:
+            print("Build failed!")
+            return result.returncode
     else:
-        p = detect_platform()
-        if p == "unknown":
-            print("Error: Could not detect platform. Use --all to create all links.")
-            return 1
-        print(f"Creating link for platform: {p}")
-        create_link(p, addon_bin, target_debug)
+        print("Skipping cargo build (--no-build)")
+
+    # 2. Setup bin links
+    print("Setting up bin links...")
+    plat = None if args.all else None
+    setup_bin_links(root, plat)
+
+    # 3. Link addon to fixture
+    if not args.no_link:
+        print("Linking addon to fixture...")
+        link_addon_to_fixture(root)
+    else:
+        print("Skipping addon link (--no-link)")
 
     print()
-    print("Done! You can now link the addon to your Godot project:")
-    print(f"  ln -s {root / 'gdapi' / 'addon'} /path/to/your/project/addons/gdapi")
+    print("Done!")
     return 0
 
 

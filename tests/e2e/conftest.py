@@ -54,9 +54,9 @@ def godot_env():
     if install.returncode != 0:
         pytest.skip(f"gdcli install failed:\n{install.stderr}")
 
-    # Setup bin links
+    # Setup bin links + link addon to fixture
     subprocess.run(
-        [sys.executable, str(root / "scripts" / "setup-dev.py")],
+        [sys.executable, str(root / "scripts" / "setup-dev.py"), "--no-build"],
         capture_output=True,
     )
 
