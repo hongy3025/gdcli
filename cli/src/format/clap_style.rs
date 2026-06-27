@@ -124,6 +124,7 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
                     .or_else(|| param_obj.get("description"))
                     .and_then(|d| d.as_str())
                     .unwrap_or("");
+                let type_name = param_obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
                 let required = param_obj
                     .get("required")
                     .and_then(|r| r.as_bool())
@@ -144,14 +145,19 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
 
                 let padding = " ".repeat(14usize.saturating_sub(param_format.len()));
                 let required_mark = if required { " [required]" } else { "" };
+                let type_mark = if !type_name.is_empty() {
+                    format!(" ({})", type_name)
+                } else {
+                    String::new()
+                };
                 let default_mark = match default {
                     Some(d) => format!(" [default: {}]", d),
                     None => String::new(),
                 };
 
                 output.push_str(&format!(
-                    "  {}{}{}{}{}\n",
-                    param_format, padding, desc, required_mark, default_mark
+                    "  {}{}{}{}{}{}\n",
+                    param_format, padding, desc, type_mark, required_mark, default_mark
                 ));
             }
         }
@@ -291,6 +297,8 @@ mod tests {
             result.contains("[new_path]"),
             "should contain optional param"
         );
+        assert!(result.contains("(string)"), "should contain type info");
+        assert!(result.contains("[required]"), "should contain required mark");
         assert!(result.contains("Returns:"), "should contain returns");
         assert!(result.contains("Example:"), "should contain example");
     }
@@ -361,6 +369,7 @@ mod tests {
         assert!(result.contains("Arguments:"), "should contain arguments");
         assert!(result.contains("[project_path]"), "should contain optional param");
         assert!(result.contains("要扫描的项目子目录路径"), "should contain param description");
+        assert!(result.contains("(String)"), "should contain type info");
         assert!(result.contains("[default: \"res://\"]"), "should contain default value");
         assert!(result.contains("Returns:"), "should contain returns");
         assert!(result.contains("处理结果统计"), "should contain returns description");
