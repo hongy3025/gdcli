@@ -68,8 +68,7 @@ uv run pytest tests/e2e/ -v -m "not e2e" # 跳过 e2e 测试
 
 - `cli/tests/` — 集成测试，使用 mock LSP 和 httpmock，不需要 Godot
 - `gdapi/rust/tests/` — 需要 Godot 编辑器运行的端到端测试
-- `scripts/e2e-ping.py` — 手动端到端验证脚本
-- `scripts/e2e-m1-smoke.py` — M1 路由基础设施端到端验证
+- `scripts/` — 开发脚本（Python）
 - `tests/e2e/` — pytest E2E 测试（需要 Godot，用 uv 管理 Python venv）
 - 测试用 Godot 项目在 `tests/fixture_project/`，addon 需要先符号链接
 
