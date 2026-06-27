@@ -86,9 +86,9 @@ static func from_variant(value: Variant) -> Variant:
 		TYPE_QUATERNION: return {"type":"Quaternion", "value":[value.x, value.y, value.z, value.w]}
 		TYPE_TRANSFORM2D:
 			return {"type":"Transform2D", "value":[
-				from_variant(value.origin).value,
 				from_variant(value.x).value,
 				from_variant(value.y).value,
+				from_variant(value.origin).value,
 			]}
 		TYPE_BASIS:
 			return {"type":"Basis", "value":[
