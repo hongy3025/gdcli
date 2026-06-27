@@ -177,6 +177,9 @@ fn install_includes_m1_runtime_helpers() {
         "addons/gdapi/runtime/variant_codec.gd",
         "addons/gdapi/runtime/edit_action.gd",
         "addons/gdapi/routes/project/health/path_check.gd",
+        "addons/gdapi/runtime/audit_log.gd",
+        "addons/gdapi/routes/project/audit/list.gd",
+        "addons/gdapi/routes/project/audit/clear.gd",
     ] {
         assert!(
             dir.path().join(file).exists(),

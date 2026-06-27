@@ -37,6 +37,11 @@ var _log_seq: int = 0
 ## 当前全局日志级别，默认 INFO
 var _log_level: int = LOG_INFO
 
+const MAX_AUDIT_ENTRIES: int = 1000
+
+var _audit_buffer: Array = []
+var _audit_seq: int = 0
+
 ## 插件初始化入口
 ##
 ## 当插件被加载到编辑器时调用。执行以下初始化流程：
@@ -136,6 +141,27 @@ func get_log_since(since: int, limit: int) -> Array:
 			if entries.size() >= limit:
 				break
 	return entries
+
+func audit_event(event: Dictionary) -> void:
+	_audit_seq += 1
+	var entry := event.duplicate(true)
+	entry["seq"] = _audit_seq
+	entry["ts"] = Time.get_unix_time_from_system()
+	_audit_buffer.append(entry)
+	if _audit_buffer.size() > MAX_AUDIT_ENTRIES:
+		_audit_buffer.pop_front()
+
+func get_audit_since(since: int, limit: int) -> Array:
+	var entries: Array = []
+	for entry in _audit_buffer:
+		if entry.seq > since:
+			entries.append(entry)
+			if entries.size() >= limit:
+				break
+	return entries
+
+func clear_audit() -> void:
+	_audit_buffer.clear()
 
 ## 从 plugin.cfg 读取版本号
 ##
