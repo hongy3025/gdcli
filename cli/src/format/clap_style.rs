@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn render_command_help_full_doc() {
-        let body = r#"{"ok":true,"doc":{"path":"editor/scene/save","summary":"保存场景","params":[{"name":"scene_path","type":"string","required":true,"desc":"场景文件路径"},{"name":"new_path","type":"string","required":false,"desc":"另存为路径"}],"returns":"bool","example":"gdcli exec editor/scene/save --data '{\"scene_path\":\"new.tscn\"}'"}}"#;
+        let body = r#"{"ok":true,"doc":{"path":"scene/save","summary":"保存场景","params":[{"name":"scene_path","type":"string","required":true,"desc":"场景文件路径"},{"name":"new_path","type":"string","required":false,"desc":"另存为路径"}],"returns":"bool","example":"gdcli exec scene/save --data '{\"scene_path\":\"new.tscn\"}'"}}"#;
         let result = render_command_help(body);
         assert!(result.contains("保存场景"), "should contain summary");
         assert!(result.contains("Usage:"), "should contain usage");
@@ -390,17 +390,17 @@ mod tests {
         let body = r#"{
             "ok": true,
             "doc": {
-                "path": "editor/scene/save",
+                "path": "scene/save",
                 "summary": "保存场景",
                 "description": "",
                 "params": [],
                 "returns": {"description": "", "fields": {}},
-                "examples": ["gdcli exec editor/scene/save --data '{\"scene_path\":\"new.tscn\"}'"]
+                "examples": ["gdcli exec scene/save --data '{\"scene_path\":\"new.tscn\"}'"]
             }
         }"#;
         let result = render_command_help(body);
         assert!(result.contains("Examples:"), "should contain examples header");
-        assert!(result.contains("gdcli exec editor/scene/save"), "should contain example");
+        assert!(result.contains("gdcli exec scene/save"), "should contain example");
     }
 
     #[test]

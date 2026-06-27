@@ -178,7 +178,7 @@ gdcli exec ping --project /path/to/project
 
 ```bash
 gdcli exec commands                     # 列出所有命令
-gdcli exec command-help editor/scene/save  # 查看命令详情
+gdcli exec command-help scene/save  # 查看命令详情
 ```
 
 ### 输出格式
@@ -200,10 +200,10 @@ Commands:
   shared/godot/version  获取 Godot 版本
 
 # 查看命令详情（clap 风格）
-$ gdcli exec command-help editor/uid/update_all
+$ gdcli exec command-help uid/update_all
 批量更新项目中所有资源的 UID
 
-Usage: gdcli exec editor/uid/update_all --data {DATA}
+Usage: gdcli exec uid/update_all --data {DATA}
 
 DATA:
 {
