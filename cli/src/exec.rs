@@ -94,7 +94,11 @@ pub fn run(
                 let reordered = format::reorder_ok_json(&body);
                 print!("{}", reordered);
             } else {
-                let rendered = format::render_exec_body(&body);
+                let rendered = match command {
+                    "commands" => format::clap_style::render_commands(&body),
+                    "command-help" => format::clap_style::render_command_help(&body),
+                    _ => format::render_exec_body(&body),
+                };
                 print!("{}", rendered);
                 if !rendered.ends_with('\n') {
                     println!();
@@ -334,7 +338,11 @@ mod build_body_tests {
         let out = build_body("commands", &args(&["unexpected"]), None).unwrap();
         match out {
             BuildBodyOutcome::Reject(m) => {
-                assert!(m.contains("arguments"), "msg should mention arguments: {}", m)
+                assert!(
+                    m.contains("arguments"),
+                    "msg should mention arguments: {}",
+                    m
+                )
             }
             BuildBodyOutcome::Body(_) => panic!("should reject"),
         }
@@ -376,7 +384,11 @@ mod build_body_tests {
         let out = build_body("command-help", &args(&["a", "b"]), None).unwrap();
         match out {
             BuildBodyOutcome::Reject(m) => {
-                assert!(m.contains("exactly one"), "msg should mention exactly one: {}", m)
+                assert!(
+                    m.contains("exactly one"),
+                    "msg should mention exactly one: {}",
+                    m
+                )
             }
             BuildBodyOutcome::Body(_) => panic!("should reject"),
         }

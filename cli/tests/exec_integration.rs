@@ -201,10 +201,15 @@ fn exec_commands_list_passes_through_server_json() {
 
     Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["exec", "commands", "--project", dir.path().to_str().unwrap()])
+        .args([
+            "exec",
+            "commands",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
         .assert()
         .success()
-        .stdout(predicates::str::contains("commands"))
+        .stdout(predicates::str::contains("Commands:"))
         .stdout(predicates::str::contains("ping"));
 
     mock.assert();
@@ -315,7 +320,7 @@ fn exec_json_flag_outputs_raw_json() {
 }
 
 #[test]
-fn exec_toon_tabular_uniform_array() {
+fn exec_commands_clap_style_two_commands() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST).path("/commands");
@@ -333,7 +338,12 @@ fn exec_toon_tabular_uniform_array() {
 
     let output = Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["exec", "commands", "--project", dir.path().to_str().unwrap()])
+        .args([
+            "exec",
+            "commands",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
         .output()
         .unwrap();
 
@@ -343,18 +353,20 @@ fn exec_toon_tabular_uniform_array() {
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(stdout.contains("ok: true"), "got: {stdout}");
     assert!(
-        stdout.contains("commands[2|]{path|summary}:"),
-        "expected pipe tabular header, got: {stdout}"
+        stdout.contains("Commands:"),
+        "should contain header, got: {stdout}"
     );
-    assert!(stdout.contains("ping|健康检查"), "got: {stdout}");
+    assert!(stdout.contains("ping"), "got: {stdout}");
+    assert!(stdout.contains("健康检查"), "got: {stdout}");
+    assert!(stdout.contains("echo"), "got: {stdout}");
+    assert!(stdout.contains("回显"), "got: {stdout}");
 
     mock.assert();
 }
 
 #[test]
-fn exec_toon_with_r1_empty_array() {
+fn exec_commands_clap_style_with_params() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST).path("/commands");
@@ -372,21 +384,23 @@ fn exec_toon_with_r1_empty_array() {
 
     let output = Command::cargo_bin("gdcli")
         .unwrap()
-        .args(["exec", "commands", "--project", dir.path().to_str().unwrap()])
+        .args([
+            "exec",
+            "commands",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
         .output()
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
     assert!(
-        stdout.contains("commands[2|]{path|params}:"),
-        "R1 should coerce to tabular, got: {stdout}"
+        stdout.contains("Commands:"),
+        "should contain header, got: {stdout}"
     );
-    assert!(
-        stdout.contains("ping|"),
-        "empty array should become empty cell, got: {stdout}"
-    );
-    assert!(stdout.contains("echo|x"), "got: {stdout}");
+    assert!(stdout.contains("ping"), "got: {stdout}");
+    assert!(stdout.contains("echo"), "got: {stdout}");
 
     mock.assert();
 }
@@ -491,7 +505,8 @@ fn exec_command_help_with_path_sends_command_body() {
         ])
         .assert()
         .success()
-        .stdout(predicates::str::contains("doc"));
+        .stdout(predicates::str::contains("保存场景"))
+        .stdout(predicates::str::contains("Usage:"));
 
     mock.assert();
 }
@@ -525,6 +540,156 @@ fn exec_command_help_nonexistent_path_returns_exit_code_2() {
         .failure()
         .code(2)
         .stderr(predicates::str::contains("Error (404)"));
+}
+
+#[test]
+fn exec_commands_clap_style_output() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/commands")
+            .json_body_obj(&serde_json::json!({}));
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"ok":true,"commands":[{"path":"ping","summary":"健康检查","params":[]}]}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"lsp_port":6005,"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "commands",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("Commands:"),
+        "should contain header, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("ping"),
+        "should contain ping command, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("健康检查"),
+        "should contain summary, got: {stdout}"
+    );
+
+    mock.assert();
+}
+
+#[test]
+fn exec_command_help_clap_style_output() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/command-help")
+            .json_body_obj(&serde_json::json!({"command": "editor/scene/save"}));
+        then.status(200)
+            .body(r#"{"ok":true,"doc":{"path":"editor/scene/save","summary":"保存场景","params":[{"name":"scene_path","type":"string","required":true,"desc":"场景文件路径"}]}}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"lsp_port":6005,"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "exec",
+            "command-help",
+            "editor/scene/save",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("保存场景"),
+        "should contain summary, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Usage:"),
+        "should contain usage, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("<scene_path>"),
+        "should contain param, got: {stdout}"
+    );
+
+    mock.assert();
+}
+
+#[test]
+fn exec_commands_json_flag_preserves_raw() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/commands")
+            .json_body_obj(&serde_json::json!({}));
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"ok":true,"commands":[{"path":"ping","summary":"健康检查","params":[]}]}"#);
+    });
+
+    let meta = format!(
+        r#"{{"http_port":{},"lsp_port":6005,"pid":{},"gdapi_version":"0.2.0"}}"#,
+        server.port(),
+        std::process::id()
+    );
+    let dir = setup_fake_project(&meta);
+
+    let output = Command::cargo_bin("gdcli")
+        .unwrap()
+        .args([
+            "--json",
+            "exec",
+            "commands",
+            "--project",
+            dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    // JSON 模式应该输出原始 JSON，而不是 clap 风格
+    assert!(
+        stdout.contains(r#""ok":true"#),
+        "should contain raw JSON, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Commands:"),
+        "should not contain clap header, got: {stdout}"
+    );
+
+    mock.assert();
 }
 
 #[test]
