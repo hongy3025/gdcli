@@ -10,33 +10,11 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 ## 完整路由表：{ path: handler_script }，由 router 注入
 var _routes: Dictionary = {}
 
-## 已注册的路由名称列表
-var _route_names: Array = []
-var _route_meta: Dictionary = {}
-
 ## 由 router 在扫描完成后调用，传入完整路由表
 ##
 ## @param routes 路由表字典
 func set_routes(routes: Dictionary) -> void:
 	_routes = routes
-
-func set_route_meta(route_meta: Dictionary) -> void:
-	_route_meta = route_meta
-
-func _apply_meta(path: String, doc: Dictionary) -> Dictionary:
-	var meta: Dictionary = _route_meta.get(path, {"canonical_path": path, "aliases": [], "is_alias": false})
-	doc["path"] = path
-	doc["canonical_path"] = meta.get("canonical_path", path)
-	doc["aliases"] = meta.get("aliases", [])
-	doc["is_alias"] = meta.get("is_alias", false)
-	return doc
-
-## 设置路由名称列表
-##
-## 由路由器在扫描完成后调用，设置所有可用路由的名称。
-## @param names 路由名称数组
-func set_route_names(names: Array) -> void:
-	_route_names = names
 
 ## 处理 /commands 请求
 ##
@@ -59,7 +37,8 @@ func _build_list() -> Array:
 	keys.sort()
 	for key in keys:
 		var handler = _routes[key].new()
-		var summary: Dictionary = _apply_meta(key, handler.doc().to_summary_dict())
+		var summary: Dictionary = handler.doc().to_summary_dict()
+		summary["path"] = key
 		result.append(summary)
 	return result
 

@@ -8,8 +8,6 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 
 ## 已注册的路由名称列表
 var _route_names: Array = []
-var _route_meta: Dictionary = {}
-var _alias_to_canonical: Dictionary = {}
 
 ## 设置路由名称列表
 ##
@@ -18,22 +16,13 @@ var _alias_to_canonical: Dictionary = {}
 func set_route_names(names: Array) -> void:
 	_route_names = names
 
-func set_route_meta(route_meta: Dictionary, alias_to_canonical: Dictionary) -> void:
-	_route_meta = route_meta
-	_alias_to_canonical = alias_to_canonical
-
 ## 处理路由列表请求
 ##
 ## 返回所有已注册路由的名称列表。
 ## @param _req 请求对象（未使用）
 ## @param res 响应对象
 func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
-	res.json({
-		"ok": true,
-		"routes": _route_names,
-		"aliases": _alias_to_canonical,
-		"meta": _route_meta,
-	})
+	res.json({"ok": true, "routes": _route_names})
 
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:

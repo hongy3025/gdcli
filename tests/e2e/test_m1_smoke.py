@@ -13,8 +13,6 @@ from conftest import gdcli_json, gdcli_expect_fail
 
 pytestmark = pytest.mark.e2e
 
-FIXTURE_PROJECT_ARGS = ["--project", "{fixture}"]
-
 
 def _exec(env: dict, route: str, data: str | None = None) -> dict:
     args = ["exec", route, "--project", str(env["fixture"])]
@@ -57,20 +55,10 @@ class TestRouteNamespace:
         resp = _exec(godot_env, "routes")
         assert "editor/scene/create" in resp["routes"]
 
-    def test_legacy_scene_create_exists(self, godot_env):
-        """scene/create 旧路由仍可用"""
-        resp = _exec(godot_env, "routes")
-        assert "scene/create" in resp["routes"]
-
     def test_shared_godot_version_exists(self, godot_env):
         """shared/godot/version 路由存在"""
         resp = _exec(godot_env, "routes")
         assert "shared/godot/version" in resp["routes"]
-
-    def test_legacy_godot_version_exists(self, godot_env):
-        """godot/version 旧路由仍可用"""
-        resp = _exec(godot_env, "routes")
-        assert "godot/version" in resp["routes"]
 
     def test_project_health_path_check_exists(self, godot_env):
         """project/health/path_check 路由存在"""
@@ -88,20 +76,6 @@ class TestRouteNamespace:
         assert "project/audit/clear" in resp["routes"]
 
 
-# ── 别名元数据 ─────────────────────────────────────────
-
-class TestAliasMetadata:
-    def test_alias_scene_create(self, godot_env):
-        """scene/create 别名指向 editor/scene/create"""
-        resp = _exec(godot_env, "routes")
-        assert resp["aliases"]["scene/create"] == "editor/scene/create"
-
-    def test_alias_godot_version(self, godot_env):
-        """godot/version 别名指向 shared/godot/version"""
-        resp = _exec(godot_env, "routes")
-        assert resp["aliases"]["godot/version"] == "shared/godot/version"
-
-
 # ── 命令元数据 ─────────────────────────────────────────
 
 class TestCommandsMetadata:
@@ -110,21 +84,6 @@ class TestCommandsMetadata:
         resp = _exec(godot_env, "commands")
         paths = [c["path"] for c in resp["commands"]]
         assert "editor/scene/create" in paths
-
-    def test_canonical_path_in_commands(self, godot_env):
-        """editor/scene/create 的 canonical_path 正确"""
-        resp = _exec(godot_env, "commands")
-        entry = next(c for c in resp["commands"] if c["path"] == "editor/scene/create")
-        assert entry["canonical_path"] == "editor/scene/create"
-
-    def test_command_help_legacy_alias(self, godot_env):
-        """command-help scene/create 解析到正确 canonical_path"""
-        resp = gdcli_json(
-            godot_env,
-            "exec", "command-help", "scene/create",
-            "--project", str(godot_env["fixture"]),
-        )
-        assert resp["doc"]["canonical_path"] == "editor/scene/create"
 
 
 # ── 路径安全 ─────────────────────────────────────────

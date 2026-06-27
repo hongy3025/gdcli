@@ -21,9 +21,6 @@ var returns_desc: String = ""
 var returns_fields: Dictionary = {}
 ## 调用示例（JSON 请求体字符串数组）
 var examples: Array[String] = []
-var canonical_path: String = ""
-var aliases: Array[String] = []
-var is_alias: bool = false
 
 ## 静态工厂：创建一个带 summary 的 RouteDoc
 ##
@@ -78,20 +75,6 @@ func example(json: String) -> GdApiRouteDoc:
 	examples.append(json)
 	return self
 
-func canonical(path: String) -> GdApiRouteDoc:
-	canonical_path = path
-	return self
-
-func alias(path: String) -> GdApiRouteDoc:
-	if not aliases.has(path):
-		aliases.append(path)
-	return self
-
-func alias_view(path: String) -> GdApiRouteDoc:
-	canonical_path = path
-	is_alias = true
-	return self
-
 ## 完整序列化（详情视图）
 ##
 ## @return 含 summary/description/params/returns/examples 的字典
@@ -108,9 +91,6 @@ func to_dict() -> Dictionary:
 			"fields": returns_fields,
 		},
 		"examples": examples,
-		"canonical_path": canonical_path,
-		"aliases": aliases,
-		"is_alias": is_alias,
 	}
 
 ## 简要序列化（列表视图）
@@ -123,7 +103,4 @@ func to_summary_dict() -> Dictionary:
 	return {
 		"summary": summary,
 		"params": param_summary,
-		"canonical_path": canonical_path,
-		"aliases": aliases,
-		"is_alias": is_alias,
 	}
