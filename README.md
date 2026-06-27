@@ -165,7 +165,7 @@ gdcli lsp native-symbol Node3D get_parent
 调用 Godot 编辑器命令，需要 Godot 编辑器运行中且 gdapi 插件已启用。
 
 ```bash
-gdcli exec ping --project /path/to/project
+gdcli exec health/ping --project /path/to/project
 # 输出：{"editor_version":"4.3.x","gdapi_version":"0.2.0","ok":true}
 ```
 
@@ -174,11 +174,11 @@ gdcli exec ping --project /path/to/project
 | `--data <json>` | `{}` | 请求 JSON 数据：字面 JSON、`@file` 或 `-`（stdin） |
 | `--timeout <secs>` | `30` | 请求超时秒数 |
 
-`commands` 和 `command-help` 使用位置参数而非 `--data`：
+`gdapi/commands` 和 `gdapi/help` 使用位置参数而非 `--data`：
 
 ```bash
-gdcli exec commands                     # 列出所有命令
-gdcli exec command-help scene/save  # 查看命令详情
+gdcli exec gdapi/commands                 # 列出所有命令
+gdcli exec gdapi/help scene/save          # 查看命令详情
 ```
 
 ### 输出格式
@@ -193,14 +193,14 @@ gdcli exec command-help scene/save  # 查看命令详情
 
 ```bash
 # 列出所有命令（clap 风格）
-$ gdcli exec commands
+$ gdcli exec gdapi/commands
 Commands:
-  ping                  健康检查
-  editor/scene/save     保存场景
-  shared/godot/version  获取 Godot 版本
+  health/ping           健康检查
+  scene/save            保存场景
+  godot/version         获取 Godot 版本
 
 # 查看命令详情（clap 风格）
-$ gdcli exec command-help uid/update_all
+$ gdcli exec gdapi/help uid/update_all
 批量更新项目中所有资源的 UID
 
 Usage: gdcli exec uid/update_all --data {DATA}

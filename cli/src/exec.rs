@@ -95,8 +95,8 @@ pub fn run(
                 print!("{}", reordered);
             } else {
                 let rendered = match command {
-                    "commands" => format::clap_style::render_commands(&body),
-                    "command-help" => format::clap_style::render_command_help(&body),
+                    "gdapi/commands" => format::clap_style::render_commands(&body),
+                    "gdapi/help" => format::clap_style::render_command_help(&body),
                     _ => format::render_exec_body(&body),
                 };
                 print!("{}", rendered);
@@ -156,32 +156,32 @@ pub(crate) fn build_body(
     data: Option<&str>,
 ) -> Result<BuildBodyOutcome> {
     // commands 命令：无参数，返回所有命令列表
-    if command == "commands" {
+    if command == "gdapi/commands" {
         if !args.is_empty() {
             return Ok(BuildBodyOutcome::Reject(format!(
-                "'commands' does not accept arguments, got {:?}",
+                "'gdapi/commands' does not accept arguments, got {:?}",
                 args
             )));
         }
         if data.is_some() {
             return Ok(BuildBodyOutcome::Reject(
-                "'commands' does not accept --data".to_string(),
+                "'gdapi/commands' does not accept --data".to_string(),
             ));
         }
         return Ok(BuildBodyOutcome::Body("{}".to_string()));
     }
 
     // command-help 命令：需要一个位置参数作为命令路径
-    if command == "command-help" {
+    if command == "gdapi/help" {
         if data.is_some() {
             return Ok(BuildBodyOutcome::Reject(
-                "'command-help' does not accept --data; use positional argument instead"
+                "'gdapi/help' does not accept --data; use positional argument instead"
                     .to_string(),
             ));
         }
         if args.len() != 1 {
             return Ok(BuildBodyOutcome::Reject(format!(
-                "'command-help' requires exactly one argument (command path), got {}: {:?}",
+                "'gdapi/help' requires exactly one argument (command path), got {}: {:?}",
                 args.len(),
                 args
             )));
@@ -326,7 +326,7 @@ mod build_body_tests {
 
     #[test]
     fn commands_no_args_no_data_yields_empty_object() {
-        let out = build_body("commands", &[], None).unwrap();
+        let out = build_body("gdapi/commands", &[], None).unwrap();
         match out {
             BuildBodyOutcome::Body(s) => assert_eq!(s, "{}"),
             BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
@@ -335,7 +335,7 @@ mod build_body_tests {
 
     #[test]
     fn commands_with_args_is_rejected() {
-        let out = build_body("commands", &args(&["unexpected"]), None).unwrap();
+        let out = build_body("gdapi/commands", &args(&["unexpected"]), None).unwrap();
         match out {
             BuildBodyOutcome::Reject(m) => {
                 assert!(
@@ -350,7 +350,7 @@ mod build_body_tests {
 
     #[test]
     fn commands_with_data_is_rejected() {
-        let out = build_body("commands", &[], Some("{}")).unwrap();
+        let out = build_body("gdapi/commands", &[], Some("{}")).unwrap();
         match out {
             BuildBodyOutcome::Reject(m) => {
                 assert!(m.contains("--data"), "msg should mention --data: {}", m)
@@ -361,7 +361,7 @@ mod build_body_tests {
 
     #[test]
     fn command_help_with_arg_builds_command_object() {
-        let out = build_body("command-help", &args(&["godot/version"]), None).unwrap();
+        let out = build_body("gdapi/help", &args(&["godot/version"]), None).unwrap();
         match out {
             BuildBodyOutcome::Body(s) => assert_eq!(s, r#"{"command":"godot/version"}"#),
             BuildBodyOutcome::Reject(m) => panic!("unexpected reject: {}", m),
@@ -370,7 +370,7 @@ mod build_body_tests {
 
     #[test]
     fn command_help_without_arg_is_rejected() {
-        let out = build_body("command-help", &[], None).unwrap();
+        let out = build_body("gdapi/help", &[], None).unwrap();
         match out {
             BuildBodyOutcome::Reject(m) => {
                 assert!(m.contains("requires"), "msg should mention requires: {}", m)
@@ -381,7 +381,7 @@ mod build_body_tests {
 
     #[test]
     fn command_help_with_multiple_args_is_rejected() {
-        let out = build_body("command-help", &args(&["a", "b"]), None).unwrap();
+        let out = build_body("gdapi/help", &args(&["a", "b"]), None).unwrap();
         match out {
             BuildBodyOutcome::Reject(m) => {
                 assert!(
@@ -396,7 +396,7 @@ mod build_body_tests {
 
     #[test]
     fn command_help_with_data_is_rejected() {
-        let out = build_body("command-help", &args(&["godot/version"]), Some("{}")).unwrap();
+        let out = build_body("gdapi/help", &args(&["godot/version"]), Some("{}")).unwrap();
         match out {
             BuildBodyOutcome::Reject(m) => {
                 assert!(m.contains("--data"), "msg should mention --data: {}", m)

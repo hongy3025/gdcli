@@ -185,7 +185,7 @@ fn exec_commands_list_passes_through_server_json() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST)
-            .path("/commands")
+            .path("/gdapi/commands")
             .json_body_obj(&serde_json::json!({}));
         then.status(200)
             .header("content-type", "application/json")
@@ -203,7 +203,7 @@ fn exec_commands_list_passes_through_server_json() {
         .unwrap()
         .args([
             "exec",
-            "commands",
+            "gdapi/commands",
             "--project",
             dir.path().to_str().unwrap(),
         ])
@@ -323,7 +323,7 @@ fn exec_json_flag_outputs_raw_json() {
 fn exec_commands_clap_style_two_commands() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method(POST).path("/commands");
+        when.method(POST).path("/gdapi/commands");
         then.status(200)
             .header("content-type", "application/json")
             .body(r#"{"ok":true,"commands":[{"path":"ping","summary":"健康检查"},{"path":"echo","summary":"回显"}]}"#);
@@ -340,7 +340,7 @@ fn exec_commands_clap_style_two_commands() {
         .unwrap()
         .args([
             "exec",
-            "commands",
+            "gdapi/commands",
             "--project",
             dir.path().to_str().unwrap(),
         ])
@@ -369,7 +369,7 @@ fn exec_commands_clap_style_two_commands() {
 fn exec_commands_clap_style_with_params() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method(POST).path("/commands");
+        when.method(POST).path("/gdapi/commands");
         then.status(200)
             .header("content-type", "application/json")
             .body(r#"{"ok":true,"commands":[{"path":"ping","params":[]},{"path":"echo","params":["x"]}]}"#);
@@ -386,7 +386,7 @@ fn exec_commands_clap_style_with_params() {
         .unwrap()
         .args([
             "exec",
-            "commands",
+            "gdapi/commands",
             "--project",
             dir.path().to_str().unwrap(),
         ])
@@ -481,7 +481,7 @@ fn exec_command_help_with_path_sends_command_body() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST)
-            .path("/command-help")
+            .path("/gdapi/help")
             .json_body_obj(&serde_json::json!({"command": "editor/scene/save"}));
         then.status(200)
             .body(r#"{"ok":true,"doc":{"path":"editor/scene/save","summary":"保存场景"}}"#);
@@ -498,7 +498,7 @@ fn exec_command_help_with_path_sends_command_body() {
         .unwrap()
         .args([
             "exec",
-            "command-help",
+            "gdapi/help",
             "editor/scene/save",
             "--project",
             dir.path().to_str().unwrap(),
@@ -531,7 +531,7 @@ fn exec_command_help_nonexistent_path_returns_exit_code_2() {
         .unwrap()
         .args([
             "exec",
-            "command-help",
+            "gdapi/help",
             "foo",
             "--project",
             dir.path().to_str().unwrap(),
@@ -547,7 +547,7 @@ fn exec_commands_clap_style_output() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST)
-            .path("/commands")
+            .path("/gdapi/commands")
             .json_body_obj(&serde_json::json!({}));
         then.status(200)
             .header("content-type", "application/json")
@@ -565,7 +565,7 @@ fn exec_commands_clap_style_output() {
         .unwrap()
         .args([
             "exec",
-            "commands",
+            "gdapi/commands",
             "--project",
             dir.path().to_str().unwrap(),
         ])
@@ -599,7 +599,7 @@ fn exec_command_help_clap_style_output() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST)
-            .path("/command-help")
+            .path("/gdapi/help")
             .json_body_obj(&serde_json::json!({"command": "editor/scene/save"}));
         then.status(200)
             .body(r#"{"ok":true,"doc":{"path":"editor/scene/save","summary":"保存场景","params":[{"name":"scene_path","type":"string","required":true,"desc":"场景文件路径"}]}}"#);
@@ -616,7 +616,7 @@ fn exec_command_help_clap_style_output() {
         .unwrap()
         .args([
             "exec",
-            "command-help",
+            "gdapi/help",
             "editor/scene/save",
             "--project",
             dir.path().to_str().unwrap(),
@@ -655,7 +655,7 @@ fn exec_commands_json_flag_preserves_raw() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST)
-            .path("/commands")
+            .path("/gdapi/commands")
             .json_body_obj(&serde_json::json!({}));
         then.status(200)
             .header("content-type", "application/json")
@@ -674,7 +674,7 @@ fn exec_commands_json_flag_preserves_raw() {
         .args([
             "--json",
             "exec",
-            "commands",
+            "gdapi/commands",
             "--project",
             dir.path().to_str().unwrap(),
         ])
@@ -704,7 +704,7 @@ fn exec_command_help_with_data_flag_is_rejected() {
         .unwrap()
         .args([
             "exec",
-            "command-help",
+            "gdapi/help",
             "--data",
             "{}",
             "--project",

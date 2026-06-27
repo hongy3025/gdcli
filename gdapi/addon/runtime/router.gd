@@ -49,7 +49,7 @@ func scan(root_dir: String, force: bool = false) -> void:
 		_file_mtimes.clear()
 		_needs_update = true
 
-	_routes["ping"] = BuiltinPing
+	_routes["health/ping"] = BuiltinPing
 
 	# 统一扫描 routes/ 目录下的所有子目录
 	_scan_dir_with_mtime(root_dir, "", force)
@@ -59,11 +59,11 @@ func scan(root_dir: String, force: bool = false) -> void:
 
 ## 获取已注册命令总数
 ##
-## 包含内置的 ping 命令。
+## 包含内置的 health/ping 命令。
 ## @return 命令数量
 func count() -> int:
-	# _routes 已含 ping；额外四个内置命令：routes + help + commands + command-help
-	return _routes.size() + 4
+	# _routes 已含 health/ping；额外三个内置命令：gdapi/routes + gdapi/commands + gdapi/help
+	return _routes.size() + 3
 
 func _refresh_builtin_handlers() -> void:
 	_builtin_routes_handler = BuiltinRoutes.new()
@@ -71,18 +71,16 @@ func _refresh_builtin_handlers() -> void:
 	_builtin_commands_handler = BuiltinCommands.new()
 	_builtin_command_help_handler = BuiltinCommandHelp.new()
 	var names: Array = _routes.keys()
-	names.append("routes")
-	names.append("help")
-	names.append("commands")
-	names.append("command-help")
+	names.append("gdapi/routes")
+	names.append("gdapi/commands")
+	names.append("gdapi/help")
 	names.sort()
 	_builtin_routes_handler.set_route_names(names)
 
 	var all_routes: Dictionary = _routes.duplicate()
-	all_routes["routes"] = BuiltinRoutes
-	all_routes["help"] = BuiltinHelp
-	all_routes["commands"] = BuiltinCommands
-	all_routes["command-help"] = BuiltinCommandHelp
+	all_routes["gdapi/routes"] = BuiltinRoutes
+	all_routes["gdapi/commands"] = BuiltinCommands
+	all_routes["gdapi/help"] = BuiltinCommandHelp
 	_builtin_help_handler.set_routes(all_routes)
 	_builtin_commands_handler.set_routes(all_routes)
 	_builtin_command_help_handler.set_routes(all_routes)
@@ -147,28 +145,21 @@ func dispatch(req_dict: Dictionary, server) -> void:
 	var key: String = path.trim_prefix("/")
 
 	# 处理内置命令列表请求
-	if key == "routes":
+	if key == "gdapi/routes":
 		var req := GdApiRequest.new(req_dict)
 		var res := GdApiResponse.new(server, id)
 		_builtin_routes_handler.handle(req, res)
 		return
 
-	# 处理内置 help 命令
-	if key == "help":
-		var req_help := GdApiRequest.new(req_dict)
-		var res_help := GdApiResponse.new(server, id)
-		_builtin_help_handler.handle(req_help, res_help)
-		return
-
 	# 处理内置 commands 命令
-	if key == "commands":
+	if key == "gdapi/commands":
 		var req_cmd := GdApiRequest.new(req_dict)
 		var res_cmd := GdApiResponse.new(server, id)
 		_builtin_commands_handler.handle(req_cmd, res_cmd)
 		return
 
 	# 处理内置 command-help 命令
-	if key == "command-help":
+	if key == "gdapi/help":
 		var req_ch := GdApiRequest.new(req_dict)
 		var res_ch := GdApiResponse.new(server, id)
 		_builtin_command_help_handler.handle(req_ch, res_ch)
