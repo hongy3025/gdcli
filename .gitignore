@@ -6,10 +6,16 @@ gdapi/rust/target/
 # Addon binaries copied into fixture (not source-controlled)
 tests/fixture_project/addons/gdapi
 
-# Bin symlinks in addon (created by setup-dev.sh)
+# Bin symlinks in addon (created by setup-dev)
 gdapi/addon/bin/linux/
 gdapi/addon/bin/macos/
 gdapi/addon/bin/windows/
 
 # Per-project Godot metadata
 .godot/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

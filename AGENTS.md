@@ -39,6 +39,11 @@ cargo test -p gdapi
 # Lint 和格式检查（无专用配置，使用默认规则）
 cargo clippy --workspace
 cargo fmt --check
+
+# E2E 测试（需要 Godot，用 uv 管理 Python venv）
+uv run pytest tests/e2e/ -v              # 运行所有 E2E
+uv run pytest tests/e2e/ -v -m e2e       # 仅运行 e2e 标记的测试
+uv run pytest tests/e2e/ -v -m "not e2e" # 跳过 e2e 测试
 ```
 
 ## 关键架构细节
@@ -65,6 +70,7 @@ cargo fmt --check
 - `gdapi/rust/tests/` — 需要 Godot 编辑器运行的端到端测试
 - `scripts/e2e-ping.py` — 手动端到端验证脚本
 - `scripts/e2e-m1-smoke.py` — M1 路由基础设施端到端验证
+- `tests/e2e/` — pytest E2E 测试（需要 Godot，用 uv 管理 Python venv）
 - 测试用 Godot 项目在 `tests/fixture_project/`，addon 需要先符号链接
 
 ## 注意事项

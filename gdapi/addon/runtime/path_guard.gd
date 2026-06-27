@@ -11,8 +11,6 @@ const BLOCKED_WRITE_PREFIXES := [
 static func validate(path: String, mode: String = "read") -> Dictionary:
 	if path.strip_edges().is_empty():
 		return _err("path is required", ErrorCodes.INVALID_PATH)
-	if path.is_absolute_path():
-		return _err("absolute system paths are not allowed", ErrorCodes.INVALID_PATH)
 	var normalized := normalize(path)
 	if normalized.contains(".."):
 		return _err("path traversal is not allowed", ErrorCodes.INVALID_PATH)
@@ -27,6 +25,8 @@ static func validate(path: String, mode: String = "read") -> Dictionary:
 static func normalize(path: String) -> String:
 	var p := path.strip_edges().replace("\\", "/")
 	if p.begins_with("res://") or p.begins_with("user://"):
+		return p
+	if p.begins_with("/") or (p.length() >= 2 and p[1] == ":"):
 		return p
 	return "res://" + p.trim_prefix("/")
 
