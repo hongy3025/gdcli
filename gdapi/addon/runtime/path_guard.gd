@@ -11,11 +11,11 @@ const BLOCKED_WRITE_PREFIXES := [
 static func validate(path: String, mode: String = "read") -> Dictionary:
 	if path.strip_edges().is_empty():
 		return _err("path is required", ErrorCodes.INVALID_PATH)
-	if path.contains(".."):
-		return _err("path traversal is not allowed", ErrorCodes.INVALID_PATH)
 	if path.is_absolute_path():
 		return _err("absolute system paths are not allowed", ErrorCodes.INVALID_PATH)
 	var normalized := normalize(path)
+	if normalized.contains(".."):
+		return _err("path traversal is not allowed", ErrorCodes.INVALID_PATH)
 	if not normalized.begins_with("res://") and not normalized.begins_with("user://"):
 		return _err("only res:// and user:// paths are allowed", ErrorCodes.INVALID_PATH)
 	if mode == "write" or mode == "delete":
