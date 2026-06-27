@@ -1,28 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${GODOT_BIN:-}" ]]; then
-  echo "GODOT_BIN is required for M1 E2E smoke" >&2
-  exit 2
-fi
+GODOT_BIN="${GODOT_BIN:-godot}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FIXTURE="$REPO_ROOT/tests/fixture_project"
 GDCLI_BIN="$REPO_ROOT/target/debug/gdcli"
 META="$FIXTURE/.godot/gdapi.json"
 
-json_get() {
-  python -c 'import json,sys; data=json.load(sys.stdin); cur=data
-for part in sys.argv[1].split("."):
-    cur=cur[part]
-print(cur)'
+json_field() {
+  python -c 'import json,sys; print(json.loads(sys.argv[1])[sys.argv[2]])' "$1" "$2"
 }
 
 assert_route() {
-  local routes_json="$1"
-  local name="$2"
   python -c 'import json,sys; data=json.loads(sys.argv[1]); name=sys.argv[2]
-assert name in data["routes"], f"missing route: {name}"' "$routes_json" "$name"
+assert name in data["routes"], f"missing route: {name}"' "$1" "$2"
 }
 
 cargo build --workspace
@@ -46,7 +38,8 @@ if [[ ! -f "$META" ]]; then
 fi
 
 PING=$("$GDCLI_BIN" --json exec ping --project "$FIXTURE")
-[[ "$(printf '%s' "$PING" | json_get ok)" == "True" || "$(printf '%s' "$PING" | json_get ok)" == "true" ]]
+OK=$(json_field "$PING" ok)
+[[ "$OK" == "True" || "$OK" == "true" ]]
 
 ROUTES=$("$GDCLI_BIN" --json exec routes --project "$FIXTURE")
 assert_route "$ROUTES" "editor/scene/create"
