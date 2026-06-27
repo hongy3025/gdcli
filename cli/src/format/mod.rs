@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 
+pub mod clap_style;
 pub mod normalize;
 pub mod toon;
 
