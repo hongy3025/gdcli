@@ -1,8 +1,8 @@
 ## 日志级别路由处理器
 ##
 ## 提供查询和设置全局日志级别的 API 端点。
-## 查询：POST /log/level body: {}
-## 设置：POST /log/level body: {"level": "debug"}
+## 查询：POST /gdapi/loglevel body: {}
+## 设置：POST /gdapi/loglevel body: {"level": "debug"}
 
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
