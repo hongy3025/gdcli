@@ -72,15 +72,15 @@ func _refresh_builtin_handlers() -> void:
 	_builtin_command_help_handler = BuiltinCommandHelp.new()
 	var names: Array = _routes.keys()
 	names.append("gdapi/routes")
-	names.append("gdapi/commands")
-	names.append("gdapi/help")
+	names.append("command/list")
+	names.append("command/doc")
 	names.sort()
 	_builtin_routes_handler.set_route_names(names)
 
 	var all_routes: Dictionary = _routes.duplicate()
 	all_routes["gdapi/routes"] = BuiltinRoutes
-	all_routes["gdapi/commands"] = BuiltinCommands
-	all_routes["gdapi/help"] = BuiltinCommandHelp
+	all_routes["command/list"] = BuiltinCommands
+	all_routes["command/doc"] = BuiltinCommandHelp
 	_builtin_help_handler.set_routes(all_routes)
 	_builtin_commands_handler.set_routes(all_routes)
 	_builtin_command_help_handler.set_routes(all_routes)
@@ -152,14 +152,14 @@ func dispatch(req_dict: Dictionary, server) -> void:
 		return
 
 	# 处理内置 commands 命令
-	if key == "gdapi/commands":
+	if key == "command/list":
 		var req_cmd := GdApiRequest.new(req_dict)
 		var res_cmd := GdApiResponse.new(server, id)
 		_builtin_commands_handler.handle(req_cmd, res_cmd)
 		return
 
 	# 处理内置 command-help 命令
-	if key == "gdapi/help":
+	if key == "command/doc":
 		var req_ch := GdApiRequest.new(req_dict)
 		var res_ch := GdApiResponse.new(server, id)
 		_builtin_command_help_handler.handle(req_ch, res_ch)

@@ -177,8 +177,8 @@ gdcli exec health/ping --project /path/to/project
 `gdapi/commands` 和 `gdapi/help` 使用位置参数而非 `--data`：
 
 ```bash
-gdcli exec gdapi/commands                 # 列出所有命令
-gdcli exec gdapi/help scene/save          # 查看命令详情
+gdcli exec command/list                     # 列出所有命令
+gdcli exec command/doc scene/save           # 查看命令详情
 ```
 
 ### 输出格式
@@ -193,14 +193,14 @@ gdcli exec gdapi/help scene/save          # 查看命令详情
 
 ```bash
 # 列出所有命令（clap 风格）
-$ gdcli exec gdapi/commands
+$ gdcli exec command/list
 Commands:
-  health/ping           健康检查
+  gdapi/health/ping     健康检查
   scene/save            保存场景
   godot/version         获取 Godot 版本
 
 # 查看命令详情（clap 风格）
-$ gdcli exec gdapi/help uid/update_all
+$ gdcli exec command/doc uid/update_all
 批量更新项目中所有资源的 UID
 
 Usage: gdcli exec uid/update_all --data {DATA}
