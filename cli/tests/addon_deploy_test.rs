@@ -176,10 +176,10 @@ fn install_includes_m1_runtime_helpers() {
         "addons/gdapi/runtime/path_guard.gd",
         "addons/gdapi/runtime/variant_codec.gd",
         "addons/gdapi/runtime/edit_action.gd",
-        "addons/gdapi/routes/health/path_check.gd",
+        "addons/gdapi/routes/gdapi/health/pathcheck.gd",
         "addons/gdapi/runtime/audit_log.gd",
-        "addons/gdapi/routes/audit/list.gd",
-        "addons/gdapi/routes/audit/clear.gd",
+        "addons/gdapi/routes/gdapi/audit/list.gd",
+        "addons/gdapi/routes/gdapi/audit/clear.gd",
     ] {
         assert!(
             dir.path().join(file).exists(),

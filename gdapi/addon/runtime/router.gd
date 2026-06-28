@@ -49,7 +49,7 @@ func scan(root_dir: String, force: bool = false) -> void:
 		_file_mtimes.clear()
 		_needs_update = true
 
-	_routes["health/ping"] = BuiltinPing
+	_routes["gdapi/health/ping"] = BuiltinPing
 
 	# 统一扫描 routes/ 目录下的所有子目录
 	_scan_dir_with_mtime(root_dir, "", force)
