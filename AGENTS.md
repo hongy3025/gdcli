@@ -54,6 +54,79 @@ uv run pytest tests/e2e/ -v -m "not e2e" # 跳过 e2e 测试
 - gdapi addon 通过 HTTP 接收 gdcli 的 `exec` 命令，运行在 Godot 编辑器进程中
 - LSP 命令需要 Godot 编辑器运行中（默认端口 6005）
 
+## gdapi 路由系统
+
+gdapi 的路由系统基于文件系统目录结构自动扫描注册：
+
+```
+gdapi/addon/routes/
+  ├── console/output.gd          # 读取编辑器 Output 面板
+  ├── gdapi/
+  │   ├── audit/clear.gd         # 清除审计日志
+  │   ├── audit/list.gd          # 列出审计日志
+  │   ├── health/pathcheck.gd    # 路径安全校验
+  │   └── loglevel.gd            # 查询/设置日志级别
+  ├── godot/version.gd           # Godot 引擎版本信息
+  ├── project/
+  │   ├── info.gd                # 项目基本信息
+  │   ├── run.gd                 # 运行项目场景
+  │   └── stop.gd                # 停止运行中的场景
+  ├── scene/
+  │   ├── add_node.gd            # 添加节点到场景
+  │   ├── create.gd              # 创建新场景
+  │   ├── export_mesh_library.gd # 导出 MeshLibrary
+  │   ├── load_sprite.gd         # 加载精灵纹理
+  │   └── save.gd                # 保存场景
+  └── uid/
+      ├── get.gd                 # 查询资源 UID
+      └── update_all.gd          # 批量更新 UID
+```
+
+### 路由注册机制
+
+- `gdapi/addon/runtime/router.gd` 在初始化时扫描 `routes/` 目录下的所有 `.gd` 文件
+- 目录路径映射为路由名（如 `scene/create.gd` → `scene/create`）
+- 内置路由（硬编码）：`gdapi/health/ping`、`gdapi/routes`、`command/list`、`command/doc`
+- 所有 route handler 继承 `route_handler.gd`，实现 `handle(req, res)` 和 `doc()` 方法
+- 文件修改时间（mtime）变化时自动重新加载
+
+### 共享基础设施
+
+| 模块 | 路径 | 职责 |
+|---|---|---|
+| `router.gd` | `runtime/router.gd` | 扫描、注册、分发请求 |
+| `request.gd` | `runtime/request.gd` | 请求参数解析 |
+| `response.gd` | `runtime/response.gd` | 响应构建（json/error） |
+| `route_handler.gd` | `runtime/route_handler.gd` | 路由处理器基类 |
+| `path_guard.gd` | `runtime/path_guard.gd` | 路径安全校验 |
+| `variant_codec.gd` | `runtime/variant_codec.gd` | JSON ↔ Godot Variant 转换 |
+| `audit_log.gd` | `runtime/audit_log.gd` | 审计日志记录 |
+| `error_codes.gd` | `runtime/error_codes.gd` | 统一错误码 |
+| `edit_action.gd` | `runtime/edit_action.gd` | UndoRedo 包装 |
+| `param_doc.gd` | `runtime/param_doc.gd` | 参数文档描述 |
+| `route_doc.gd` | `runtime/route_doc.gd` | 路由文档描述 |
+| `builtin_ping.gd` | `runtime/builtin_ping.gd` | 内置 ping 路由 |
+| `builtin_routes.gd` | `runtime/builtin_routes.gd` | 内置路由列表 |
+| `builtin_help.gd` | `runtime/builtin_help.gd` | 内置帮助路由 |
+| `builtin_commands.gd` | `runtime/builtin_commands.gd` | 内置命令列表 |
+| `builtin_command_help.gd` | `runtime/builtin_command_help.gd` | 内置命令帮助 |
+
+### 内置路由
+
+| 路由 | 说明 |
+|---|---|
+| `gdapi/health/ping` | 健康检查（硬编码，不在 routes/ 目录中） |
+| `gdapi/routes` | 列出所有已注册路由名 |
+| `command/list` | 列出所有命令的详细信息（含参数） |
+| `command/doc` | 查询单个命令的完整帮助文档（位置参数传命令名） |
+
+### CLI 侧特殊处理
+
+- `command/list` 和 `command/doc` 在 CLI 侧使用 clap 风格格式化输出（而非默认 TOON）
+- `command/list` 不接受 `--data` 和位置参数
+- `command/doc` 不接受 `--data`，要求恰好 1 个位置参数作为命令路径
+- 其余路由通过 `--data` 传 JSON body，不接受位置参数
+
 ## 开发环境搭建
 
 1. `cargo build --workspace` — 编译所有产物

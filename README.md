@@ -68,10 +68,10 @@ gdcli status --project /path/to/project
 
 ## 开发验证
 
-M1 gdapi 路由基础设施端到端验证：
+M1 gdapi 路由基础设施端到端验证（需要 Godot 编辑器，用 uv 管理 Python venv）：
 
 ```bash
-python scripts/e2e-m1-smoke.py
+uv run pytest tests/e2e/test_m1_smoke.py -v
 ```
 
 可选设置 `GODOT_BIN` 环境变量指定 Godot 路径（默认使用 PATH 中的 `godot`）。
@@ -165,7 +165,7 @@ gdcli lsp native-symbol Node3D get_parent
 调用 Godot 编辑器命令，需要 Godot 编辑器运行中且 gdapi 插件已启用。
 
 ```bash
-gdcli exec health/ping --project /path/to/project
+gdcli exec gdapi/health/ping --project /path/to/project
 # 输出：{"editor_version":"4.3.x","gdapi_version":"0.2.0","ok":true}
 ```
 
@@ -174,7 +174,7 @@ gdcli exec health/ping --project /path/to/project
 | `--data <json>` | `{}` | 请求 JSON 数据：字面 JSON、`@file` 或 `-`（stdin） |
 | `--timeout <secs>` | `30` | 请求超时秒数 |
 
-`gdapi/commands` 和 `gdapi/help` 使用位置参数而非 `--data`：
+`command/list` 和 `command/doc` 使用位置参数而非 `--data`：
 
 ```bash
 gdcli exec command/list                     # 列出所有命令
@@ -189,7 +189,7 @@ gdcli exec command/doc scene/save           # 查看命令详情
 - 字段统一的对象数组 → 紧凑表格（pipe 分隔）
 - 其它结构 → 树状列表
 
-`commands` 和 `command-help` 子命令使用 clap 风格输出，便于阅读：
+`command/list` 和 `command/doc` 使用 clap 风格输出，便于阅读：
 
 ```bash
 # 列出所有命令（clap 风格）
