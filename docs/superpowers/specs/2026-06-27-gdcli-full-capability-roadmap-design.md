@@ -30,6 +30,7 @@ gdcli 已具备 Rust CLI、Godot LSP、GDExtension HTTP server、Bearer token、
 5. 所有能力都有可程序验证的成功、失败和无副作用验收条件。
 6. 编辑器内存状态 mutation 优先接入 UndoRedo；文件、资源和运行时 mutation 必须明确标注不可撤销性。
 7. 危险能力默认关闭或要求显式启用、`force:true`、边界限制和审计记录。
+8. 仅支持 Godot 4.7，不为 Godot 4.3–4.6 保留构建、运行或测试兼容。
 
 ## 非目标
 
@@ -39,6 +40,7 @@ gdcli 已具备 Rust CLI、Godot LSP、GDExtension HTTP server、Bearer token、
 4. 不把所有能力压入单个实现里程碑。
 5. 不绕过现有 loopback、Bearer token、请求大小、连接数和超时限制。
 6. 不在本文中写逐文件实施步骤；逐文件任务属于后续 implementation plan。
+7. 不支持 Godot 4.3、4.4、4.5 或 4.6；版本升级后不保留旧版 CI/E2E 矩阵。
 
 ## 当前实现基线
 
@@ -102,7 +104,15 @@ Rust 层不包含场景、节点或资源业务逻辑，此边界应保持不变
 - `gdapi_version`
 - `token`
 
-当前 workspace 版本、plugin 版本和 ping 中的 gdapi 版本均为 `0.2.0`。GDExtension 使用 `godot` crate 0.5 的 `api-4-3` feature，`.gdextension` 声明最低兼容 Godot 4.3。
+当前 workspace 版本、plugin 版本和 ping 中的 gdapi 版本均为 `0.2.0`。升级前基线仍锁定 godot-rust 0.5.3，使用 `api-4-3` feature，`.gdextension` 声明最低兼容 Godot 4.3；这些是待 M1 移除的现状，不是继续兼容的目标。
+
+目标版本基线固定为：
+
+- Godot 4.7.x。
+- godot-rust 至少 0.5.4，并显式启用 `api-4-7`。
+- `.gdextension` 的 `compatibility_minimum` 为 4.7。
+- fixture 的 `config/features` 为 `4.7`。
+- 构建和 E2E 不接受 Godot 4.3–4.6 作为替代运行时。
 
 ### Router 与自描述系统
 
@@ -178,7 +188,7 @@ Rust 层不包含场景、节点或资源业务逻辑，此边界应保持不变
 2026-07-21 的验证结果：
 
 - `cargo test --workspace` 通过；覆盖 Rust HTTP/server、CLI exec、格式化、安装和 LSP。
-- `uv run pytest tests/e2e/test_m1_smoke.py -v` 在真实 Godot 4.6.3 上得到 10 passed、6 failed。
+- 升级前的 `uv run pytest tests/e2e/test_m1_smoke.py -v` 在真实 Godot 4.6.3 上得到 10 passed、6 failed。
 - 6 个失败均来自测试仍调用已删除的 `routes` 和 `commands`；实现中的正确路径分别是 `gdapi/routes` 和 `command/list`。
 - ping、PathGuard 正反例以及 audit clear/list 正反例均通过。
 - `tests/fixture_project/tests/test_request.gd` 和 `test_route_doc.gd` 存在，但当前 pytest E2E harness 不执行这些 GDScript 测试，不能把它们计入自动化通过项。
@@ -342,6 +352,9 @@ mutation 分为三类：
 
 内容：
 
+- 将 godot-rust 从锁定的 0.5.3 升级到至少 0.5.4，并把 feature 从 `api-4-3` 改为 `api-4-7`。
+- 将 `.gdextension` 的 `compatibility_minimum` 和 fixture `config/features` 统一改为 4.7。
+- E2E 启动前检查 `GODOT_BIN --version`，非 4.7 直接以明确错误终止，不降级、不 skip。
 - 修复 M1 E2E 中的 `routes`、`commands` 旧路径，统一使用 `gdapi/routes`、`command/list`、`command/doc`。
 - 断言完整的 20-route 当前清单以及命令文档结构。
 - 修正源码、注释、README 和审计记录中的旧 route 名。
@@ -358,7 +371,8 @@ mutation 分为三类：
 验收：
 
 - `cargo fmt --check`、`cargo clippy --workspace`、`cargo test --workspace` 全部通过。
-- `uv run pytest tests/e2e/ -v` 在 Godot 4.3 最低兼容版本和当前开发版本上通过；没有因实现错误而 skip。
+- `cargo tree -p gdapi` 显示 godot-rust 版本不低于 0.5.4，且构建启用 `api-4-7`。
+- `uv run pytest tests/e2e/ -v` 在 Godot 4.7.x 上通过；Godot 4.3–4.6 会在测试启动前被明确拒绝。
 - `gdapi/routes` 精确返回当前预期清单，`command/list` 与 `command/doc` 文档一致。
 - 新增、修改、删除 route 文件后，热重载注册表与磁盘一致。
 - 所有现有文件型 route 的 traversal、绝对路径、保护目录和覆盖未授权反例均无副作用。
@@ -481,7 +495,7 @@ mutation 分为三类：
 - fixture mutation 的隔离或快照恢复，避免测试顺序依赖。
 - stale metadata 清理和 Godot 异常退出清理。
 - helper GDScript 测试的自动执行入口。
-- 最低兼容 Godot 4.3 与当前开发版本的验证矩阵。
+- Godot 版本预检；只接受 4.7.x，不维护旧版验证矩阵。
 - 对必须存在的外部条件使用显式失败；只对真正缺失的可选环境使用 skip。
 
 所有里程碑遵循精确收口标准：
