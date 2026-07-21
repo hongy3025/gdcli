@@ -1,6 +1,7 @@
 """E2E test fixtures — Godot editor lifecycle management."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -8,6 +9,32 @@ import time
 from pathlib import Path
 
 import pytest
+
+
+def parse_godot_version(output: str) -> tuple[int, int, int]:
+    match = re.search(r"(?:v)?(\d+)\.(\d+)(?:\.(\d+))?", output)
+    if match is None:
+        raise RuntimeError(f"Godot 4.7.x is required; cannot parse version: {output!r}")
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+
+
+def require_godot_47(godot_bin: str) -> tuple[int, int, int]:
+    try:
+        result = subprocess.run(
+            [godot_bin, "--version"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"Godot 4.7.x is required: {exc}") from exc
+    version = parse_godot_version(result.stdout or result.stderr)
+    if version[:2] != (4, 7):
+        raise RuntimeError(
+            f"Godot 4.7.x is required; found {version[0]}.{version[1]}.{version[2]}"
+        )
+    return version
 
 
 def _repo_root() -> Path:
@@ -33,6 +60,10 @@ def godot_env():
     Skips the entire test session if GODOT_BIN is not available or build fails.
     """
     godot_bin = os.environ.get("GODOT_BIN", "godot")
+    try:
+        godot_version = require_godot_47(godot_bin)
+    except RuntimeError as exc:
+        pytest.fail(str(exc), pytrace=False)
     root = _repo_root()
     fixture = root / "tests" / "fixture_project"
     meta = fixture / ".godot" / "gdapi.json"
@@ -70,14 +101,11 @@ def godot_env():
     meta.unlink(missing_ok=True)
 
     # Start Godot
-    try:
-        godot = subprocess.Popen(
-            [godot_bin, "--editor", "--headless", "--path", str(fixture)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        pytest.skip(f"Godot not found: {godot_bin}")
+    godot = subprocess.Popen(
+        [godot_bin, "--editor", "--headless", "--path", str(fixture)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
     # Wait for meta
     ready = False
@@ -96,6 +124,7 @@ def godot_env():
 
     yield {
         "godot_bin": godot_bin,
+        "godot_version": godot_version,
         "root": root,
         "fixture": fixture,
         "meta": meta_data,

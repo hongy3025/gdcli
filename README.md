@@ -16,6 +16,8 @@ cargo build --release
 
 ## 前置条件
 
+gdcli 的 gdapi 插件仅支持 Godot 4.7.x。构建使用 godot-rust 0.5.4 的 `api-4-7` API level；Godot 4.3–4.6 不在兼容或测试范围内。
+
 LSP 命令需要 Godot 编辑器运行中（默认监听 6005 端口）：
 
 ```bash
