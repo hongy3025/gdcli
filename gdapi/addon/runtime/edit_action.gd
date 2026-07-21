@@ -2,15 +2,17 @@
 class_name GdApiEditAction
 extends RefCounted
 
-static func plugin():
+static func plugin() -> Object:
 	if Engine.has_meta("gdapi_plugin"):
 		return Engine.get_meta("gdapi_plugin")
 	return null
 
-static func undo_redo():
-	var p = plugin()
+static func undo_redo() -> EditorUndoRedoManager:
+	var p := plugin()
 	if p and p.has_method("get_undo_redo"):
-		return p.get_undo_redo()
+		var manager = p.get_undo_redo()
+		if manager is EditorUndoRedoManager:
+			return manager
 	return null
 
 static func has_undo_redo() -> bool:
