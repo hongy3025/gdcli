@@ -23,10 +23,10 @@ static func info(path: String) -> Dictionary:
 	var res: Resource = load(checked.path)
 	if res == null:
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "failed to load resource"}
-	var uid := ResourceUID.path_to_id(checked.path)
 	var uid_str := ""
-	if uid != ResourceUID.INVALID_ID:
-		uid_str = str(uid)
+	var uid_path: String = checked.path + ".uid"
+	if FileAccess.file_exists(uid_path):
+		uid_str = FileAccess.get_file_as_string(uid_path).strip_edges()
 	var props: Dictionary = {}
 	for info_obj in res.get_property_list():
 		if info_obj.usage & PROPERTY_USAGE_CATEGORY:
@@ -71,18 +71,12 @@ static func deps(path: String) -> Dictionary:
 		"undoable": false,
 	}
 
-## 搜索资源 — 通过 EditorFileSystem 扫描
+## 搜索资源 — 通过 DirAccess 扫描文件系统 (不依赖 EditorFileSystem)
 static func search(filter_text: String, offset: int, limit: int) -> Dictionary:
-	if not Engine.is_editor_hint():
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "resource/search requires editor"}
 	if limit < 1 or limit > 1000:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "limit must be 1-1000"}
-	var fs := EditorInterface.get_resource_filesystem()
-	if fs == null:
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorFileSystem unavailable"}
 	var all: Array = []
-	var sc := fs.get_scan_completed()
-	_collect_search(fs.get_filesystem(), filter_text.to_lower(), all)
+	_scan_dir_for_resources("res://", filter_text.to_lower(), all)
 	all.sort()
 	var total := all.size()
 	return {
@@ -95,16 +89,24 @@ static func search(filter_text: String, offset: int, limit: int) -> Dictionary:
 	}
 
 
-static func _collect_search(dir: EditorFileSystemDirectory, needle: String, out: Array) -> void:
+static func _scan_dir_for_resources(dir_path: String, needle: String, out: Array) -> void:
+	var dir := DirAccess.open(dir_path)
 	if dir == null:
 		return
-	for i in dir.get_subdir_count():
-		_collect_search(dir.get_subdir(i), needle, out)
-	for i in dir.get_file_count():
-		var info_obj := dir.get_file(i)
-		var path := info_obj.resource_path if info_obj != null else ""
-		if path != "" and (needle == "" or path.to_lower().find(needle) >= 0):
-			out.append(path)
+	dir.list_dir_begin()
+	var name := dir.get_next()
+	while name != "":
+		if name.begins_with(".") or name == "import":
+			name = dir.get_next()
+			continue
+		var full := dir_path.path_join(name) if dir_path.ends_with("/") else dir_path + "/" + name
+		if dir.current_is_dir():
+			_scan_dir_for_resources(full, needle, out)
+		else:
+			if needle == "" or full.to_lower().find(needle) >= 0:
+				out.append(full)
+		name = dir.get_next()
+	dir.list_dir_end()
 
 
 ## 重新导入资源
@@ -204,7 +206,7 @@ static func move(from_path: String, to_path: String, force: bool) -> Dictionary:
 	var fs := EditorInterface.get_resource_filesystem()
 	if fs == null:
 		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorFileSystem unavailable"}
-	var err := fs.move_file(from_check.path, to_check.path)
+	var err: Error = fs.move_file(from_check.path, to_check.path)
 	if err != OK:
 		AuditLog.record("resource/move", "file", {"from": from_check.path, "to": to_check.path}, false, ErrorCodes.GODOT_ERROR)
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "move_file failed: " + str(err)}
@@ -229,7 +231,7 @@ static func delete(path: String, force: bool) -> Dictionary:
 		AuditLog.record("resource/delete", "file", {"path": checked.path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
 		return {"ok": false, "code": ErrorCodes.UNSAFE_OPERATION, "error": "resource/delete requires force:true"}
 	var abs_path := ProjectSettings.globalize_path(checked.path)
-	var err := DirAccess.remove_absolute(abs_path)
+	var err: Error = DirAccess.remove_absolute(abs_path)
 	if err != OK:
 		AuditLog.record("resource/delete", "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR)
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "remove failed: " + str(err)}

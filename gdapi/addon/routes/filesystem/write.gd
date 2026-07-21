@@ -30,7 +30,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		AuditLog.record(ROUTE, "file", {"path": checked.path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
 		res.error("filesystem/write requires force:true to overwrite", ErrorCodes.UNSAFE_OPERATION, 403)
 		return
-	var dir := checked.path.get_base_dir()
+	var dir: String = checked.path.get_base_dir()
 	if dir != "res://" and not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir)):
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
 	var tmp := abs_path + ".gdcli-tmp"

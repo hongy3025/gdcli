@@ -89,13 +89,16 @@ def wait_for_metadata(project: Path, timeout: float = 45.0) -> dict:
 
 
 def wait_for_godot_ready(project: Path, timeout: float = 30.0) -> None:
-    """Wait until the editor fully finishes loading (logs include 'Editor layout ready')."""
+    """Wait until the editor fully finishes loading (logs include 'loading_editor_layout' DONE)."""
     log = project / ".godot" / "godot.log"
     deadline = time.time() + timeout
     while time.time() < deadline:
         if log.exists():
             try:
-                if "Editor layout ready" in log.read_text(encoding="utf-8", errors="replace"):
+                content = log.read_text(encoding="utf-8", errors="replace")
+                # The headless editor prints ANSI-colored progress lines; check for
+                # the completion of the loading_editor_layout step.
+                if "loading_editor_layout" in content and "DONE" in content:
                     return
             except OSError:
                 pass

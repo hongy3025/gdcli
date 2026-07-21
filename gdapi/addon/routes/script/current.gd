@@ -3,7 +3,7 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
-const TextEdit := preload("res://addons/gdapi/runtime/services/text_edit.gd")
+const TextEditService := preload("res://addons/gdapi/runtime/services/text_edit.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 const ROUTE := "script/current"
@@ -14,7 +14,7 @@ func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 	res.json({
 		"ok": true,
-		"path": TextEdit.current_script(),
+		"path": TextEditService.current_script(),
 		"undoable": false,
 	})
 

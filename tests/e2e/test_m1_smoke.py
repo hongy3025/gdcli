@@ -16,8 +16,8 @@ from conftest import gdcli_json, gdcli_expect_fail
 
 pytestmark = pytest.mark.e2e
 
-# 当前 gdapi 公开路由集合（与 gdapi/routes + command/list 返回结果一致）
-EXPECTED_ROUTES = {
+# M1 收口的基线路由 — 不可缩减。M2 在该集合上增量扩展。
+M1_BASELINE_ROUTES = {
     "command/doc",
     "command/list",
     "console/output",
@@ -39,6 +39,8 @@ EXPECTED_ROUTES = {
     "uid/get",
     "uid/update_all",
 }
+
+RETIRED_ROUTES = {"routes", "commands", "help", "command-help", "gdapi/commands", "gdapi/help"}
 
 
 def _exec(env: dict, route: str, data: str | None = None) -> dict:
@@ -77,27 +79,30 @@ class TestConnectivity:
 # ── 路由命名空间 ─────────────────────────────────────────
 
 class TestRouteNamespace:
-    def test_routes_match_current_public_surface(self, godot_env):
-        """gdapi/routes 返回的 route 集合与 EXPECTED_ROUTES 完全一致"""
+    def test_routes_include_m1_baseline(self, godot_env):
+        """gdapi/routes 返回的 route 超集必须涵盖 M1 基线."""
         resp = _exec(godot_env, "gdapi/routes")
         assert resp["ok"] is True
-        assert resp["routes"] == sorted(EXPECTED_ROUTES)
+        actual = set(resp["routes"])
+        assert M1_BASELINE_ROUTES <= actual
+        assert RETIRED_ROUTES.isdisjoint(actual)
 
     def test_removed_aliases_are_not_exposed(self, godot_env):
         """旧别名 routes / commands / help / command-help 不再暴露"""
-        for removed in ("routes", "commands", "help", "command-help"):
+        for removed in RETIRED_ROUTES:
             _exec_fail(godot_env, removed)
 
 
 # ── 命令元数据 ─────────────────────────────────────────
 
 class TestCommandsMetadata:
-    def test_commands_list_matches_route_surface(self, godot_env):
-        """command/list 返回的 path 集合与 EXPECTED_ROUTES 完全一致"""
+    def test_commands_list_includes_m1_baseline(self, godot_env):
+        """command/list 返回的 path 超集必须涵盖 M1 基线."""
         resp = _exec(godot_env, "command/list")
         assert resp["ok"] is True
-        paths = [c["path"] for c in resp["commands"]]
-        assert sorted(paths) == sorted(EXPECTED_ROUTES)
+        command_paths = {item["path"] for item in resp["commands"]}
+        assert M1_BASELINE_ROUTES <= command_paths
+        assert RETIRED_ROUTES.isdisjoint(command_paths)
 
 
 # ── 路径安全 ─────────────────────────────────────────

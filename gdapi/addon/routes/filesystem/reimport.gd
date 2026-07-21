@@ -17,9 +17,9 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var validated: Array = []
 	for raw in paths_v:
 		var p := str(raw)
-		var checked := PathGuard.validate(p, "read")
+		var checked := PathGuard.validate(p, "write")
 		if not checked.ok:
-			res.error("invalid path " + p + ": " + checked.error, ErrorCodes.INVALID_PATH, 400)
+			res.error("invalid path " + p + ": " + checked.error, checked.code, checked.get("status", 400))
 			return
 		validated.append(checked.path)
 	if not Engine.is_editor_hint():

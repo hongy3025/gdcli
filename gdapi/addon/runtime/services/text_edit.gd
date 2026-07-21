@@ -55,7 +55,7 @@ static func create_script(path: String, content: String, force: bool) -> Diction
 	if FileAccess.file_exists(abs_path) and not force:
 		AuditLog.record("script/create", "file", {"path": checked.path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
 		return {"ok": false, "code": ErrorCodes.UNSAFE_OPERATION, "error": "script/create requires force:true"}
-	var dir := checked.path.get_base_dir()
+	var dir: String = checked.path.get_base_dir()
 	if dir != "res://" and !DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir)):
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
 	# 写入临时文件再 rename,避免半写入
@@ -87,10 +87,13 @@ static func patch_script(path: String, first: int, last: int, text: String, forc
 	var patch_result := replace_lines(existing, first, last, text)
 	if not patch_result.ok:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": patch_result.error}
-	# 强制要求覆盖时,目标必须真实变化或必须 force
+	# 覆盖已有文件需要 force:true
+	if not force:
+		return {"ok": false, "code": ErrorCodes.UNSAFE_OPERATION, "error": "script/patch requires force:true to overwrite"}
+	# 检查是否真的是有变化的 patch
 	var new_text: String = patch_result.text
-	if new_text == existing and not force:
-		return {"ok": false, "code": ErrorCodes.CONFLICT, "error": "patch is a no-op without force:true"}
+	if new_text == existing:
+		return {"ok": false, "code": ErrorCodes.CONFLICT, "error": "patch is a no-op"}
 	var tmp := abs_path + ".gdcli-tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:

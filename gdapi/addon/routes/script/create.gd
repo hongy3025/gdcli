@@ -3,7 +3,7 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
-const TextEdit := preload("res://addons/gdapi/runtime/services/text_edit.gd")
+const TextEditService := preload("res://addons/gdapi/runtime/services/text_edit.gd")
 
 const ROUTE := "script/create"
 
@@ -14,7 +14,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if path == "":
 		res.error("path is required", "missing_param")
 		return
-	var result := TextEdit.create_script(path, content, force)
+	var result := TextEditService.create_script(path, content, force)
 	if not result.ok:
 		res.error(result.error, result.code, 403 if result.code == "unsafe_operation" else 400)
 		return

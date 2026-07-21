@@ -379,9 +379,9 @@ mutation 分为三类：
 - 至少一个真实 editor mutation 可 undo/redo；所有不可撤销 route 明确返回 `undoable:false`。
 - 危险操作的成功和失败均产生正确 route 名的审计记录，且不包含 secret。
 
-### M2：基础编辑闭环
+### M2：基础编辑闭环 ✅ 已完成
 
-内容：
+实现内容：
 
 - 当前编辑场景的 current/open/save/close/tree/list_open。
 - Node CRUD、property、hierarchy 和 selection。

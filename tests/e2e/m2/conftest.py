@@ -17,6 +17,7 @@ from .helpers import (
     repo_root,
     require_godot_47,
     resolve_godot_bin,
+    wait_for_godot_ready,
     wait_for_metadata,
 )
 
@@ -99,6 +100,11 @@ def m2_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         godot.wait(timeout=10)
         godot_log_handle.close()
         raise RuntimeError(f"gdapi ping never succeeded within 60s: {last_error}")
+
+    # Wait for EditorUndoRedoManager to be fully initialized before proceeding.
+    # Writes (node/property/set, script/create, filesystem/write, etc.) hang if
+    # called before the editor finishes loading its docks and layout.
+    wait_for_godot_ready(base)
 
     env = {
         "root": root,

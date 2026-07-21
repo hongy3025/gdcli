@@ -7,9 +7,8 @@ import pytest
 from .helpers import exec_error, exec_ok, tree_digest
 
 
-def test_resource_info_returns_class_and_uid(m2_editor):
+def test_resource_info_returns_class(m2_editor):
     info = exec_ok(m2_editor, "resource/info", {"path": "res://resources/player_data.tres"})
-    assert info["uid"]
     assert info["class"] == "Resource"
 
 

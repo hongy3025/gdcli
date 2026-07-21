@@ -3,7 +3,7 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
-const TextEdit := preload("res://addons/gdapi/runtime/services/text_edit.gd")
+const TextEditService := preload("res://addons/gdapi/runtime/services/text_edit.gd")
 
 const ROUTE := "script/patch"
 
@@ -19,7 +19,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if first < 1 or last < first:
 		res.error("start_line must be >= 1 and <= end_line", "invalid_param")
 		return
-	var result := TextEdit.patch_script(path, first, last, text, force)
+	var result := TextEditService.patch_script(path, first, last, text, force)
 	if not result.ok:
 		res.error(result.error, result.code, 400)
 		return

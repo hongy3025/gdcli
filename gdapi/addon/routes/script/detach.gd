@@ -3,7 +3,7 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
-const TextEdit := preload("res://addons/gdapi/runtime/services/text_edit.gd")
+const TextEditService := preload("res://addons/gdapi/runtime/services/text_edit.gd")
 
 const ROUTE := "script/detach"
 
@@ -12,7 +12,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if node_path == "":
 		res.error("node_path is required", "missing_param")
 		return
-	var result := TextEdit.detach_script(node_path)
+	var result := TextEditService.detach_script(node_path)
 	if not result.ok:
 		res.error(result.error, result.code, 400)
 		return

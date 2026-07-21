@@ -64,8 +64,9 @@ func scan(root_dir: String, force: bool = false) -> void:
 			_file_signatures.erase(file_path)
 			_needs_update = true
 
-	if _needs_update:
-		_refresh_builtin_handlers()
+	# 始终刷新内置 handler，确保 command/list 和 command/doc
+	# 持有最新的路由表（包括通过 _on_filesystem_changed 触发的增量扫描）
+	_refresh_builtin_handlers()
 
 ## 获取已注册命令总数
 ##

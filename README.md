@@ -242,6 +242,130 @@ gdcli --json exec gdapi/health/ping
 
 ---
 
+## exec 路由家族（M2 基础编辑）
+
+gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器的基本编辑工作流。
+
+### 场景 (scene)
+
+| 路由 | 说明 |
+|---|---|
+| `scene/current` | 获取当前编辑场景信息 |
+| `scene/current/save` | 保存当前编辑场景（可选另存为 `{path, force?}`） |
+| `scene/open` | 在编辑器中打开场景 `{path}` |
+| `scene/close` | 关闭场景 `{path?}` |
+| `scene/tree` | 查询场景树结构 `{path?, max_depth?}` |
+| `scene/list_open` | 列出所有已打开场景 |
+
+### 节点 (node)
+
+| 路由 | 说明 |
+|---|---|
+| `node/create` | 创建节点 `{parent_path, type, name}` |
+| `node/delete` | 删除节点（不能删除场景根节点） |
+| `node/duplicate` | 复制节点 |
+| `node/rename` | 重命名节点 `{node_path, name}` |
+| `node/reparent` | 改变节点父级 `{node_path, parent_path}` |
+| `node/move` | 调整节点在兄弟中的顺序 |
+| `node/get` | 获取节点信息 `{node_path}` |
+| `node/set` | 批量设置节点属性 `{node_path, properties}` |
+| `node/list` | 列出当前场景所有节点 |
+| `node/select` | 选择单个节点 |
+
+### 属性 (node/property)
+
+| 路由 | 说明 |
+|---|---|
+| `node/property/get` | 获取属性值 `{node_path, property}` |
+| `node/property/set` | 设置属性值 `{node_path, property, value}` |
+| `node/property/list` | 列出节点所有属性 |
+| `node/property/reset` | 重置属性为默认值 |
+| `node/property/revert` | 还原属性为场景文件中的值 |
+
+属性值使用 typed Variant JSON 格式，例如：
+
+```json
+{"type": "Vector2", "value": [100.0, 200.0]}
+{"type": "Color", "value": [1.0, 0.0, 0.0, 1.0]}
+{"type": "NodePath", "value": "/root/Main/Player"}
+{"type": "Resource", "value": "res://resources/player_data.tres"}
+```
+
+### 信号 (node/signal)
+
+| 路由 | 说明 |
+|---|---|
+| `node/signal/list` | 列出节点信号及连接 `{node_path}` |
+| `node/signal/connect` | 连接信号 `{source_path, signal, target_path, method, flags?}` |
+| `node/signal/disconnect` | 断开信号连接 |
+| `node/signal/emit` | 手动发射信号 |
+
+### 分组 (node/group)
+
+| 路由 | 说明 |
+|---|---|
+| `node/group/list` | 列出节点所属分组 `{node_path}` |
+| `node/group/add` | 添加节点到分组 `{node_path, group, persistent?}` |
+| `node/group/remove` | 从分组移除节点 |
+| `node/group/nodes` | 查询分组内所有节点 `{group}` |
+
+### 脚本 (script)
+
+| 路由 | 说明 |
+|---|---|
+| `script/read` | 读取脚本文件内容 `{path}` |
+| `script/create` | 创建新脚本文件 `{path, content}` |
+| `script/write` | 覆盖写入脚本文件（需 `force:true`） |
+| `script/patch` | 行范围替换 `{path, start_line, end_line, text, force?}` |
+| `script/attach` | 挂载脚本到节点 `{node_path, path}`（UndoRedo 支持） |
+| `script/detach` | 从节点卸载脚本（UndoRedo 支持） |
+| `script/current` | 获取当前编辑的脚本 |
+| `script/open` | 在编辑器中打开脚本并定位到指定行列 `{path, line?, column?}` |
+| `script/validate` | 验证脚本语法 `{path}` |
+
+### 文件系统 (filesystem)
+
+| 路由 | 说明 |
+|---|---|
+| `filesystem/list` | 列出目录内容 `{path, offset?, limit?}` |
+| `filesystem/read` | 读取文件内容 `{path}` |
+| `filesystem/write` | 写入文件（需 `force:true`）`{path, content, force?}` |
+| `filesystem/search` | 按文件名搜索 `{pattern, root?, offset?, limit?}` |
+| `filesystem/grep` | 按内容搜索 `{root, pattern, glob?, case_sensitive?, offset?, limit?}` |
+| `filesystem/reimport` | 重新导入资源 `{paths}` |
+
+### 资源 (resource)
+
+| 路由 | 说明 |
+|---|---|
+| `resource/info` | 资源元信息 `{path}` |
+| `resource/deps` | 资源依赖列表 `{path}` |
+| `resource/search` | 搜索资源 `{filter?, type?, offset?, limit?}` |
+| `resource/create` | 创建资源文件 `{path, type, properties, force?}` |
+| `resource/assign` | 分配资源到节点属性（UndoRedo 支持）`{node_path, property, path}` |
+| `resource/delete` | 删除资源文件（需 `force:true`） |
+| `resource/move` | 移动/重命名资源 `{from, to, force?}` |
+| `resource/reimport` | 重新导入单个资源 |
+
+### 编辑器 UI (editor)
+
+| 路由 | 说明 |
+|---|---|
+| `editor/selection/get` | 获取当前选中节点 |
+| `editor/selection/set` | 设置选中节点 `{node_paths, clear?}` |
+| `editor/main_screen/set` | 切换主编辑器 Tab `{screen: "2D"|"3D"|"Script"|"AssetLib"}` |
+
+### Mutation 模型
+
+| 类型 | UndoRedo | 覆盖保护 |
+|---|---|---|
+| 编辑器状态（节点/属性/信号/分组） | ✅ `undoable:true` | 不适用 |
+| 文件/资源操作 | ❌ `undoable:false` | 需 `force:true` |
+
+所有 mutation 响应包含 `ok`、`changed`、`undoable` 字段。危险操作记录审计日志。
+
+---
+
 ## 全局选项
 
 | Flag | 默认 | 说明 |

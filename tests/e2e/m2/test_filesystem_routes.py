@@ -60,7 +60,7 @@ def test_filesystem_write_atomic_with_force(m2_editor):
     ("filesystem/read", {"path": "res://notes/../../outside.txt"}, "invalid_path"),
     ("filesystem/read", {"path": "/etc/passwd"}, "invalid_path"),
     ("filesystem/write", {"path": "res://addons/gdapi/plugin.gd", "content": "x", "force": True}, "permission_denied"),
-    ("filesystem/reimport", {"paths": ["res://addons/gdapi/plugin.gd"]}, "invalid_path"),
+    ("filesystem/reimport", {"paths": ["res://addons/gdapi/plugin.gd"]}, "permission_denied"),
 ])
 def test_filesystem_rejections(m2_editor, route, data, code):
     error = exec_error(m2_editor, route, data)
