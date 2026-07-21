@@ -156,3 +156,27 @@ def gdcli_expect_fail(env: dict, *args: str) -> int:
     )
     assert result.returncode != 0, f"expected nonzero exit: {args}\n{result.stdout}"
     return result.returncode
+
+
+def run_godot_script(
+    env: dict,
+    script: str,
+    *,
+    editor: bool = False,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a Godot GDScript test through --headless --script."""
+    command = [env["godot_bin"], "--headless", "--path", str(env["fixture"])]
+    if editor:
+        command.append("--editor")
+    command += ["--script", script]
+    process_env = os.environ.copy()
+    process_env.update(extra_env or {})
+    return subprocess.run(
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=process_env,
+        timeout=45,
+    )

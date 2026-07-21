@@ -107,7 +107,6 @@ gdapi/addon/routes/
 | `route_doc.gd` | `runtime/route_doc.gd` | 路由文档描述 |
 | `builtin_ping.gd` | `runtime/builtin_ping.gd` | 内置 ping 路由 |
 | `builtin_routes.gd` | `runtime/builtin_routes.gd` | 内置路由列表 |
-| `builtin_help.gd` | `runtime/builtin_help.gd` | 内置帮助路由 |
 | `builtin_commands.gd` | `runtime/builtin_commands.gd` | 内置命令列表 |
 | `builtin_command_help.gd` | `runtime/builtin_command_help.gd` | 内置命令帮助 |
 
@@ -147,6 +146,7 @@ gdapi/addon/routes/
 
 ## 注意事项
 
+- 本机 Godot 路径：`GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe`
 - 版本号统一在 workspace `Cargo.toml` 的 `workspace.package.version` 管理
 - `plugin.cfg` 和 `gdapi.gdextension` 中的版本号需要手动同步
 - 行列号参数是 1-based（与编辑器一致），内部转换为 0-based

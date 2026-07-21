@@ -6,12 +6,39 @@
 跳过：
   uv run pytest tests/e2e/test_m1_smoke.py -v -k "not e2e"
 """
+import json
+import subprocess
+
 import pytest
 
 from conftest import gdcli_json, gdcli_expect_fail
 
 
 pytestmark = pytest.mark.e2e
+
+# 当前 gdapi 公开路由集合（与 gdapi/routes + command/list 返回结果一致）
+EXPECTED_ROUTES = {
+    "command/doc",
+    "command/list",
+    "console/output",
+    "gdapi/audit/clear",
+    "gdapi/audit/list",
+    "gdapi/health/pathcheck",
+    "gdapi/health/ping",
+    "gdapi/loglevel",
+    "gdapi/routes",
+    "godot/version",
+    "project/info",
+    "project/run",
+    "project/stop",
+    "scene/add_node",
+    "scene/create",
+    "scene/export_mesh_library",
+    "scene/load_sprite",
+    "scene/save",
+    "uid/get",
+    "uid/update_all",
+}
 
 
 def _exec(env: dict, route: str, data: str | None = None) -> dict:
@@ -50,40 +77,27 @@ class TestConnectivity:
 # ── 路由命名空间 ─────────────────────────────────────────
 
 class TestRouteNamespace:
-    def test_scene_create_exists(self, godot_env):
-        """scene/create 路由存在"""
-        resp = _exec(godot_env, "routes")
-        assert "scene/create" in resp["routes"]
+    def test_routes_match_current_public_surface(self, godot_env):
+        """gdapi/routes 返回的 route 集合与 EXPECTED_ROUTES 完全一致"""
+        resp = _exec(godot_env, "gdapi/routes")
+        assert resp["ok"] is True
+        assert resp["routes"] == sorted(EXPECTED_ROUTES)
 
-    def test_godot_version_exists(self, godot_env):
-        """godot/version 路由存在"""
-        resp = _exec(godot_env, "routes")
-        assert "godot/version" in resp["routes"]
-
-    def test_gdapi_health_pathcheck_exists(self, godot_env):
-        """gdapi/health/pathcheck 路由存在"""
-        resp = _exec(godot_env, "routes")
-        assert "gdapi/health/pathcheck" in resp["routes"]
-
-    def test_gdapi_audit_list_exists(self, godot_env):
-        """gdapi/audit/list 路由存在"""
-        resp = _exec(godot_env, "routes")
-        assert "gdapi/audit/list" in resp["routes"]
-
-    def test_gdapi_audit_clear_exists(self, godot_env):
-        """gdapi/audit/clear 路由存在"""
-        resp = _exec(godot_env, "routes")
-        assert "gdapi/audit/clear" in resp["routes"]
+    def test_removed_aliases_are_not_exposed(self, godot_env):
+        """旧别名 routes / commands / help / command-help 不再暴露"""
+        for removed in ("routes", "commands", "help", "command-help"):
+            _exec_fail(godot_env, removed)
 
 
 # ── 命令元数据 ─────────────────────────────────────────
 
 class TestCommandsMetadata:
-    def test_commands_contains_scene_create(self, godot_env):
-        """commands 列表包含 scene/create"""
-        resp = _exec(godot_env, "commands")
+    def test_commands_list_matches_route_surface(self, godot_env):
+        """command/list 返回的 path 集合与 EXPECTED_ROUTES 完全一致"""
+        resp = _exec(godot_env, "command/list")
+        assert resp["ok"] is True
         paths = [c["path"] for c in resp["commands"]]
-        assert "scene/create" in paths
+        assert sorted(paths) == sorted(EXPECTED_ROUTES)
 
 
 # ── 路径安全 ─────────────────────────────────────────
@@ -134,3 +148,46 @@ class TestAuditLog:
         assert resp["ok"] is True
         assert isinstance(resp["entries"], list)
         assert len(resp["entries"]) > 0
+
+
+# ── 路径安全（扩展） ──────────────────────────────────
+
+def _exec_error(env: dict, route: str, data: dict) -> dict:
+    result = subprocess.run(
+        [
+            str(env["gdcli"]), "--json", "exec", route,
+            "--project", str(env["fixture"]),
+            "--data", json.dumps(data),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert result.returncode != 0, result.stdout
+    return json.loads(result.stderr.split(": ", 1)[1])
+
+
+def test_pathcheck_rejects_unknown_mode(godot_env):
+    error = _exec_error(
+        godot_env,
+        "gdapi/health/pathcheck",
+        {"path": "res://test.tscn", "mode": "execute"},
+    )
+    assert error["code"] == "invalid_param"
+
+
+def test_uid_update_requires_force(godot_env):
+    error = _exec_error(godot_env, "uid/update_all", {"project_path": "res://tests"})
+    assert error["code"] == "unsafe_operation"
+
+
+def test_uid_update_cannot_touch_protected_metadata(godot_env):
+    metadata = godot_env["fixture"] / ".godot" / "gdapi.json"
+    before = metadata.read_bytes()
+    error = _exec_error(
+        godot_env,
+        "uid/update_all",
+        {"project_path": "res://.godot", "force": True},
+    )
+    assert error["code"] == "permission_denied"
+    assert metadata.read_bytes() == before

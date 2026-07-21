@@ -132,7 +132,7 @@ enum Cmd {
     Exec {
         /// 命令名
         command: String,
-        /// 位置参数（command-help 使用：命令路径）
+        /// 位置参数（`command/doc <route>` 使用：待查询路由路径）
         args: Vec<String>,
         /// 请求 JSON 数据（字面 JSON、@file 或 - 表示 stdin）
         #[arg(long)]

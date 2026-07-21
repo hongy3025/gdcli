@@ -1,6 +1,6 @@
 ## 内置命令列表路由
 ##
-## POST /commands → 返回所有可用命令的详细列表（path + summary + params）
+## POST `command/list` → 返回所有可用命令的详细列表（path + summary + params）
 ##
 ## 路由表由 router.scan() 完成后调用 set_routes() 注入。
 
@@ -16,7 +16,7 @@ var _routes: Dictionary = {}
 func set_routes(routes: Dictionary) -> void:
 	_routes = routes
 
-## 处理 /commands 请求
+## 处理 `command/list` 请求
 ##
 ## 返回所有命令的详细列表。
 ##
@@ -44,7 +44,7 @@ func _build_list() -> Array:
 
 ## 自身的帮助文档
 ##
-## @return GdApiRouteDoc 描述 /commands 路由的语义
+## @return GdApiRouteDoc 描述 `command/list` 路由的语义
 func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc.make("列出所有可用命令的详细信息")

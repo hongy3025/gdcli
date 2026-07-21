@@ -29,7 +29,7 @@ const _RouteDoc := preload("res://addons/gdapi/runtime/route_doc.gd")
 ## 返回该路由的帮助文档
 ##
 ## 子类可选重载：未重载时返回 summary 为空的占位文档，路由仍可正常工作，
-## 仅在 /help 列表中显示为空描述。
+## 仅在 `command/doc` 详情列表中显示为空描述。
 ##
 ## @return GdApiRouteDoc 实例
 func doc() -> _RouteDoc:

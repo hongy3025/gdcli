@@ -1,7 +1,7 @@
 ## 路由单个参数的文档描述
 ##
 ## 由 GdApiRouteDoc.param() 构造，一般不直接实例化。
-## 用于在 /help 接口序列化为 JSON 返回给客户端。
+## 用于在 `command/list` / `command/doc` 接口序列化为 JSON 返回给客户端。
 
 @tool
 class_name GdApiParamDoc

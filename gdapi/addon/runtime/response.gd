@@ -118,7 +118,7 @@ func _send(body: PackedByteArray) -> void:
 		return
 	_sent = true
 	
-	var headers_dict := {}
+	var headers_dict: Dictionary[String, Variant] = {}
 	for key in _headers:
 		headers_dict[key] = _headers[key]
 	

@@ -231,12 +231,12 @@ Return Fields:
 
 ```bash
 # 默认 TOON 输出
-gdcli exec ping
+gdcli exec gdapi/health/ping
 # ok: true
 # gdapi_version: 0.2.0
 
 # JSON 输出（脚本友好）
-gdcli --json exec ping
+gdcli --json exec gdapi/health/ping
 # {"ok":true,"gdapi_version":"0.2.0"}
 ```
 

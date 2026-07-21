@@ -1,6 +1,6 @@
 ## 内置路由列表处理器
 ##
-## 提供 /routes 端点，返回所有已注册的路由名称列表。
+## 提供 `gdapi/routes` 端点，返回所有已注册的路由名称列表。
 ## 用于客户端发现可用的 API 端点。
 
 @tool
@@ -29,7 +29,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc.make("列出所有已注册的路由名称")
 		.desc("返回当前 gdapi 运行时所有可调用路由的扁平名称数组；用于客户端发现 API 端点")
-		.returns("路由名数组（含内置 ping / routes / help）", {
+		.returns("路由名数组（含内置 `gdapi/health/ping` / `gdapi/routes` / `command/list` / `command/doc`）", {
 			"ok": "bool",
 			"routes": "Array[String], 按字母序排列的路由路径",
 		})

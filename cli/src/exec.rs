@@ -27,8 +27,8 @@ use crate::gdapi_meta;
 /// # 参数
 ///
 /// * `project` - Godot 项目根目录路径
-/// * `command` - 命令名（如 "ping"、"scene/create" 等）
-/// * `args` - 位置参数（command-help 使用：命令路径）
+/// * `command` - 命令名（如 "gdapi/health/ping"、"scene/create" 等）
+/// * `args` - 位置参数（`command/doc <route>` 使用：待查询路由路径）
 /// * `data` - 可选的请求数据（JSON 字符串、@文件路径或 "-" 表示 stdin）
 /// * `timeout_secs` - 请求超时时间（秒）
 /// * `json_mode` - 是否以原始 JSON 格式输出（默认 TOON 格式）
@@ -52,7 +52,7 @@ pub fn run(
         }
     };
 
-    // 2. 准备请求 body（含 command-help 命令的位置参数处理）
+    // 2. 准备请求 body（含 `command/doc` 命令的位置参数处理）
     let body_text = match build_body(command, args, data)? {
         BuildBodyOutcome::Body(t) => t,
         BuildBodyOutcome::Reject(msg) => {
@@ -142,20 +142,20 @@ pub(crate) enum BuildBodyOutcome {
 /// # 参数
 ///
 /// * `command` - 命令名
-/// * `args` - 位置参数（command-help 使用：命令路径）
+/// * `args` - 位置参数（`command/doc <route>` 使用：待查询路由路径）
 /// * `data` - 可选的用户提供的请求数据
 ///
 /// # 特殊命令
 ///
-/// * `commands` — 返回空 body，拒绝 `--data` 和位置参数
-/// * `command-help <path>` — 以 `{"command": "<path>"}` 为 body，拒绝 `--data`，要求恰好 1 个位置参数
-/// * 其它命令 — 使用 `--data` 或空 `{}`，拒绝位置参数
+/// * `command/list` — 返回空 body，拒绝 `--data` 和位置参数
+/// * `command/doc <path>` — 以 `{"command": "<path>"}` 为 body，拒绝 `--data`，要求恰好 1 个位置参数
+/// * 其它命令（如 `gdapi/health/ping`、`scene/create`） — 使用 `--data` 或空 `{}`，拒绝位置参数
 pub(crate) fn build_body(
     command: &str,
     args: &[String],
     data: Option<&str>,
 ) -> Result<BuildBodyOutcome> {
-    // commands 命令：无参数，返回所有命令列表
+    // command/list 命令：无参数，返回所有命令列表
     if command == "command/list" {
         if !args.is_empty() {
             return Ok(BuildBodyOutcome::Reject(format!(
@@ -171,12 +171,11 @@ pub(crate) fn build_body(
         return Ok(BuildBodyOutcome::Body("{}".to_string()));
     }
 
-    // command-help 命令：需要一个位置参数作为命令路径
+    // command/doc 命令：需要一个位置参数作为命令路径
     if command == "command/doc" {
         if data.is_some() {
             return Ok(BuildBodyOutcome::Reject(
-                "'command/doc' does not accept --data; use positional argument instead"
-                    .to_string(),
+                "'command/doc' does not accept --data; use positional argument instead".to_string(),
             ));
         }
         if args.len() != 1 {

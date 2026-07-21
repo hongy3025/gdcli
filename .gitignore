@@ -19,4 +19,5 @@ gdapi/addon/bin/windows/
 __pycache__/
 *.pyc
 .pytest_cache/
-/.pi/tasks
+.pi-subagents/
+.pi/tasks

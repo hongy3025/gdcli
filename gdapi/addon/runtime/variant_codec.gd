@@ -2,75 +2,80 @@
 class_name GdApiVariantCodec
 extends RefCounted
 
-static func to_variant(value: Variant) -> Variant:
+## 带检查的类型解码，返回 {ok:true, value:Variant} 或 {ok:false, error:String}
+static func decode(value: Variant) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
-		return value
+		return {"ok": true, "value": value}
 	if not value.has("type"):
-		return value
+		return {"ok": true, "value": value}
 	var type_name: String = value.get("type", "")
 	var raw = value.get("value", null)
 	if raw == null:
-		return value
+		return {"ok": false, "error": "missing value for type: " + type_name}
 	match type_name:
 		"Vector2":
-			if not _check_size(raw, 2): return value
-			return Vector2(float(raw[0]), float(raw[1]))
+			if not _check_size(raw, 2): return {"ok": false, "error": "Vector2 requires 2 values"}
+			return {"ok": true, "value": Vector2(float(raw[0]), float(raw[1]))}
 		"Vector2i":
-			if not _check_size(raw, 2): return value
-			return Vector2i(int(raw[0]), int(raw[1]))
+			if not _check_size(raw, 2): return {"ok": false, "error": "Vector2i requires 2 values"}
+			return {"ok": true, "value": Vector2i(int(raw[0]), int(raw[1]))}
 		"Vector3":
-			if not _check_size(raw, 3): return value
-			return Vector3(float(raw[0]), float(raw[1]), float(raw[2]))
+			if not _check_size(raw, 3): return {"ok": false, "error": "Vector3 requires 3 values"}
+			return {"ok": true, "value": Vector3(float(raw[0]), float(raw[1]), float(raw[2]))}
 		"Vector3i":
-			if not _check_size(raw, 3): return value
-			return Vector3i(int(raw[0]), int(raw[1]), int(raw[2]))
+			if not _check_size(raw, 3): return {"ok": false, "error": "Vector3i requires 3 values"}
+			return {"ok": true, "value": Vector3i(int(raw[0]), int(raw[1]), int(raw[2]))}
 		"Vector4":
-			if not _check_size(raw, 4): return value
-			return Vector4(float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3]))
+			if not _check_size(raw, 4): return {"ok": false, "error": "Vector4 requires 4 values"}
+			return {"ok": true, "value": Vector4(float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3]))}
 		"Vector4i":
-			if not _check_size(raw, 4): return value
-			return Vector4i(int(raw[0]), int(raw[1]), int(raw[2]), int(raw[3]))
+			if not _check_size(raw, 4): return {"ok": false, "error": "Vector4i requires 4 values"}
+			return {"ok": true, "value": Vector4i(int(raw[0]), int(raw[1]), int(raw[2]), int(raw[3]))}
 		"Color":
-			if not _check_size(raw, 3): return value
-			return Color(float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3]) if raw.size() > 3 else 1.0)
+			if not _check_size(raw, 3): return {"ok": false, "error": "Color requires at least 3 values"}
+			return {"ok": true, "value": Color(float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3]) if raw.size() > 3 else 1.0)}
 		"Rect2":
-			if not _check_size(raw, 2): return value
-			return Rect2(to_variant({"type":"Vector2","value":raw[0]}), to_variant({"type":"Vector2","value":raw[1]}))
+			if not _check_size(raw, 2): return {"ok": false, "error": "Rect2 requires 2 values"}
+			return {"ok": true, "value": Rect2(decode(raw[0]).value, decode(raw[1]).value)}
 		"Rect2i":
-			if not _check_size(raw, 2): return value
-			return Rect2i(to_variant({"type":"Vector2i","value":raw[0]}), to_variant({"type":"Vector2i","value":raw[1]}))
+			if not _check_size(raw, 2): return {"ok": false, "error": "Rect2i requires 2 values"}
+			return {"ok": true, "value": Rect2i(decode(raw[0]).value, decode(raw[1]).value)}
 		"Quaternion":
-			if not _check_size(raw, 4): return value
-			return Quaternion(float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3]))
+			if not _check_size(raw, 4): return {"ok": false, "error": "Quaternion requires 4 values"}
+			return {"ok": true, "value": Quaternion(float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3]))}
 		"Transform2D":
-			if not _check_size(raw, 3): return value
-			return Transform2D(
-				to_variant({"type":"Vector2","value":raw[0]}),
-				to_variant({"type":"Vector2","value":raw[1]}),
-				to_variant({"type":"Vector2","value":raw[2]})
-			)
+			if not _check_size(raw, 3): return {"ok": false, "error": "Transform2D requires 3 values"}
+			if not (_check_size(raw[0], 2) and _check_size(raw[1], 2) and _check_size(raw[2], 2)):
+				return {"ok": false, "error": "Transform2D vectors require 2 values"}
+			return {"ok": true, "value": Transform2D(Vector2(float(raw[0][0]), float(raw[0][1])), Vector2(float(raw[1][0]), float(raw[1][1])), Vector2(float(raw[2][0]), float(raw[2][1])))}
 		"Basis":
-			if not _check_size(raw, 3): return value
-			return Basis(
-				to_variant({"type":"Vector3","value":raw[0]}),
-				to_variant({"type":"Vector3","value":raw[1]}),
-				to_variant({"type":"Vector3","value":raw[2]})
-			)
+			if not _check_size(raw, 3): return {"ok": false, "error": "Basis requires 3 values"}
+			return {"ok": true, "value": Basis(decode(raw[0]).value, decode(raw[1]).value, decode(raw[2]).value)}
 		"Transform3D":
-			if not _check_size(raw, 2): return value
-			return Transform3D(
-				to_variant({"type":"Basis","value":raw[0]}),
-				to_variant({"type":"Vector3","value":raw[1]})
-			)
+			if not _check_size(raw, 2): return {"ok": false, "error": "Transform3D requires 2 values"}
+			return {"ok": true, "value": Transform3D(decode(raw[0]).value, decode(raw[1]).value)}
 		"AABB":
-			if not _check_size(raw, 2): return value
-			return AABB(
-				to_variant({"type":"Vector3","value":raw[0]}),
-				to_variant({"type":"Vector3","value":raw[1]})
-			)
-		"NodePath": return NodePath(str(raw))
-		"Resource": return load(str(raw))
-		_: return value
+			if not _check_size(raw, 2): return {"ok": false, "error": "AABB requires 2 values"}
+			return {"ok": true, "value": AABB(decode(raw[0]).value, decode(raw[1]).value)}
+		"NodePath":
+			return {"ok": true, "value": NodePath(str(raw))}
+		"Resource":
+			var resource_path: String = str(raw)
+			if resource_path.is_empty():
+				return {"ok": false, "error": "Resource path is empty"}
+			if not resource_path.begins_with("res://") and not resource_path.begins_with("user://"):
+				return {"ok": false, "error": "Resource path must be res:// or user://"}
+			var res_load = load(resource_path)
+			if res_load == null:
+				return {"ok": false, "error": "Resource not found: " + resource_path}
+			return {"ok": true, "value": res_load}
+		_:
+			return {"ok": false, "error": "unsupported Variant type: " + type_name}
+
+## 兼容性包装器，调用 decode() 并返回原始值，失败时返回原值
+static func to_variant(value: Variant) -> Variant:
+	var result := decode(value)
+	return result.value if result.ok else value
 
 static func from_variant(value: Variant) -> Variant:
 	match typeof(value):

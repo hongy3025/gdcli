@@ -14,7 +14,7 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 ## @param res 响应对象
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if not Engine.has_meta("gdapi_plugin"):
-		res.error("gdapi plugin not available", "plugin_not_ready", 503)
+		res.error("gdapi plugin not available", "godot_error", 503)
 		return
 
 	var plugin = Engine.get_meta("gdapi_plugin")
@@ -36,13 +36,13 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 	plugin._log_level = level_map[new_level.to_lower()]
 	res.json({"ok": true, "level": new_level.to_lower()})
-
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc.make("查询或设置全局日志级别")
 		.desc("不带 level 参数时查询当前日志级别；带 level 参数时设置新级别。级别可选：debug, info, warn, error")
 		.param("level", "String", false, "要设置的日志级别（debug/info/warn/error），留空则查询当前级别", "")
+		.example("{\"level\":\"info\"}")
 		.returns("查询模式返回当前级别；设置模式返回新级别", {
 			"ok": "bool",
 			"level": "String, 当前或新设置的日志级别",

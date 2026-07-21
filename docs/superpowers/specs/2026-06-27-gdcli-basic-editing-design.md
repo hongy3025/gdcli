@@ -2,6 +2,8 @@
 
 日期：2026-06-27
 
+> **已被取代：** 本文保留为历史设计记录。当前 route 命名、Godot 4.7 基线和里程碑以 [gdcli 全功能能力路线图设计](2026-06-27-gdcli-full-capability-roadmap-design.md) 为准，不得据此生成新的 implementation plan。
+
 ## 背景
 
 `docs/papers` 下的研究报告显示，Godot MCP/编辑器操控工具已经形成稳定能力谱系：场景管理、节点操作、脚本管理、文件/资源管理、信号/分组、运行时验证、导出与高级游戏系统等。gdcli 当前优势是 Rust CLI、Godot LSP、GDExtension HTTP 安全底座和嵌入式 addon 安装；短板是编辑器操控域少、无 UndoRedo、缺节点/脚本/资源/信号基础能力，也没有运行时探针。

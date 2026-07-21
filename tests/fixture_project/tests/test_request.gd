@@ -29,6 +29,7 @@ func _init() -> void:
 	test_empty_body_stays_empty()
 	test_invalid_json_body_stays_empty()
 	test_json_array_body_stays_empty()
+	test_non_json_content_type_rejected()
 	test_path_with_query_string_split()
 	test_path_without_query_string()
 	test_default_path_and_method()
@@ -134,7 +135,8 @@ func test_invalid_json_body_stays_empty() -> void:
 		"headers": {"content-type": "application/json"},
 		"body": 'not valid json'.to_utf8_buffer()
 	})
-	assert_eq(req.body.size(), 0, "invalid json body empty")
+	assert_eq(req.body.size(), 0, "invalid body stays empty")
+	assert_eq(req.body_error, "request body must be valid JSON", "invalid json error")
 
 ## 测试 JSON 数组请求体保持为空（不是字典）
 func test_json_array_body_stays_empty() -> void:
@@ -144,7 +146,18 @@ func test_json_array_body_stays_empty() -> void:
 		"headers": {"content-type": "application/json"},
 		"body": '[1, 2, 3]'.to_utf8_buffer()
 	})
-	assert_eq(req.body.size(), 0, "json array body stays empty (not dict)")
+	assert_eq(req.body.size(), 0, "array body stays empty")
+	assert_eq(req.body_error, "request body must be a JSON object", "array body error")
+
+## 测试非 JSON 内容类型被拒绝
+func test_non_json_content_type_rejected() -> void:
+	var req = GdApiRequest.new({
+		"method": "POST",
+		"path": "/test",
+		"headers": {"content-type": "text/plain"},
+		"body": '{}'.to_utf8_buffer(),
+	})
+	assert_eq(req.body_error, "content-type must be application/json", "content type error")
 
 ## 测试带查询字符串的路径分离
 func test_path_with_query_string_split() -> void:

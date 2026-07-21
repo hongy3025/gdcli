@@ -20,7 +20,7 @@ config/features=PackedStringArray("4.7")
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/gdapi/plugin.cfg")
+enabled=PackedStringArray("res://addons/gdapi/plugin.cfg", "res://addons/gdapi_test/plugin.cfg")
 
 [rendering]
 

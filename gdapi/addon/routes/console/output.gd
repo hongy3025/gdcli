@@ -51,7 +51,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		"offset": new_offset,
 		"eof": eof,
 	})
-
 ## 查找 EditorLog 内的 RichTextLabel
 ##
 ## 优先使用缓存引用；若无效则遍历编辑器场景树查找。
@@ -101,6 +100,7 @@ func doc() -> GdApiRouteDoc:
 		.desc("从编辑器 Output 面板读取日志内容；包含编辑器启动信息、插件消息和运行场景输出；支持基于字符偏移量的增量拉取")
 		.param("offset", "int", false, "字符偏移量，上次响应返回的 offset 值", 0)
 		.param("limit", "int", false, "最大返回行数", 200)
+		.example("{\"offset\":0,\"limit\":50}")
 		.returns("日志内容和分页信息", {
 			"ok": "bool",
 			"lines": "Array[String], 日志行数组（纯文本）",

@@ -286,7 +286,10 @@ mod tests {
         let result = render_command_help(body);
         assert!(result.contains("保存场景"), "should contain summary");
         assert!(result.contains("Usage:"), "should contain usage");
-        assert!(result.contains("--data {DATA}"), "should contain DATA placeholder");
+        assert!(
+            result.contains("--data {DATA}"),
+            "should contain DATA placeholder"
+        );
         assert!(result.contains("DATA:"), "should contain DATA section");
         assert!(
             result.contains("\"scene_path\""),
@@ -296,10 +299,22 @@ mod tests {
             result.contains("\"new_path\""),
             "should contain param name in JSON"
         );
-        assert!(result.contains("(required string)"), "should contain required mark and type");
-        assert!(result.contains("(optional string)"), "should contain optional mark and type");
-        assert!(result.contains("场景文件路径"), "should contain param description");
-        assert!(result.contains("另存为路径"), "should contain param description");
+        assert!(
+            result.contains("(required string)"),
+            "should contain required mark and type"
+        );
+        assert!(
+            result.contains("(optional string)"),
+            "should contain optional mark and type"
+        );
+        assert!(
+            result.contains("场景文件路径"),
+            "should contain param description"
+        );
+        assert!(
+            result.contains("另存为路径"),
+            "should contain param description"
+        );
         assert!(result.contains("Returns:"), "should contain returns");
         assert!(result.contains("Example:"), "should contain example");
     }
@@ -310,10 +325,7 @@ mod tests {
         let result = render_command_help(body);
         assert!(result.contains("健康检查"), "should contain summary");
         assert!(result.contains("Usage:"), "should contain usage");
-        assert!(
-            !result.contains("DATA:"),
-            "should not contain DATA section"
-        );
+        assert!(!result.contains("DATA:"), "should not contain DATA section");
         assert!(
             !result.contains("--data {DATA}"),
             "should not contain DATA placeholder"
@@ -369,20 +381,53 @@ mod tests {
             }
         }"#;
         let result = render_command_help(body);
-        assert!(result.contains("批量更新项目中所有资源的 UID"), "should contain summary");
+        assert!(
+            result.contains("批量更新项目中所有资源的 UID"),
+            "should contain summary"
+        );
         assert!(result.contains("Usage:"), "should contain usage");
-        assert!(result.contains("--data {DATA}"), "should contain DATA placeholder");
+        assert!(
+            result.contains("--data {DATA}"),
+            "should contain DATA placeholder"
+        );
         assert!(result.contains("DATA:"), "should contain DATA section");
-        assert!(result.contains("\"project_path\""), "should contain param name in JSON");
-        assert!(result.contains("(optional String)"), "should contain optional mark and type");
-        assert!(result.contains("要扫描的项目子目录路径"), "should contain param description");
-        assert!(result.contains("PROJECT_PATH"), "should contain placeholder text");
+        assert!(
+            result.contains("\"project_path\""),
+            "should contain param name in JSON"
+        );
+        assert!(
+            result.contains("(optional String)"),
+            "should contain optional mark and type"
+        );
+        assert!(
+            result.contains("要扫描的项目子目录路径"),
+            "should contain param description"
+        );
+        assert!(
+            result.contains("PROJECT_PATH"),
+            "should contain placeholder text"
+        );
         assert!(result.contains("Returns:"), "should contain returns");
-        assert!(result.contains("处理结果统计"), "should contain returns description");
-        assert!(result.contains("Return Fields:"), "should contain return fields");
-        assert!(result.contains("scenes_processed"), "should contain field name");
-        assert!(result.contains("Description:"), "should contain description section");
-        assert!(result.contains("扫描指定目录下的场景文件"), "should contain description text");
+        assert!(
+            result.contains("处理结果统计"),
+            "should contain returns description"
+        );
+        assert!(
+            result.contains("Return Fields:"),
+            "should contain return fields"
+        );
+        assert!(
+            result.contains("scenes_processed"),
+            "should contain field name"
+        );
+        assert!(
+            result.contains("Description:"),
+            "should contain description section"
+        );
+        assert!(
+            result.contains("扫描指定目录下的场景文件"),
+            "should contain description text"
+        );
     }
 
     #[test]
@@ -399,8 +444,14 @@ mod tests {
             }
         }"#;
         let result = render_command_help(body);
-        assert!(result.contains("Examples:"), "should contain examples header");
-        assert!(result.contains("gdcli exec scene/save"), "should contain example");
+        assert!(
+            result.contains("Examples:"),
+            "should contain examples header"
+        );
+        assert!(
+            result.contains("gdcli exec scene/save"),
+            "should contain example"
+        );
     }
 
     #[test]
@@ -417,7 +468,13 @@ mod tests {
             }
         }"#;
         let result = render_command_help(body);
-        assert!(result.contains("Description:"), "should contain description header");
-        assert!(result.contains("这是详细描述"), "should contain description text");
+        assert!(
+            result.contains("Description:"),
+            "should contain description header"
+        );
+        assert!(
+            result.contains("这是详细描述"),
+            "should contain description text"
+        );
     }
 }

@@ -15,7 +15,9 @@ var path: String
 ## 请求头字典，键为小写形式
 var headers: Dictionary
 ## 解析后的 JSON 请求体
-var body: Dictionary
+var body: Dictionary = {}
+## 请求体解析错误信息（空字符串表示无错误）
+var body_error: String = ""
 ## 查询字符串部分（? 后面的内容）
 var query: String
 ## 路径参数字典，由路由系统填充（如 /users/:id 中的 id）
@@ -44,10 +46,20 @@ func _init(req_dict: Dictionary) -> void:
 	
 	# 尝试解析 JSON 请求体
 	if raw_body.size() > 0:
+		var content_type := get_header("content-type")
+		if not content_type.is_empty() and not is_json():
+			body_error = "content-type must be application/json"
+			return
 		var text := raw_body.get_string_from_utf8()
-		var parsed = JSON.parse_string(text)
-		if typeof(parsed) == TYPE_DICTIONARY:
-			body = parsed
+		var parser := JSON.new()
+		if parser.parse(text) != OK:
+			if not content_type.is_empty():
+				body_error = "request body must be valid JSON"
+			return
+		if typeof(parser.data) != TYPE_DICTIONARY:
+			body_error = "request body must be a JSON object"
+			return
+		body = parser.data
 
 	# 获取插件引用用于日志
 	if Engine.has_meta("gdapi_plugin"):

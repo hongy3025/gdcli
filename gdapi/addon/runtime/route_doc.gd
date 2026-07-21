@@ -1,7 +1,7 @@
 ## 路由帮助文档对象
 ##
 ## 通过 GdApiRouteDoc.make("...").desc("...").param(...).returns(...) 链式构造。
-## 由 route handler 的 doc() 方法返回，内置 /help 路由调用 to_dict()/to_summary_dict() 序列化。
+## 由 route handler 的 doc() 方法返回，内置 `command/list` / `command/doc` 路由调用 to_dict()/to_summary_dict() 序列化。
 
 @tool
 class_name GdApiRouteDoc
