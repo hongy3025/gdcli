@@ -45,5 +45,6 @@ func doc() -> GdApiRouteDoc:
 			"session_id": "int, EditorDebuggerSession 的 id;未连接时为 -1",
 			"pending": "int, 当前等待回复的请求数",
 			"broker_registered": "bool, broker 是否已注册到 Engine meta",
+			"session_started_at": "float, 当前 broker 首次 attach 的 unix 时间戳;从未 attach 时为 0",
 		})
 	)

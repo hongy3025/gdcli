@@ -28,11 +28,16 @@ var _session_id: int = -1
 var _sender: Callable = Callable()
 ## 下一个请求 id;单调递增
 var _next_id: int = 1
+## 第一次 attach 的 unix 时间戳；用于 runtime/status 暴露的 session_started_at 字段。
+## 多次重连（detach 后再 attach）保持首次值不变，方便客户端判定 session 重启。
+var _session_started_at: float = 0.0
 
 ## 返回当前 broker 的可观测状态
 ##
 ## 含 session_id 让外部路由可以判定"是否同一会话";
-## 含 pending 让 await/call 操作者能即时失败 pending。
+## 含 pending 让 await/call 操作者能即时失败 pending;
+## 含 broker_registered 表明 Engine meta 中是否已注册（始终为 true；外部路由
+## 在 broker 缺席时直接返回 broker_registered=false，无需调用本方法）。
 ## @return 状态字典
 func status() -> Dictionary:
 	var pending_count: int = 0
@@ -43,6 +48,8 @@ func status() -> Dictionary:
 		"protocol_version": Protocol.VERSION,
 		"session_id": _session_id,
 		"pending": pending_count,
+		"broker_registered": Engine.has_meta("gdapi_runtime_broker"),
+		"session_started_at": _session_started_at,
 	}
 
 ## 关联一个 debugger session 和 transport send callable
@@ -57,6 +64,8 @@ func attach(session_id: int, send: Callable) -> void:
 	_session_id = session_id
 	_sender = send
 	_state = "connecting"
+	if _session_started_at <= 0.0:
+		_session_started_at = Time.get_unix_time_from_system()
 
 ## 把 broker 标记为 connecting 而不绑定 session
 ##
