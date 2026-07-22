@@ -24,23 +24,23 @@ def test_runtime_tree_root_name(m3_running):
 def test_runtime_node_get_set_call(m3_running):
     path = "/root/RuntimeMain/ProbeTarget"
 
-    # get typed Vector2
+    # get typed Vector2 from renamed field spawn_position
     payload = exec_ok(m3_running, "runtime/node/get", {
-        "node_path": path, "property": "position",
+        "node_path": path, "property": "spawn_position",
     })
     assert payload["value"]["type"] == "Vector2"
     assert payload["value"]["value"] == [10.0, 20.0]
 
     # set 与 readback
     changed = exec_ok(m3_running, "runtime/node/set", {
-        "node_path": path, "property": "position",
+        "node_path": path, "property": "spawn_position",
         "value": {"type": "Vector2", "value": [30, 40]},
     })
     assert changed["undoable"] is False
     payload2 = exec_ok(m3_running, "runtime/node/get", {
-        "node_path": path, "property": "position",
+        "node_path": path, "property": "spawn_position",
     })
-    assert payload2["value"]["value"] == [30.0, 40.0]
+    assert payload2["value"]["value"] == [30.0, 40.0]  
 
     # call allowlisted method "increment"
     called = exec_ok(m3_running, "runtime/node/call", {

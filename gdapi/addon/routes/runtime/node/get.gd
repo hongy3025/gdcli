@@ -21,6 +21,6 @@ func doc() -> GdApiRouteDoc:
 		.param("property", "String", true, "属性名", "")
 		.example("{\"node_path\":\"/root/RuntimeMain/ProbeTarget\",\"property\":\"counter\"}")
 		.returns("属性值", {
-			"value": "Object, {"type":..., "value":...} 或 plain",
+			"value": "Object, 其中 type 与 value 字段详见 VariantCodec，或纯 plain 值",
 		})
 	)

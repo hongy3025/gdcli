@@ -43,11 +43,10 @@ func _setup_session(session_id: int) -> void:
 		push_warning("[gdapi] runtime debugger plugin failed to find session %d" % session_id)
 		return
 	_sessions[session_id] = session
-	if _broker == null:
-		return
-	var send := func(message: Dictionary) -> bool:
-		return _send_to_session(session_id, message)
-	_broker.attach(session_id, send)
+	if _broker != null:
+		var send := func(message: Dictionary) -> bool:
+			return _send_to_session(session_id, message)
+		_broker.attach(session_id, send)
 
 ## 接收 runtime probe 推过来的 reply / event / hello
 ##
@@ -55,22 +54,21 @@ func _setup_session(session_id: int) -> void:
 ## @param _message 协议层子通道（当前未使用）
 ## @param data data 数组,args[0] 是 protocol v1 字典
 ## @param session_id 对应 session id
-func _capture(name: String, _message: String, data: Array, session_id: int) -> void:
+func _capture(name: String, data: Array, session_id: int) -> bool:
 	if name != "gdapi":
-		return
+		return false
 	if _broker == null:
-		return
+		return true
 	if data.is_empty():
-		return
+		return true
 	var payload: Variant = data[0]
 	if typeof(payload) != TYPE_DICTIONARY:
-		return
+		return false
 	_broker.receive(payload)
 	# Hello 不走 broker.receive 而更新 connect 状态。
 	if String(payload.get("event", "")) == "hello":
 		_broker.begin_connect()
-	if _sessions.has(session_id):
-		pass
+	return true
 
 ## EditorDebuggerSession 断开时回调
 ##
@@ -109,16 +107,17 @@ func _send_to_session(session_id: int, message: Dictionary) -> bool:
 ## @param session_id 已知 session id
 ## @return session 引用或 null
 func _lookup_session(session_id: int) -> RefCounted:
-	var debugger := EditorInterface.get_debugger()
-	if debugger == null:
-		return null
-	if debugger.has_method("get_session"):
-		var session: Variant = debugger.get_session(session_id)
+	# Godot 4.7 `EditorDebuggerPlugin` 内部保存 `_sessions: Dictionary`
+	# (session_id -> EditorDebuggerSession)。子类通过 `get_session()` 访问。
+	if self.has_method("get_session"):
+		var session: Variant = call("get_session", session_id)
 		if session != null:
 			return session
-	# 兜底:扫描自身声明的方法,直接 self.get_session(...)
-	if self.has_method("get_session"):
-		var self_session: Variant = call("get_session", session_id)
-		if self_session != null:
-			return self_session
+	# 兑底: 直接访问父类可能暴露的 _sessions
+	for prop in self.get_property_list():
+		if String(prop.name) == "_sessions":
+			var parent_sessions: Variant = self.get("_sessions")
+			if typeof(parent_sessions) == TYPE_DICTIONARY and parent_sessions.has(session_id):
+				return parent_sessions[session_id]
 	return null
+

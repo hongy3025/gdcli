@@ -3,7 +3,7 @@ extends Node2D
 ## ProbeTarget — 可观测 counter 和 signal 用于 runtime assertion
 
 var counter: int = 0
-var position: Vector2 = Vector2(10, 20)
+var spawn_position: Vector2 = Vector2(10, 20)
 var input_keys: int = 0
 var input_mouse: int = 0
 var input_gamepad: int = 0
