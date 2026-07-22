@@ -82,6 +82,8 @@ func _enter_tree() -> void:
 	# M3：创建并注册 runtime broker 和 EditorDebuggerPlugin
 	_runtime_broker = RuntimeBroker.new()
 	Engine.set_meta("gdapi_runtime_broker", _runtime_broker)
+	# 4.7: add_debugger_plugin 需要 EditorDebuggerPlugin 实例(不是 Script)。
+	# 传入已实例化的对象才能让 _setup_session / _capture 被编辑器调度。
 	_runtime_debugger_plugin = RuntimeDebuggerPlugin.new()
 	_runtime_debugger_plugin.setup(_runtime_broker)
 	add_debugger_plugin(_runtime_debugger_plugin)
@@ -116,11 +118,9 @@ func _exit_tree() -> void:
 	# M3：先暂停运行期 broker、所有 pending 会立即被失败 callback
 	if _runtime_broker != null:
 		_runtime_broker.detach("plugin exiting")
-	# 关闭 debugger plugin(根据是否在编辑器上生效)
-	if _runtime_debugger_plugin != null:
-		# EditorPlugin 提供 remove_debugger_plugin
-		if self.has_method("remove_debugger_plugin"):
-			self.remove_debugger_plugin(_runtime_debugger_plugin)
+	# 关闭 debugger plugin(4.7: 同样传 instance)
+	if _runtime_debugger_plugin != null and self.has_method("remove_debugger_plugin"):
+		self.remove_debugger_plugin(_runtime_debugger_plugin)
 	remove_autoload_singleton("GdApiRuntimeProbe")
 	Engine.remove_meta("gdapi_runtime_broker")
 	_runtime_broker = null

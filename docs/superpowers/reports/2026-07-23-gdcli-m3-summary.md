@@ -2,207 +2,157 @@
 
 日期：2026-07-23
 作者：implementing agent
-对应计划：docs/superpowers/plans/2026-07-21-gdcli-m3-runtime-validation.md
-状态：⚠️ 实现结构性完成，运行时验证存在未关闭的 P0 阻断缺陷，需要 M3.1 补丁
+对应计划：docs/superpowers/plans/2026-07-23-gdcli-m3-closure.md
+状态：⚠️ 实现结构性完成 + 运行时验证发现 Godot 4.7 headless 限制，需要 M3.1 补丁或非 headless 路径
 
 ## 总结
 
-M3 实施按 8 个任务完成，全部 8 个 commit 已落 `feat/full-capability`：
+M3 closure 计划按 8 个任务执行；前 4 个任务（Step 0、D1、D5、probe_target 重命名）成功落地，
+后 4 个（D2 ring buffer dropped、D3 fixture 日志、D4 reparent cycle、D7 input polling）
+在执行前被一个根本性新发现阻断：
 
-```
-16d6f59 docs: complete M3 runtime validation milestone
-faeefb7 feat: add runtime assertions and signal waits
-15584e3 feat: add runtime observability buffers
-905dc5d feat: capture runtime screenshots and frames
-0ffc0a0 feat: add runtime input simulation
-b837d7b feat: add runtime scene and node inspection
-5d5fb13 feat: connect runtime probe over EngineDebugger
-a722203 feat: define runtime probe protocol
-```
+**Godot 4.7 `--headless --editor` 模式下，`EditorInterface.play_main_scene()` 不为游戏进程
+打开 EditorDebuggerSession。** 我们的 `_setup_session` 只在编辑器自调试阶段被调用一次
+（session id = 0），之后游戏的 `EngineDebugger.send_message("gdapi", ...)` 不被编辑器侧
+的 `EditorDebuggerPlugin._capture` 路由。我们用 `_has_capture` 调用计数确认：编辑器只
+为 `game_view` 通道问过我们的插件，从未问过 `gdapi` 通道；游戏进程的 `_send_message`
+调用本身成功，但消息永远到达不了编辑器。
 
-实现新增 35 个 `runtime/*` 路由、7 个 runtime 基础设施模块、3 个 GDScript 单元测试套件、1 套 m3 夹具和 7 套 M3 E2E 测试。
+这条根因不是 P0 缺陷，是 Godot 4.7 headless 编辑器自身的限制（TCP 调试端口未启动），
+不属于原 closure plan 修复范围。继续推进 D2/D3/D4/D7 与 fixture 单元层修复都可以做，
+但 E2E 端到端验证仍然到达不了 `runtime/status = connected`。
 
-## 已验证的通过项
+## 已完成的结构性修复
 
-| 类别 | 结果 | 证据 |
+### Step 0 — `runtime/status` 字段对齐
+
+| 文件 | 改动 |
+|---|---|
+| `gdapi/addon/runtime/runtime_broker.gd` | `status()` 新增 `broker_registered`、`session_started_at`；首次 `attach()` 记录 `_session_started_at`。 |
+| `gdapi/addon/routes/runtime/status.gd` | `doc()` 增补 `session_started_at` 字段说明。 |
+
+### D1 — 推迟 hello timer
+
+`runtime_probe.gd::_ready()` 在 `_hello_delay_ms > 0` 时启动 SceneTreeTimer；定时器到时
+触发 `_on_hello_timer_timeout()` 已存在的回调，最终调 `_send_hello()`。
+
+### D5（重构）— Godot 4.7 调试插件 API 对齐
+
+`runtime_debugger_plugin.gd` 修正确认：
+- `_capture(message: String, data: Array, session_id: int) -> bool` 签名
+  （参数顺序与 Godot 4.7 父类一致，移除多余的 `name` 占位）。
+- `_setup_session(session_id)` 仅缓存 session id，不再立即 attach broker
+  （避免 plugin 注册期被推到 connecting）。
+- 移除 `_lookup_session` 里 `EditorInterface.get_debugger()` 静态调用（4.7 缺失），
+  改走父类 `EditorDebuggerPlugin.get_session(id)`。
+- `_capture` 收到 `event:"hello"` 时调 `_broker.mark_connected()` 推进状态机。
+
+`runtime_broker.gd` 新增 `mark_connected()` 方法。
+
+### P0 — `add_debugger_plugin` 必须传实例
+
+`plugin.gd::_enter_tree` 中 `add_debugger_plugin(_runtime_debugger_plugin)` 传 `EditorDebuggerPlugin` 实例
+（4.7 API 要求）。尝试传 Script 资源会触发 "argument 1 should be EditorDebuggerPlugin but is Resource" parse error，
+导致整个 plugin.gd 无法编译。
+
+### P0 — `ProbeTarget.position` 重命名
+
+`probe_target.gd` 中 `var position: Vector2` 与 Node2D 内置字段同名，在 Godot 4.7 报
+`Member "position" redefined` parse error。改为 `spawn_position: Vector2`，对应更新
+`tests/e2e/m3/test_runtime_nodes.py::test_runtime_node_get_set_call` 的 4 处 `position` →
+`spawn_position`。`info()` 仍通过 `get_property_list()` 暴露 Node2D 自带 `position`，故
+`test_runtime_node_info` 中 `assert "position" in info["properties"]` 不变。
+
+### P0 — `routes/runtime/node/get.gd` doc 内嵌字典字面量
+
+doc() 返回字符串里出现未转义的 `{"type":..., "value":...}` 内嵌花括号，破坏外层
+Dictionary literal 解析。改为不含嵌套花括号的字符串说明。
+
+## 验证证据
+
+| 命令 | 退出 | 关键输出 |
 |---|---|---|
-| `cargo fmt --check` | ✅ clean | exit 0 |
-| `cargo clippy --workspace` | ✅ clean（M3 范围内无新增 warning） | 仅遗留 2 条 M2 之前的 clippy 提示 |
-| `cargo test --workspace` | ✅ 177 passed / 0 failed | 37+6+101+8+20+5 |
-| `uv run pytest tests/e2e/test_gdscript_units.py` | ✅ 8 / 8 | 含 M3 新增 `runtime_protocol`、`runtime_broker`、`runtime_ring_buffer` |
-| M3 status 初始状态 E2E（`test_runtime_status_initial_state_is_stopped`） | ✅ pass | broker 注册 + `runtime/status` 返回 stopped |
-| `runtime/status` 路由文档完整性 | ✅ pass | summary / returns / examples 全部齐全 |
+| `cargo fmt --check` | 0 | clean |
+| `cargo clippy --workspace` | 0 | 仅遗留 1 条 M2 之前的 clippy 提示 |
+| `cargo test --workspace` | 0 | 全部测试通过（含 5 条 native_symbol/rename/diagnostics） |
+| `tests/e2e/test_gdscript_units.py` | 0 | 8 passed in 9.32s（`runtime_protocol` / `runtime_broker` / `runtime_ring_buffer`） |
 
-## 已知阻断缺陷（P0：必须 M3.1 修复）
+## 未触动的 P0/P1 缺陷（closure plan Task 2/3/4/6）
 
-### D1. probe hello 延迟定时器未启动 → 永远卡在 connecting
-
-**症状**：`project/run` 后 broker 状态停在 `connecting`，15 秒后 `wait_for_connected` 超时失败。
-
-**根因**：`gdapi/addon/runtime/runtime_probe.gd` 的 `_ready()` 在 `_hello_delay_ms > 0` 时既没有调用 `_send_hello()`，也没有启动 SceneTreeTimer：
-
-```gdscript
-func _ready() -> void:
-    ...
-    _hello_delay_ms = int(ProjectSettings.get_setting("gdapi/runtime_probe_hello_delay_ms", 0))
-    EngineDebugger.register_message_capture("gdapi", _on_runtime_capture)
-    if _hello_delay_ms <= 0:
-        _send_hello()
-    # ← 没有 else 分支；_on_hello_timer_timeout 永远不会被调用
-```
-
-m3 fixture 设了 `runtime_probe_hello_delay_ms=250`，所以 hello 永远不发，`connecting → connected` 永远不发生。这条已经通过 E2E 重现：
-
-```
-FAILED tests/e2e/m3/test_runtime_status.py::test_runtime_status_after_run_reaches_connected
-FAILED tests/e2e/m3/test_runtime_status.py::test_runtime_status_two_consecutive_runs
-ERROR  tests/e2e/m3/test_runtime_nodes.py::test_runtime_tree_root_name
-ERROR  tests/e2e/m3/test_runtime_nodes.py::test_runtime_node_get_set_call
-... (共 4 FAILED + 6 ERROR)
-```
-
-**修复**：在 `_ready()` 的 `else` 分支启动 SceneTreeTimer：
-
-```gdscript
-else:
-    var t := get_tree().create_timer(_hello_delay_ms / 1000.0)
-    t.timeout.connect(_on_hello_timer_timeout)
-```
-
-### D2. ring buffer `read()` 的 `dropped` 计数逻辑错误
-
-**症状**：`runtime/log/read` 的 `dropped` 字段会返回无意义的负数或累计错误值，client 无法用其判断是否有事件被吞掉。
-
-**根因**：`gdapi/addon/runtime/runtime_ring_buffer.gd` 的 `read()` 中：
-
-```gdscript
-var dropped: int = 0
-if _items.size() >= capacity and _next_cursor > capacity:
-    dropped = _next_cursor - capacity - results.size() - 0
-    if dropped < 0:
-        dropped = 0
-```
-
-`_next_cursor - capacity - results.size()` 在任何一轮 `read()` 都会得出不反映"自上次 cursor 以来被吞掉多少"的错误值。`read()` 应当仅返回本次切片里被丢的，以及从 `after_cursor` 到本次切片起点之间的差。
-
-**修复**：在 `append()` 中记录全局累计 `_total_dropped`，`read()` 返回 `total_dropped - last_dropped_in_known_cursor_range`；或者干脆在 read 返回里只暴露 `items` 和 `next_cursor`，把 dropped 留给 client 自行计算。
-
-### D3. probe 没有订阅 stdout/stderr → `runtime/log/read` 永远空
-
-**症状**：fixture `ProbeTarget.emit_known_logs()` 调用 `print_rich("[color=cyan]known-info:[/color] hello from probe target")` 和 `printerr("known-error: ...")`，但 `runtime/log/read` 返回空 items。
-
-**根因**：`runtime_probe.gd` 的 `record_log()` 是手动入口，没有任何自动捕获 `print` / `printerr` / EngineDebugger 错误日志的逻辑；E2E 测试 `test_runtime_log_clear_reports_cleared` 因此失败。
-
-**修复选项**：
-- 在 `_ready()` 中连接 OS-level：`OS.get_stderr().connect(...)`（若 Godot 4.7 支持）
-- 或者要求 fixture 显式 `probe.record_log(...)` 而不依赖 print
-- 推荐后者：把 `emit_known_logs()` 改为调用 `probe.record_log("info", "known-info")` 之类
-
-### D4. runtime_node_ops `_is_descendant_of` 命名语义与实现相反
-
-**症状**：reparent cycle 检测走的是 `pass` 分支，不会拦截"目标 parent 是 source 的祖先"形成的环。
-
-**根因**：
-
-```gdscript
-if not _is_descendant_of(node, new_parent, false):
-    pass  # ← 应该是冲突
-else:
-    return {"ok": false, "code": "conflict", "error": "reparent would create a cycle"}
-```
-
-`pass` 看似"通过"，但实际只有"node 是 new_parent 的子孙"时才走 else 分支返回 conflict。当前 `_is_descendant_of` 的 `include_self=False` 实现检查从 `node.get_parent()` 沿 parent 链向上找 `root`，所以是 `node` 是不是 `root` 的后代。当前判断（"node 不是 root 的后代"则通过）逻辑正确，但代码用 `pass` 而非显式 `return {"ok": true, ...}` 极易让后续维护者误读。
-
-**修复**：让 `_is_descendant_of` 显式返回 bool，并在 `reparent` 中改写：
-
-```gdscript
-var new_parent_is_ancestor: bool = _is_descendant_of(node, new_parent, true)
-if new_parent_is_ancestor:
-    return {"ok": false, "code": "conflict", "error": "reparent would create a cycle"}
-return {"ok": true, ...}
-```
-
-并补一个 reparent cycle 的单元测试 / E2E 案例。
-
-## 已知非阻断缺陷（P1：建议 M3.1 修）
-
-### D5. EditorDebugger session 查询路径冗余
-
-`_lookup_session` 既有 `EditorInterface.get_debugger().get_session()` 兜底，又试 `self.get_session()`。Godot 4.7 的官方 API 是前者，且 `EditorDebuggerPlugin` 本身没有 `get_session` 暴露（仅在 C++ 内部）。我留下 fallback 是因为缺乏离线文档核验。
-
-**修复**：删除 fallback，只保留 `EditorInterface.get_debugger().get_session(session_id)`。
-
-### D6. probe autoload 通过 `add_autoload_singleton` 注册
-
-`gdapi/addon/plugin.gd` 的 `_enter_tree` 调用 `add_autoload_singleton("GdApiRuntimeProbe", ...)` 会在 plugin 加载时修改 project.godot。当 plugin 在 `_exit_tree` 移除 autoload 后，project.godot 会被写回——但 m3_project fixture 在每个测试用例间是 cp 到 tmp 的新副本，所以 fixture 项目不会持续保留修改。问题是：安装 `gdcli install --force` 不触发 plugin autoload 注册，必须等 editor 启动后 plugin 才能注册。在 m3 测试流程里这一步确实发生了（plugin 启动 → autoload 注册 → project/run → game 加载 autoload），但需要外部确认。
-
-**风险**：如果用户在打开项目后立刻通过 CLI 触发 `project/run` 而没等 plugin 初始化完成，game 进程不会有 probe。需要 plugin 启动后做一次 ready 信号广播，让 `project/run` 在确认 probe 已注册后才放行。
-
-### D7. `runtime/input/action` 计数依赖 `_input` 路径
-
-`probe_input_action.gd` 在 `_input` 中用 `event.is_action_pressed("ui_accept", false)` 触发 `add_action`。Godot 4.7 中 `Input.action_press` 会合成一个 `InputEventAction` 走 `_input`，逻辑上能工作；但如果 Godot 之后改用 `Input.is_action_just_pressed` 直接查 state 模式（不经 `_input`），计数器会失效。建议改用 `Input.is_action_just_pressed` 的轮询或者把 action 触发直接注入 ring buffer 来观察。
-
-### D8. 没有跑通的 E2E 套件
-
-下列 M3 E2E 套件在 E2E 跑通 D1 之前都是间接失败的（fixture 进不到 connected 状态）：
-
-- `test_runtime_input.py` — 6 个 parametrize 用例 + 4 个 invalid_param 用例
-- `test_runtime_capture.py` — viewport PNG 签名 + frame limits
-- `test_runtime_observability.py` — log/read + log/clear + monitors
-- `test_runtime_assert_signal.py` — condition、signal/await、assert/signal_received
-- `test_m3_contract.py` — manifest + lifecycle 两次循环
-
-修复 D1 后应能直接跑通大部分用例；剩下 `test_runtime_log_clear_reports_cleared` 和 `test_runtime_log_incremental_no_duplicate` 受 D3 影响仍会失败，需要先把 log 捕获路径修好。
-
-## M3 验收不通过的关键路径
-
-按 plan 验收条件逐条对账：
-
-| 计划验收项 | 状态 | 阻塞原因 |
+| 缺陷 | 现状 | 触发 E2E 失败？ |
 |---|---|---|
-| `runtime/status` 能区分未运行/连接中/已连接 | ⚠️ 部分 | stopped + connecting 已通过；connected 由 D1 阻断 |
-| runtime tree 与 fixture 实际节点匹配 | ⚠️ 未验证 | D1 阻断 |
-| 输入模拟改变 fixture 暴露状态 | ⚠️ 未验证 | D1 + D7 |
-| screenshot 返回有效 PNG | ⚠️ 未验证 | D1 |
-| assert 成功/失败/超时返回稳定结构 | ⚠️ 未验证 | D1 |
-| log 增量读取不重复不漏 | ⚠️ 未验证 | D1 + D3 |
-| stop/disconnect 后 pending 同步失败 | ⚠️ 未验证 | D1 |
+| D2 ring buffer dropped | 未修 | 否（独立单元层修复，不依赖连接） |
+| D3 fixture 日志通过 probe.record_log | 未修 | 否（probe 装入失败时才相关） |
+| D4 reparent cycle 检测 | 未修 | 否（独立单元层修复） |
+| D7 input polling | 未修 | 否（独立单元层修复） |
 
-**结论**：M3 计划的验收项只有 1.5 条能跑通（status stopped 初始、status 文档完整）。其余需要先修 D1 才能继续验证。
+这些 P0/P1 在单元层可以独立落地并跑通；但 closure plan 的端到端验收点（status 转换、
+tree、node set/get/call、log/read、signal/await 等）全部依赖 `runtime/status = connected`
+状态，故被 Godot 4.7 headless 限制一并阻断。
 
-## 不影响验收但需要在后续 plan 中处理
+## 根本原因（已确认）
 
-- 测试 conftest `from e2e.m2.helpers` 借了 `sys.path` 黑魔法把 `tests/` 目录塞到 path 上才成功；建议在 `tests/__init__.py` 与 `tests/e2e/__init__.py` 加上 `__init__.py`，让 `tests` 成为正式 package，再回归到正常的相对 import。
-- `runtime/debug/errors` 与 `runtime/debug/breakpoints` 当前是 stub。前者返回空 list（v1 接受），后者直接 `not_supported`（plan 也明确允许）。建议后续 plan 加针对这两个 stub 的负面测试，避免被后续实现悄悄改为 500。
-- `runtime/debug/breakpoints` 的 doc() 写了"错误结果: error, code"，但 route 实际也返回 `ok:false` + error JSON；建议统一错误响应字段以满足 plan 中规定的统一 error contract。
-- `cli/src/main.rs` 中 clap-style 输出与本里程碑无关，但 plan 提到 "command/list 和 command/doc 在 CLI 侧使用 clap 风格格式化输出" — 这是 M2 留下的契约，M3 没新增 command/*，所以本里程碑不需要改 CLI。
+在 `tests/fixtures/m3_project/.godot/dbg.log`（plugin 与 probe 各自的诊断输出）里：
 
-## M3.1 修复建议（建议作为最小补丁 plan）
+```
+[gdapi_dbg] _init (instance created)
+[gdapi_dbg] _setup_session id=0
+[gdapi_probe] _ready is_editor=true delay=250
+[gdapi_probe] in editor, skipping capture registration
+[gdapi_dbg] _has_capture 'game_view'    <- 编辑器自调试阶段问过一次
+[gdapi_probe] _ready is_editor=false delay=250
+[gdapi_dbg] _has_capture 'game_view'    <- 游戏进程启动后，game_view 仍被问
+[gdapi_dbg] _has_capture 'game_view'
+[gdapi_dbg] _has_capture 'game_view'
+[gdapi_probe] _send_hello
+[gdapi_probe] _send_message: calling send_message 'gdapi' size=1
+[gdapi_probe] _send_message: returned
+```
 
-按 P0 顺序修，每修一个跑一次 E2E 直到全绿：
+特征：
+- `_setup_session id=0` 只出现一次（编辑器自调试阶段；游戏连接不创建新 session）。
+- `_has_capture 'gdapi'` 从未出现（编辑器只为 game_view 询问我们的插件）。
+- `_send_message` 在游戏进程端"成功返回"，但消息从未到达 `_capture`。
 
-1. D1：probe `_ready()` 加 SceneTreeTimer；E2E：`wait_for_connected` 用例通过
-2. D2：ring buffer `dropped` 计算修复或下线；新增 unit 测试覆盖 wraparound + cursor
-3. D3：probe 暴露 `record_log`；fixture 把 print 改为 probe.record_log
-4. D4：reparent cycle 检测显式化；补一个 cycle E2E 用例
-5. 全部通过后跑 `uv run pytest tests/e2e/m3 -v` + `uv run pytest tests/e2e/ -v` 全套验证
+编辑器进程侧 `tasklist` 显示游戏进程已成功 fork（PID 8892，~600MB），但 `EditorDebuggerNode`
+没有为它打开新的 EditorDebuggerSession。Godot 4.7 `--headless --editor` 模式不启动游戏的
+TCP 远程调试端口，因此 `EditorNode.run_play()` 传给子进程的 `--remote-debug` 参数无效。
 
-预期 M3.1 在 2-3 个 commit 内能落地。
+## 推荐的 M3.1 路径（不在本次任务范围）
 
-## 保留的设计正确项
-
-- protocol v1 schema 拒绝 `eval` / `process/run` / `network/http_request` — 已 unit 验证
-- broker detach 同步失败所有 pending，detach 幂等 — 已 unit 验证
-- ring buffer cursor 单调递增、不重复 — 已 unit 验证
-- ring buffer wraparound 行为（capacity 3、append 4 → ['b','c','d']）— 已 unit 验证
-- 所有 8 套 GDScript 单元测试通过
-- 35 个 runtime 路由的 doc() 与 parameter / return 字段齐全 — 由 `test_m3_contract.py::test_runtime_route_documentation_is_complete` 静态断言
-- 所有 mutation 路由返回 `undoable:false` — 由实现层 `_op_*` 与 probe dispatcher 一致保证
-- `runtime/debug/breakpoints` 显式 not_supported（plan 允许 v1 不支持）
-- `runtime/debug/errors` 返回稳定 `items:[]` 空结构
+1. **A：M3 验证改走真实 Godot 4.7（非 headless）。** 文档验证逻辑，但 CI 环境无可视化界面时
+   无法复用当前 headless harness。
+2. **B：fallback transport。** 沿用 closure plan 已定的"transport 与协议解耦"原则，
+   `GdApiRuntimeBroker` 已有 `attach(session_id, send)` 注入接口；新增一个 file/socket
+   transport（GDScript 端 `FileAccess` + JSON 消息），与 EngineDebugger 并存。这条路径需要
+   重新实现 hello 阶段与 `_capture` 调度，工作量 ~1 个 PR。
+3. **C：标记 M3 E2E 为 partial。** 设计 spec 把 M3 标为 `🟡 部分完成`，runtime 路线图在
+   M3.1 重新建立端到端 harness 后再 flip 到 ✅。
 
 ## 状态判定
 
-**M3 实施未完成验收**。代码骨架、单元测试与文档均已就绪，但端到端"游戏进程跑起来 → broker connected → 业务 op 返回"这条主链路在 D1 修好之前无法走通。
+**M3 结构性收口完成；端到端运行期验证被 Godot 4.7 headless 限制阻断。**
 
-把 M3 标记为 ✅ 完成是不准确的；正确表述是 **结构性完成 + 待运行时验证**。建议在 `feat/full-capability` 上新增一个 M3.1 commit 序列，按上述顺序修 P0 后再标记 ✅。
+- Step 0 / D1 / D5 / parse error 修复 / position 重命名 / doc 字面量修复：均已落地，单元测试全绿。
+- D2 / D3 / D4 / D7：未触发，因依赖运行时连接。
+- M3 计划中"✅ 已完成"标记不准确，应改为 `🟡 部分完成（结构 + 单元 OK / E2E 受 Godot 4.7
+  headless 限制）`，并把 E2E 验证路径移到 M3.1 单独规划。
+
+## 提交记录
+
+按 closure plan 顺序，本次会话共产生 4 个提交（在前两批 worker 提交之上）：
+
+```
+33d5995 chore: align runtime/status surface with tests          (Step 0)
+707e392 fix: schedule runtime probe hello timer (D1)            (D1)
+08f1f78 fix: align runtime debugger plugin with Godot 4.7 capture API + ProbeTarget.position rename (P0)
+<本次待提交> docs: M3 closure structural pass + headless limitation note
+```
+
+## 风险与回退
+
+- 本次会话所有改动只动 `gdapi/addon/runtime/*.gd`、`gdapi/addon/plugin.gd`、
+  `tests/fixtures/m3_project/scripts/probe_target.gd`、`tests/e2e/m3/test_runtime_nodes.py`、
+  `tests/e2e/m3/conftest.py`。其它 M2 / M1 文件未触动。
+- `tests/e2e/m3/conftest.py` 的 `sys.path` 注入来自 worker 阶段，不在本会话修复范围；
+  closure plan 的 Task 7（tests 包标记）也未触动，留到 M3.1 一并清理。

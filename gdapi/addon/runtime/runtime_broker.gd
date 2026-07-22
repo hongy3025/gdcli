@@ -75,6 +75,14 @@ func begin_connect() -> void:
 	if _state != "connected":
 		_state = "connecting"
 
+## 把 broker 标记为 connected（probe hello 已到达）
+##
+## 由 runtime debugger plugin 在收到 hello 事件时调用；
+## 仅在状态机处于 connecting 时才推进到 connected。
+func mark_connected() -> void:
+	if _state == "connecting":
+		_state = "connected"
+
 ## 主动断开当前会话,清理所有 pending
 ##
 ## @param reason 人类可读的断开原因,会被写入失败 reply

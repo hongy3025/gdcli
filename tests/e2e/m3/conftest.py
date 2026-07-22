@@ -15,7 +15,16 @@ from typing import Any
 
 import pytest
 
-from tests.e2e.m2.helpers import (
+# Allow importing tests.e2e.m2.helpers regardless of pytest testpath setup.
+_THIS_DIR = Path(__file__).resolve().parent
+_REPO_ROOT_CANDIDATE = _THIS_DIR.parent.parent
+_TESTS_DIR = _THIS_DIR.parent
+if str(_REPO_ROOT_CANDIDATE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_CANDIDATE))
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from e2e.m2.helpers import (  # noqa: E402
     copy_native_library,
     gdcli_exec,
     gdcli_bin,

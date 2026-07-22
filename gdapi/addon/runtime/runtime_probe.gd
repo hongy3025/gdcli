@@ -36,6 +36,9 @@ func _ready() -> void:
 		# EngineDebugger 在 release 构建下也可能可用,但为了安全 default 跳过
 		pass
 	_hello_delay_ms = int(ProjectSettings.get_setting("gdapi/runtime_probe_hello_delay_ms", 0))
+	if Engine.is_editor_hint():
+		# Editor 进程不运行游戏,probe 仅在游戏进程里注册 capture
+		return
 	EngineDebugger.register_message_capture("gdapi", _on_runtime_capture)
 	if _hello_delay_ms <= 0:
 		_send_hello()
