@@ -39,6 +39,9 @@ func _ready() -> void:
 	EngineDebugger.register_message_capture("gdapi", _on_runtime_capture)
 	if _hello_delay_ms <= 0:
 		_send_hello()
+	else:
+		var t := get_tree().create_timer(_hello_delay_ms / 1000.0)
+		t.timeout.connect(_on_hello_timer_timeout)
 
 ## 推迟到了 timer 触发时间后调用此函数
 func _on_hello_timer_timeout() -> void:
