@@ -1,0 +1,29 @@
+## runtime/input/touch — 注入 InputEventScreenTouch
+
+@tool
+extends "res://addons/gdapi/runtime/route_handler.gd"
+
+func handle(req: GdApiRequest, res: GdApiResponse) -> void:
+	var ops := load("res://addons/gdapi/runtime/runtime_input_ops.gd")
+	var result: Dictionary = ops.touch(req.body)
+	if not bool(result.get("ok", false)):
+		res.error(String(result.get("error", "touch failed")), String(result.get("code", "godot_error")), 500)
+		return
+	res.json(result.get("result", {}))
+
+func doc() -> GdApiRouteDoc:
+	return (
+		GdApiRouteDoc.make("注入 touch 事件")
+		.desc("index 是触摸点 id;pressed=true 表示按下,false 弹起。")
+		.param("index", "int", false, "触摸点 index,默认 0", "0")
+		.param("pressed", "bool", false, "是否按下", "true")
+		.param("position", "Array", false, "[x,y]", "[0,0]")
+		.example("{\"index\":0,\"pressed\":true,\"position\":[12,14]}")
+		.returns("事件结果", {
+			"changed": "bool",
+			"undoable": "bool",
+			"event_type": "String",
+			"index": "int",
+			"pressed": "bool",
+		})
+	)
