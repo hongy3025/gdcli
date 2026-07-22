@@ -14,6 +14,7 @@ from conftest import run_godot_script
         "res://tests/test_path_guard.gd",
         "res://tests/test_variant_codec.gd",
         "res://tests/test_runtime_protocol.gd",
+        "res://tests/test_runtime_broker.gd",
     ],
 )
 def test_gdscript_unit_suite(godot_env, script):

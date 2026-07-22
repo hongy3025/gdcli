@@ -1,0 +1,22 @@
+[gd_scene load_steps=5 format=3 uid="uid://bm3runtimemain"]
+
+[ext_resource type="Script" path="res://scripts/runtime_main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/probe_target.gd" id="2_target"]
+[ext_resource type="Script" path="res://scripts/probe_input.gd" id="3_input"]
+[ext_resource type="Script" path="res://scripts/probe_input_action.gd" id="4_input_action"]
+[ext_resource type="Script" path="res://scripts/probe_finished_signal.gd" id="5_finished_signal"]
+
+[node name="RuntimeMain" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="ProbeTarget" type="Node2D" parent="."]
+script = ExtResource("2_target")
+
+[node name="ProbeInput" type="Node" parent="."]
+script = ExtResource("3_input")
+
+[node name="ProbeInputAction" type="Node" parent="."]
+script = ExtResource("4_input_action")
+
+[node name="ProbeFinishedSignal" type="Node" parent="."]
+script = ExtResource("5_finished_signal")

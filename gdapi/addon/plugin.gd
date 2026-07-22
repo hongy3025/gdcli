@@ -9,6 +9,9 @@ extends EditorPlugin
 
 ## 路由系统预加载引用
 const Router := preload("res://addons/gdapi/runtime/router.gd")
+const RuntimeBroker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
+const RuntimeDebuggerPlugin := preload("res://addons/gdapi/runtime/runtime_debugger_plugin.gd")
+const RuntimeProbe := preload("res://addons/gdapi/runtime/runtime_probe.gd")
 ## 元数据文件路径，用于存储服务器连接信息
 const META_PATH := "res://.godot/gdapi.json"
 ## 默认端口号，实际使用时会尝试从该端口开始绑定
@@ -29,6 +32,11 @@ const LOG_LEVEL_NAMES := {0: "debug", 1: "info", 2: "warn", 3: "error"}
 var _server: GdApiServer
 ## 路由系统实例，负责请求分发和处理
 var _router: Router
+
+## M3 运行时 broker 实例(RefCounted,生命周期跟随插件)
+var _runtime_broker: RefCounted = null
+## M3 runtime debugger plugin 实例(EditorDebuggerPlugin)
+var _runtime_debugger_plugin: RefCounted = null
 
 ## 日志缓冲区，存储最近的日志条目用于远程查询
 var _log_buffer: Array = []
@@ -51,6 +59,7 @@ var _audit_seq: int = 0
 ## 4. 写入元数据文件供外部工具发现服务
 ## 5. 启用进程回调以处理请求轮询
 ## 6. 连接文件系统变化信号，实现路由热重载
+## 7. M3：创建 runtime broker 和 EditorDebuggerPlugin,注册为 autoload
 func _enter_tree() -> void:
 	# 注册自身到 Engine meta，供路由访问
 	Engine.set_meta("gdapi_plugin", self)
@@ -65,11 +74,22 @@ func _enter_tree() -> void:
 	_router.scan("res://addons/gdapi/routes")
 	_write_meta(port, token)
 	set_process(true)
-	
+
 	# 连接文件系统变化信号，实现路由热重载
 	var fs = EditorInterface.get_resource_filesystem()
 	fs.filesystem_changed.connect(_on_filesystem_changed)
-	
+
+	# M3：创建并注册 runtime broker 和 EditorDebuggerPlugin
+	_runtime_broker = RuntimeBroker.new()
+	Engine.set_meta("gdapi_runtime_broker", _runtime_broker)
+	_runtime_debugger_plugin = RuntimeDebuggerPlugin.new()
+	_runtime_debugger_plugin.setup(_runtime_broker)
+	add_debugger_plugin(_runtime_debugger_plugin)
+	# autoload 可以走 IIFE 装载 — Game 进程上 Engine 不会启动该 autoload,
+	# 只有 PlayScene 时作为 detached project 加载 RuntimeProbe。游戏进程中
+	# 通过下述 helper 也手动拉到 node 节点。未主动注入的场景表明尚未运行游戏。
+	add_autoload_singleton("GdApiRuntimeProbe", "res://addons/gdapi/runtime/runtime_probe.gd")
+
 	print("[gdapi] listening on 127.0.0.1:%d (%d routes)" % [port, _router.count()])
 
 ## 文件系统变化回调
@@ -88,10 +108,23 @@ func _on_filesystem_changed() -> void:
 ## 2. 停止 HTTP 服务器
 ## 3. 删除元数据文件
 ## 4. 从引擎元数据中移除插件引用
+## 5. M3: 关闭 runtime broker,移除 autoload,移除 debugger plugin
 func _exit_tree() -> void:
 	set_process(false)
 	if _server and _server.is_running():
 		_server.stop()
+	# M3：先暂停运行期 broker、所有 pending 会立即被失败 callback
+	if _runtime_broker != null:
+		_runtime_broker.detach("plugin exiting")
+	# 关闭 debugger plugin(根据是否在编辑器上生效)
+	if _runtime_debugger_plugin != null:
+		# EditorPlugin 提供 remove_debugger_plugin
+		if self.has_method("remove_debugger_plugin"):
+			self.remove_debugger_plugin(_runtime_debugger_plugin)
+	remove_autoload_singleton("GdApiRuntimeProbe")
+	Engine.remove_meta("gdapi_runtime_broker")
+	_runtime_broker = null
+	_runtime_debugger_plugin = null
 	_delete_meta()
 	Engine.remove_meta("gdapi_plugin")
 
@@ -99,10 +132,14 @@ func _exit_tree() -> void:
 ##
 ## 在编辑器空闲时轮询 HTTP 服务器，处理所有待处理的请求。
 ## 使用循环确保一次处理所有积压请求，避免请求延迟。
+## M3: 同时推动 runtime broker 的 tick(),让超时请求被及时清除。
+##
 ## @param _dt 帧时间间隔（未使用）
 func _process(_dt: float) -> void:
 	if _server == null or not _server.is_running():
 		return
+	if _runtime_broker != null:
+		_runtime_broker.tick(Time.get_ticks_msec())
 	while true:
 		var req: Variant = _server.poll_request()
 		if req == null:
