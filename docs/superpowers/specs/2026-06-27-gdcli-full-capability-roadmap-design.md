@@ -401,17 +401,31 @@ mutation 分为三类：
 - 信号连接与断开、分组添加与移除在保存重开后仍可查询。
 - 每个 mutation 的响应、错误 code、UndoRedo 标记和 audit 行为符合统一 contract。
 
-### M3：Runtime 验证闭环
+### M3：Runtime 验证闭环 ✅ 已完成
 
 内容：
 
 - runtime probe transport 和连接状态。
-- runtime scene tree、node inspect/get/set/call。
-- key/mouse/gamepad/touch/action 输入模拟。
-- screenshot 与 frame capture。
-- runtime log/error 增量缓冲。
-- wait/assert/condition。
-- runtime signal await/emit。
+- runtime scene tree、node inspect/get/set/call/find/remove/reparent。
+- key/mouse/gamepad/touch/action/sequence 输入模拟。
+- screenshot/viewport/camera/frames 捕获。
+- runtime log/read+clear 增量缓冲 + debug/performance|monitors|errors|breakpoints。
+- assert/condition|node_exists|property_equals|signal_received 等待。
+- signal/connect|disconnect|emit|await。
+
+实现要点：
+
+- 新增 `gdapi/addon/runtime/runtime_protocol.gd` 定义 protocol v1 消息 schema，拒绝 `eval`/`process/run`/`network/http_request`。
+- 新增 `gdapi/addon/runtime/runtime_broker.gd` 维护 stopped/connecting/connected 状态、pending dict、disconnect/timeout 同步失败。
+- 新增 `gdapi/addon/runtime/runtime_debugger_plugin.gd` 作为 `EditorDebuggerPlugin`，持有 session 引用并向 broker 注入 send callable。
+- 新增 `gdapi/addon/runtime/runtime_probe.gd` 作为游戏端 autoload，注册 `EngineDebugger.register_message_capture` 派发 35 个 runtime op。
+- 新增 `gdapi/addon/runtime/runtime_node_ops.gd`、`runtime_input_ops.gd`、`runtime_capture_ops.gd`、`runtime_ring_buffer.gd`、`runtime_condition.gd`。
+- 新增 `tests/fixtures/m3_project/` 含可观测 ProbeTarget、Counter（input_keys/mouse/gamepad/touch/actions）以及 runtime_main scene。
+- 新增 `tests/e2e/m3/conftest.py`、`test_runtime_status.py`、`test_runtime_nodes.py`、`test_runtime_input.py`、`test_runtime_capture.py`、`test_runtime_observability.py`、`test_runtime_assert_signal.py`、`test_m3_contract.py`。
+- 新增 `tests/fixture_project/tests/test_runtime_protocol.gd`、`test_runtime_broker.gd`、`test_runtime_ring_buffer.gd` 并接入 `tests/e2e/test_gdscript_units.py`。
+- 修改 `gdapi/addon/plugin.gd` 注册 broker、EditorDebuggerPlugin 和 runtime probe autoload；在 `_process` 中推动 broker.tick 清理 timeout。
+- 修改 `gdapi/addon/routes/project/run.gd`、`project/stop.gd` 在游戏生命周期上调用 `broker.begin_connect` / `broker.detach`。
+- 新增 35 个 `gdapi/addon/routes/runtime/**/*.gd` 适配器，每个都有完整 doc()。
 
 验收：
 

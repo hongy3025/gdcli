@@ -70,10 +70,15 @@ gdcli status --project /path/to/project
 
 ## 开发验证
 
-M1 gdapi 路由基础设施端到端验证（需要 Godot 编辑器，用 uv 管理 Python venv）：
+M1/M2/M3 gdapi 路由基础设施端到端验证（需要 Godot 编辑器，用 uv 管理 Python venv）：
 
 ```bash
+# M1 烟测
 uv run pytest tests/e2e/test_m1_smoke.py -v
+# M2 基础编辑验收
+uv run pytest tests/e2e/m2 -v
+# M3 runtime 验证闭环
+uv run pytest tests/e2e/m3 -v
 ```
 
 可选设置 `GODOT_BIN` 环境变量指定 Godot 路径（默认使用 PATH 中的 `godot`）。
@@ -361,8 +366,30 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 |---|---|---|
 | 编辑器状态（节点/属性/信号/分组） | ✅ `undoable:true` | 不适用 |
 | 文件/资源操作 | ❌ `undoable:false` | 需 `force:true` |
+| 运行期 mutation（M3 runtime/*） | ❌ `undoable:false` | 不适用 |
 
 所有 mutation 响应包含 `ok`、`changed`、`undoable` 字段。危险操作记录审计日志。
+
+### M3 运行时验证
+
+M3 增补 35 个 runtime 路由（以 `runtime/` 为前缀），这些路由需要项目处于运行状态：使用 `gdcli exec project/run` 启动游戏后通过 `runtime/status` 等待 `connected`。所有 runtime/* 请求均由后台的 EditorDebuggerPlugin ↔ EngineDebugger 双向通道承载，公共路由不直接调用 session API。
+
+| 分类 | 路由数 | 说明 |
+|---|---|---|
+| `runtime/status` `runtime/scene/tree` | 2 | 状态、场景树 |
+| `runtime/node/info\|get\|set\|call\|find\|remove\|reparent` | 7 | 节点增删改查，方法调用需要在节点元数据 `gdapi_callable_methods` allowlist 中 |
+| `runtime/input/key\|mouse\|gamepad\|touch\|action\|sequence` | 6 | 输入模拟；sequence 最多 100 项、累计 ≤ 10 秒 |
+| `runtime/screenshot/viewport\|camera\|frames` | 3 | PNG 截图，尺寸限制 1920x1080，单响应 ≤ 4 MiB |
+| `runtime/log/read\|clear` `runtime/debug/performance\|monitors\|errors\|breakpoints` | 6 | 游标读取 + 性能监控 |
+| `runtime/assert/condition\|node_exists\|property_equals\|signal_received` | 4 | 等待 / 断言，使用固定 json grammar，不调用 Expression/eval |
+| `runtime/signal/connect\|disconnect\|emit\|await` | 4 | 信号连接 / 等待 |
+
+所有 runtime 请求默认 5 秒超时，可被 broker.tick 清理；stop/disconnect 会同步失败所有 pending 让 await/call 收到 `conflict`。
+
+不支持的能力（含 op 名单）：
+
+- `eval`、`process/run`、`network/http_request` — protocol v1 拒绝
+- 断点 mutation、任意表达式 — 计划在 M6 才开放
 
 ---
 
