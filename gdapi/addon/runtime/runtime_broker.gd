@@ -24,8 +24,11 @@ var _state: String = "stopped"
 var _pending: Dictionary = {}
 ## 当前 debugger session id;-1 表示无
 var _session_id: int = -1
-## 当前 send callable,由 transport 注入;Callable() 表示未连接
+## 当前被优先级选择的 send callable;Callable() 表示未连接
 var _sender: Callable = Callable()
+## EngineDebugger transport 的 send callable，与 file transport 独立保存。
+var _engine_sender: Callable = Callable()
+var _engine_connected: bool = false
 ## 下一个请求 id;单调递增
 var _next_id: int = 1
 ## 第一次 attach 的 unix 时间戳；用于 runtime/status 暴露的 session_started_at 字段。
@@ -39,6 +42,7 @@ var _file_probe_id: String = ""
 
 ## 当前 file transport send callable
 var _file_sender: Callable = Callable()
+var _file_connected: bool = false
 
 var _active_transport: String = "none"
 
@@ -70,6 +74,8 @@ func status() -> Dictionary:
 func attach(session_id: int, send: Callable) -> void:
 	_prepare_new_session("previous session replaced")
 	_session_id = session_id
+	_engine_sender = send
+	_engine_connected = false
 	_sender = send
 	_state = "connecting"
 	if _session_started_at <= 0.0:
@@ -90,24 +96,26 @@ func begin_connect() -> void:
 func mark_connected() -> void:
 	if _state == "connecting":
 		_state = "connected"
+	_engine_connected = true
+	_select_transport_sender()
 ## attach file transport(由 editor 侧文件 transport manager 调用)
 ##
-## 把 send callable 切换到 file transport,并把状态推到 connected。
-## EngineDebugger attach 在 hello 先到的情况下优先,这里仅在没 attach
-## 过 EngineDebugger 时把状态推到 connected。
+## 保存 file transport 的 send callable，并按 EngineDebugger > file > none
+## 的优先级选择实际发送端。已连接的 EngineDebugger 绝不会被 file hello 替换。
 ##
 ## @param probe_id probe 标识(全局唯一 hex)
 ## @param send file transport 注入的发送 callable
 func attach_file_transport(probe_id: String, send: Callable, _generation: String = "") -> void:
 	_file_probe_id = probe_id
 	_file_sender = send
-	_active_transport = "file"
-	if _state == "stopped":
+	_file_connected = true
+	if not _engine_connected and _state == "stopped":
 		_state = "connecting"
-	_session_id = probe_id.to_int() if probe_id.is_valid_int() else -1
-	_sender = send
-	if _state == "connecting":
+	if not _engine_connected:
+		_session_id = probe_id.to_int() if probe_id.is_valid_int() else -1
+	if not _engine_connected and _state == "connecting":
 		_state = "connected"
+	_select_transport_sender()
 	if _session_started_at <= 0.0:
 		_session_started_at = Time.get_unix_time_from_system()
 
@@ -117,12 +125,13 @@ func attach_file_transport(probe_id: String, send: Callable, _generation: String
 ##
 ## @param reason 人类可读的关闭原因
 func detach_file_transport(reason: String = "file transport detached", _generation: String = "") -> void:
-	if _active_transport != "file":
-		return
+	var was_file_active: bool = _active_transport == "file"
 	_file_probe_id = ""
 	_file_sender = Callable()
-	_active_transport = "none"
-	detach(reason)
+	_file_connected = false
+	_select_transport_sender()
+	if was_file_active:
+		detach(reason)
 
 ## 由 transport 路径调用,显式切换活跃 transport 标识
 ##
@@ -132,20 +141,42 @@ func detach_file_transport(reason: String = "file transport detached", _generati
 ## @param name transport 标识("engine_debugger" / "file" / "none")
 func _set_active_transport(name: String) -> void:
 	_active_transport = name
+	if name == "engine_debugger" and not _engine_sender.is_null():
+		_engine_connected = true
+		_sender = _engine_sender
+	elif name == "file" and not _file_sender.is_null():
+		_file_connected = true
+		_sender = _file_sender
 
 ## 记录 transport 连通性；generation 由后续 transport 协商使用，保留在
 ## broker 边界以免 transport 自行持有会话状态。
 func set_transport_connected(name: String, connected: bool, generation: String = "") -> void:
 	if name == "file":
-		if connected:
-			_active_transport = "file"
-		elif _active_transport == "file":
+		_file_connected = connected
+		if not connected:
 			detach_file_transport("file transport disconnected", generation)
+		else:
+			_select_transport_sender()
 		return
-	if connected:
-		_active_transport = name
-	elif _active_transport == name:
-		_active_transport = "none"
+	if name == "engine_debugger":
+		_engine_connected = connected
+		if not connected:
+			_engine_sender = Callable()
+		_select_transport_sender()
+
+## 在 EngineDebugger、file、none 之间选择实际 sender。此方法是唯一的
+## transport 优先级决策点，优先顺序固定为 EngineDebugger > file > none。
+func _select_transport_sender() -> void:
+	if _engine_connected and not _engine_sender.is_null():
+		_sender = _engine_sender
+		_active_transport = "engine_debugger"
+		return
+	if _file_connected and not _file_sender.is_null():
+		_sender = _file_sender
+		_active_transport = "file"
+		return
+	_sender = Callable()
+	_active_transport = "none"
 
 
 ## 主动断开当前会话,清理所有 pending
@@ -160,6 +191,12 @@ func detach(reason: String = "runtime detached") -> void:
 	_pending.clear()
 	_session_id = -1
 	_sender = Callable()
+	_engine_sender = Callable()
+	_engine_connected = false
+	_file_sender = Callable()
+	_file_connected = false
+	_file_probe_id = ""
+	_active_transport = "none"
 	_state = "stopped"
 	for entry in snapshot:
 		var cb: Callable = entry[1]

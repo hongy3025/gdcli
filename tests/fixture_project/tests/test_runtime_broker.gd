@@ -34,6 +34,7 @@ func _init() -> void:
 	test_request_after_detach_returns_immediately()
 	test_transport_field_initial_none()
 	test_attach_file_transport_sets_transport_file()
+	test_engine_debugger_sender_keeps_priority_over_file_transport()
 	test_set_active_transport_overrides_label()
 	test_detach_file_transport_returns_to_none()
 
@@ -219,6 +220,26 @@ func test_attach_file_transport_sets_transport_file() -> void:
 	assert_eq(b.status().transport, "none", "transport back to none after detach")
 	assert_eq(b.status().state, "stopped", "state back to stopped after detach")
 	assert_eq(b.status().pending, 0, "pending cleared after detach")
+
+func test_engine_debugger_sender_keeps_priority_over_file_transport() -> void:
+	var b: RefCounted = Broker.new()
+	var engine_sent: Array = []
+	var file_sent: Array = []
+	b.attach(42, func(message: Dictionary) -> bool:
+		engine_sent.append(message.duplicate(true))
+		return true
+	)
+	b.mark_connected()
+	b._set_active_transport("engine_debugger")
+	b.attach_file_transport("file1234", func(message: Dictionary) -> bool:
+		file_sent.append(message.duplicate(true))
+		return true
+	)
+	b.request("runtime/status", {}, 5000, func(_reply: Dictionary) -> void: pass)
+	assert_eq(engine_sent.size(), 1, "engine debugger sender retains priority")
+	assert_eq(file_sent.size(), 0, "file sender is not used while engine debugger is connected")
+	assert_eq(b.status().transport, "engine_debugger", "engine debugger remains active transport")
+	assert_eq(b.status().session_id, 42, "engine debugger session id remains active")
 
 func test_set_active_transport_overrides_label() -> void:
 	var b: RefCounted = Broker.new()
