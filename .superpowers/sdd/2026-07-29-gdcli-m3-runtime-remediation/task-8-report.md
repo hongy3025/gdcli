@@ -38,3 +38,27 @@ The focused run reported one editor setup and the lifecycle scenario passed both
 - No runtime routes, production GDScript handlers, CLI/Rust code, or unrelated route migrations were changed.
 - The full M3 and full E2E suites were not run in this handoff because the user requested bounded focused tests only.
 - Handoff-owned dirty files (`.gitignore`, fixture project files, and the roadmap status report) were not changed or staged.
+
+## Fix round 1 — reviewer findings
+
+Addressed on top of `4b868fe`:
+
+- Readiness/reset polling now raises `HarnessFailure` with command, exit code, stdout, stderr, runtime status, and Godot log tail. Recovery warnings retain the same structured evidence and no longer replace the original failure.
+- `game_attached` remains true until both stop and stopped-state polling succeed. Editor teardown retries game teardown, then terminates/kills the editor and records diagnostics.
+- Added injected failure tests for pending/disconnect teardown and fake-process kill behavior.
+- Added stale-file cleanup before editor attach and after reset, plus a connected-game reset lifecycle test. Shared data-plane fixture reset remains deferred to Task 10.
+- Setup counters now derive from completed build/install/editor-start lifecycle events rather than literal values.
+
+Fix-round RED:
+
+```text
+uv run pytest tests/e2e/m3/test_harness.py -v --timeout=30
+2 failed: detach_game cleared game_attached after wait failure; detach_editor did not retry and recovery omitted diagnostic fields
+```
+
+Fix-round GREEN, with the explicit Godot 4.7.1 override:
+
+```text
+$env:GODOT_BIN='D:\app\devel\Godot\v4.7.1\godot_console.exe'; uv run pytest tests/e2e/m3/test_harness.py tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_m3_contract.py -v --durations=20 --timeout=180
+10 passed in 11.57s
+```

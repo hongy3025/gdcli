@@ -44,6 +44,14 @@ DIAGNOSTIC_FIELDS = (
 )
 
 
+class HarnessFailure(RuntimeError):
+    """A harness failure that keeps the complete command/runtime/log evidence."""
+
+    def __init__(self, message: str, diagnostics: dict[str, Any]):
+        self.diagnostics = diagnostics
+        super().__init__(f"{message}\ndiagnostics:\n{_format_diagnostics(diagnostics)}")
+
+
 def runtime_route_source(route: str) -> str:
     """Read a runtime route from the addon source tree for source-contract checks."""
     route_path = repo_root() / "gdapi" / "addon" / "routes" / Path(*route.split("/"))
@@ -147,9 +155,10 @@ def _run_cli(
 
 
 def _read_log_tail(env: dict[str, Any], lines: int = 80) -> str:
-    log_path = Path(env.get("godot_log_path", ""))
-    if not log_path:
+    raw_log_path = env.get("godot_log_path")
+    if raw_log_path is None:
         return "<Godot log path unavailable>"
+    log_path = Path(raw_log_path)
     try:
         log_handle = env.get("godot_log")
         if log_handle is not None:
@@ -193,21 +202,31 @@ def _runtime_status_snapshot(env: dict[str, Any], failed_args: list[str]) -> Any
 def _diagnostics(
     env: dict[str, Any], args: list[str], result: subprocess.CompletedProcess[str]
 ) -> dict[str, Any]:
-    return {
-        "command": [str(env["gdcli"]), "--json", *args],
+    diagnostics = {
+        "command": [str(env.get("gdcli", "gdcli")), "--json", *args],
         "exit_code": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
         "runtime_status": _runtime_status_snapshot(env, args),
         "godot_log_tail": _read_log_tail(env),
     }
+    env["last_diagnostics"] = diagnostics
+    return diagnostics
 
 
 def _format_diagnostics(diagnostics: dict[str, Any]) -> str:
     return json.dumps(diagnostics, ensure_ascii=False, indent=2, default=str)
 
 
-def attach_editor(project: Path, godot_bin: str, log_handle) -> tuple[subprocess.Popen, dict[str, Any]]:
+def _harness_failure(
+    env: dict[str, Any], args: list[str], result: subprocess.CompletedProcess[str], message: str
+) -> HarnessFailure:
+    return HarnessFailure(message, _diagnostics(env, args, result))
+
+
+def attach_editor(
+    project: Path, godot_bin: str, log_handle, *, on_start=None
+) -> tuple[subprocess.Popen, dict[str, Any]]:
     """Start one headless editor and poll until metadata, ping, and layout are ready."""
     godot = subprocess.Popen(
         [godot_bin, "--editor", "--headless", "--path", str(project)],
@@ -215,6 +234,8 @@ def attach_editor(project: Path, godot_bin: str, log_handle) -> tuple[subprocess
         stderr=subprocess.STDOUT,
         text=True,
     )
+    if on_start is not None:
+        on_start()
     meta_path = project / ".godot" / "gdapi.json"
 
     try:
@@ -247,13 +268,13 @@ def attach_editor(project: Path, godot_bin: str, log_handle) -> tuple[subprocess
 
 def detach_editor(env: dict[str, Any]) -> None:
     """Stop game/editor ownership and close the session log without masking test errors."""
-    game_error: BaseException | None = None
     if env.get("game_attached"):
-        try:
-            detach_game(env)
-        except BaseException as exc:
-            game_error = exc
-            _record_recovery(env, "editor teardown", exc)
+        for attempt in range(2):
+            try:
+                detach_game(env)
+                break
+            except BaseException as exc:
+                _record_recovery(env, f"editor teardown attempt {attempt + 1}", exc)
     godot = env.get("godot")
     if godot is not None and godot.poll() is None:
         godot.terminate()
@@ -264,15 +285,11 @@ def detach_editor(env: dict[str, Any]) -> None:
             godot.wait(timeout=10)
     try:
         cleanup_stale_runtime(env)
-    except OSError as exc:
+    except BaseException as exc:
         _record_recovery(env, "stale runtime cleanup", exc)
     log_handle = env.get("godot_log")
     if log_handle is not None and not log_handle.closed:
         log_handle.close()
-    if game_error is not None:
-        return
-
-
 @pytest.fixture(scope="session")
 def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     """Build/install once and own one deterministic headless editor for the M3 session."""
@@ -280,12 +297,14 @@ def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     godot_bin = resolve_godot_bin()
     require_godot_47(godot_bin)
 
+    setup_events: list[str] = []
     build = subprocess.run(
         ["cargo", "build", "--workspace"],
         cwd=root, capture_output=True, encoding="utf-8", errors="replace",
     )
     if build.returncode != 0:
         pytest.skip(f"cargo build failed:\n{build.stderr}")
+    setup_events.append("build")
 
     base = tmp_path_factory.mktemp("m3_editor") / "project"
     shutil.copytree(M3_FIXTURE_SOURCE, base)
@@ -296,6 +315,7 @@ def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     )
     if install.returncode != 0:
         pytest.fail(f"gdcli install failed:\n{install.stderr}")
+    setup_events.append("install")
 
     godot_dir = base / ".godot"
     godot_dir.mkdir(exist_ok=True)
@@ -303,6 +323,11 @@ def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     runtime_root = godot_dir / "gdapi_runtime"
     if runtime_root.exists():
         shutil.rmtree(runtime_root)
+    stale_before_attach = runtime_root / "stale-before-attach" / "outbox" / "reply.json"
+    stale_before_attach.parent.mkdir(parents=True, exist_ok=True)
+    stale_before_attach.write_text("stale", encoding="utf-8")
+    pre_attach_env = {"project": base}
+    cleanup_stale_runtime(pre_attach_env)
     log_handle = (godot_dir / "godot.log").open("w", encoding="utf-8")
 
     env = {
@@ -313,9 +338,11 @@ def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         "godot_bin": godot_bin,
         "gdcli": gdcli_bin(),
         "snapshot_digest": tree_digest(base),
-        "build_count": 1,
-        "install_count": 1,
+        "build_count": setup_events.count("build"),
+        "install_count": setup_events.count("install"),
         "editor_start_count": 0,
+        "setup_events": setup_events,
+        "pre_attach_stale_removed": not runtime_root.exists(),
         "editor_pids": set(),
         "game_run_count": 0,
         "game_stop_count": 0,
@@ -323,8 +350,14 @@ def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         "game_attached": False,
     }
 
+    def record_editor_start() -> None:
+        env["editor_start_count"] += 1
+        env["setup_events"].append("editor_start")
+
     try:
-        godot, meta = attach_editor(base, godot_bin, log_handle)
+        godot, meta = attach_editor(
+            base, godot_bin, log_handle, on_start=record_editor_start
+        )
         env["godot"] = godot
         env["meta"] = meta
         env["editor_start_count"] = 1
@@ -365,9 +398,8 @@ def m3_lifecycle(m3_editor: dict[str, Any]) -> dict[str, Any]:
             started = project_run(m3_editor)
             connected = wait_for_connected(m3_editor, timeout=30.0)
             active = exec_ok(m3_editor, "runtime/status")
-            stopped = project_stop(m3_editor)
-            stopped_status = wait_stopped(m3_editor, timeout=30.0)
-            reset_fixture(m3_editor)
+            stopped_status = reset_fixture(m3_editor)
+            stopped = {"ok": True, "runtime_state": stopped_status["state"]}
             cycles.append({
                 "cycle": cycle,
                 "started": started,
@@ -394,7 +426,23 @@ def m3_lifecycle(m3_editor: dict[str, Any]) -> dict[str, Any]:
 
 
 def _record_recovery(env: dict[str, Any], phase: str, error: BaseException) -> None:
-    message = f"M3 harness recovery ({phase}): {error}"
+    diagnostics = getattr(error, "diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = env.get("last_diagnostics")
+    if not isinstance(diagnostics, dict):
+        fallback_args = ["exec", "runtime/status", "--project", str(env.get("project", ""))]
+        fallback_result = subprocess.CompletedProcess(
+            [str(env.get("gdcli", "gdcli")), "--json", *fallback_args],
+            1,
+            stdout="",
+            stderr=str(error),
+        )
+        diagnostics = _diagnostics(env, fallback_args, fallback_result)
+    message = (
+        f"M3 harness recovery ({phase}): {error}\n"
+        f"diagnostics:\n{_format_diagnostics(diagnostics)}"
+    )
+    env["last_recovery_diagnostics"] = diagnostics
     env.setdefault("recovery_events", []).append(message)
     warnings.warn(message, RuntimeWarning, stacklevel=2)
 
@@ -428,35 +476,53 @@ def attach_game(env: dict[str, Any], *, recovery_restarts: int = RECOVERY_RESTAR
 def detach_game(env: dict[str, Any]) -> None:
     """Stop the current game, wait for broker detachment, and remove stale transport files."""
     errors: list[BaseException] = []
+    stopped_status: dict[str, Any] | None = None
     try:
         project_stop(env)
     except BaseException as exc:
         errors.append(exc)
     try:
-        wait_stopped(env, timeout=15.0)
+        stopped_status = wait_stopped(env, timeout=15.0)
     except BaseException as exc:
         errors.append(exc)
-    env["game_attached"] = False
+    if not errors:
+        env["game_attached"] = False
     try:
         cleanup_stale_runtime(env)
     except BaseException as exc:
         errors.append(exc)
     if errors:
-        raise RuntimeError("; ".join(str(error) for error in errors)) from errors[0]
+        diagnostics = next(
+            (
+                getattr(error, "diagnostics")
+                for error in errors
+                if isinstance(getattr(error, "diagnostics", None), dict)
+            ),
+            None,
+        )
+        if diagnostics is None:
+            fallback_args = ["exec", "project/stop", "--project", str(env["project"])]
+            fallback_result = subprocess.CompletedProcess(
+                [str(env.get("gdcli", "gdcli")), "--json", *fallback_args],
+                1,
+                stdout="",
+                stderr="; ".join(str(error) for error in errors),
+            )
+            diagnostics = _diagnostics(env, fallback_args, fallback_result)
+        raise HarnessFailure("game teardown failed", diagnostics) from errors[0]
+    return stopped_status
 
 
-def reset_fixture(env: dict[str, Any]) -> None:
+def reset_fixture(env: dict[str, Any]) -> dict[str, Any]:
     """Reset session-owned transport state; runtime node state stays game-isolated until Task 10."""
-    try:
-        status = exec_ok(env, "runtime/status")
-    except BaseException:
-        status = {"state": "unknown"}
+    status = exec_ok(env, "runtime/status")
     if status.get("state") != "stopped" or status.get("pending", 0) != 0:
-        detach_game(env)
+        return detach_game(env)
     cleanup_stale_runtime(env)
     entries = _runtime_entries(env)
     if entries:
         raise RuntimeError(f"stale runtime entries remain after reset: {entries}")
+    return status
 
 
 def project_run(env: dict) -> dict:
@@ -475,17 +541,13 @@ def exec_ok(env: dict, route: str, data: dict | None = None) -> dict[str, Any]:
     args = _command_args(env, route, data)
     result = _run_cli(env, args)
     if result.returncode != 0:
-        diagnostics = _diagnostics(env, args, result)
-        pytest.fail(
-            f"{route}: expected success (exit {result.returncode})\n"
-            f"diagnostics:\n{_format_diagnostics(diagnostics)}"
+        raise _harness_failure(
+            env, args, result, f"{route}: expected success (exit {result.returncode})"
         )
     payload = _parse_payload(result)
     if payload is None or payload.get("ok") is not True:
-        diagnostics = _diagnostics(env, args, result)
-        pytest.fail(
-            f"{route}: expected ok:true payload\n"
-            f"diagnostics:\n{_format_diagnostics(diagnostics)}"
+        raise _harness_failure(
+            env, args, result, f"{route}: expected ok:true payload"
         )
     return payload
 
@@ -495,9 +557,8 @@ def exec_error(env: dict, route: str, data: dict | None = None) -> dict[str, Any
     result = _run_cli(env, args)
     diagnostics = _diagnostics(env, args, result)
     if result.returncode == 0:
-        pytest.fail(
-            f"{route}: expected non-zero exit\n"
-            f"diagnostics:\n{_format_diagnostics(diagnostics)}"
+        raise HarnessFailure(
+            f"{route}: expected non-zero exit", diagnostics
         )
     payload = _parse_payload(result) or {
         "code": "unknown",
@@ -512,12 +573,19 @@ def command_doc(env: dict, route: str) -> dict[str, Any]:
     result = _run_cli(env, args)
     payload = _parse_payload(result)
     if result.returncode != 0 or payload is None or payload.get("ok") is not True:
-        diagnostics = _diagnostics(env, args, result)
-        pytest.fail(
-            f"command/doc {route}: expected ok:true payload\n"
-            f"diagnostics:\n{_format_diagnostics(diagnostics)}"
+        raise HarnessFailure(
+            f"command/doc {route}: expected ok:true payload",
+            _diagnostics(env, args, result),
         )
     return payload["doc"]
+
+
+def _poll_runtime_status(
+    env: dict[str, Any]
+) -> tuple[list[str], subprocess.CompletedProcess[str], dict[str, Any] | None]:
+    args = ["exec", "runtime/status", "--project", str(env["project"])]
+    result = _run_cli(env, args, timeout=5.0)
+    return args, result, _parse_payload(result)
 
 
 def wait_for_connected(env: dict, timeout: float = 30.0) -> dict[str, Any]:
@@ -528,35 +596,46 @@ def wait_for_connected(env: dict, timeout: float = 30.0) -> dict[str, Any]:
     """
     deadline = time.monotonic() + timeout
     last_status: dict = {}
+    last_args: list[str] = []
+    last_result: subprocess.CompletedProcess[str] | None = None
     while time.monotonic() < deadline:
-        try:
-            last_status = exec_ok(env, "runtime/status")
-            if last_status.get("state") == "connected":
-                if last_status.get("transport") in ("file", "engine_debugger"):
-                    return last_status
-        except Exception:
-            pass
+        last_args, last_result, payload = _poll_runtime_status(env)
+        if payload is not None:
+            last_status = payload
+            if payload.get("ok") is True and payload.get("state") == "connected":
+                if payload.get("transport") in ("file", "engine_debugger"):
+                    return payload
         time.sleep(0.1)
-    raise RuntimeError(
+    if last_result is None:
+        last_args, last_result, _ = _poll_runtime_status(env)
+    raise _harness_failure(
+        env,
+        last_args,
+        last_result,
         f"runtime probe never reached connected state within {timeout}s "
-        f"(last status: {last_status})"
+        f"(last status: {last_status})",
     )
 
 
 def wait_stopped(env: dict, timeout: float = 10.0) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     last_status: dict[str, Any] = {}
+    last_args: list[str] = []
+    last_result: subprocess.CompletedProcess[str] | None = None
     while time.monotonic() < deadline:
-        try:
-            status = exec_ok(env, "runtime/status")
-            last_status = status
-            if status.get("state") == "stopped" and status.get("pending", 0) == 0:
-                return status
-        except Exception:
-            pass
+        last_args, last_result, payload = _poll_runtime_status(env)
+        if payload is not None:
+            last_status = payload
+            if payload.get("ok") is True and payload.get("state") == "stopped" and payload.get("pending", 0) == 0:
+                return payload
         time.sleep(0.1)
-    raise RuntimeError(
-        f"runtime broker did not return to stopped state: {last_status}"
+    if last_result is None:
+        last_args, last_result, _ = _poll_runtime_status(env)
+    raise _harness_failure(
+        env,
+        last_args,
+        last_result,
+        f"runtime broker did not return to stopped state: {last_status}",
     )
 
 
