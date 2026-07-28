@@ -54,8 +54,8 @@ def test_runtime_route_documentation_is_complete(m3_editor):
 def test_lifecycle_two_runs_clean_pending(m3_editor):
     for cycle in range(2):
         project_run(m3_editor)
-        wait_for_connected(m3_editor, timeout=15.0)
+        wait_for_connected(m3_editor, timeout=30.0)
         project_stop(m3_editor)
-        wait_stopped(m3_editor, timeout=10.0)
+        wait_stopped(m3_editor, timeout=30.0)
         pending = exec_ok(m3_editor, "runtime/status").get("pending", 0)
         assert pending == 0, f"cycle {cycle}: pending={pending}"

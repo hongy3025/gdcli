@@ -216,17 +216,27 @@ def command_doc(env: dict, route: str) -> dict[str, Any]:
     return payload["doc"]
 
 
-def wait_for_connected(env: dict, timeout: float = 15.0) -> None:
+def wait_for_connected(env: dict, timeout: float = 30.0) -> None:
+    """Wait for runtime probe to reach connected state via either file or EngineDebugger transport.
+
+    M3.1: 默认 30s,既覆盖 250ms hello delay + game startup,又允许 file transport
+    在 headless harness 跑通。返回前确认 transport 字段合法。
+    """
     deadline = time.time() + timeout
+    last_status: dict = {}
     while time.time() < deadline:
         try:
-            status = exec_ok(env, "runtime/status")
-            if status.get("state") == "connected":
-                return
+            last_status = exec_ok(env, "runtime/status")
+            if last_status.get("state") == "connected":
+                if last_status.get("transport") in ("file", "engine_debugger"):
+                    return
         except Exception:
             pass
         time.sleep(0.1)
-    raise RuntimeError("runtime probe never reached connected state")
+    raise RuntimeError(
+        f"runtime probe never reached connected state within {timeout}s "
+        f"(last status: {last_status})"
+    )
 
 
 def wait_stopped(env: dict, timeout: float = 10.0) -> None:
