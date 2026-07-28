@@ -17,7 +17,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		var msg: String = String(result.get("error", "runtime/scene/tree failed"))
 		res.error(msg, code, 500, {"details": result})
 		return
-	res.json(result.get("result", {}))
+	res.json({"ok": true, "root": result.get("root", {})})
 
 ## 委托给 RuntimeNodeOps.tree
 func _tree(payload: Dictionary) -> Dictionary:

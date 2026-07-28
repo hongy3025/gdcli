@@ -34,7 +34,7 @@ static func tree(payload: Dictionary) -> Dictionary:
 	var root: Node = (Engine.get_main_loop() as SceneTree).root
 	if root == null:
 		return {"ok": false, "code": "not_found", "error": "scene root is unavailable"}
-	var out: Dictionary = _serialize_node(root, 0, max_depth, [root])
+	var out: Dictionary = _serialize_node(root, 0, max_depth, [])
 	return {"ok": true, "result": {"root": out}}
 
 ## 实现 runtime/node/info

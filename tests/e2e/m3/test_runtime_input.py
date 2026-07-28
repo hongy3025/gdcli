@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from .conftest import exec_ok, exec_error, runtime_counter, wait_for, start_exec
+from .conftest import exec_ok, exec_error, runtime_counter, wait_for
 
 
 def start_exec(env, route, data=None):

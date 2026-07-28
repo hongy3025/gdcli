@@ -13,7 +13,11 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 			return
 		res.error(String(result.get("error", "assert/condition failed")), String(result.get("code", "godot_error")), 500)
 		return
-	res.json(result.get("result", {}))
+	var inner := result.get("result", {})
+	if typeof(inner) != TYPE_DICTIONARY:
+		inner = {"value": inner}
+	inner["ok"] = true
+	res.json(inner)
 
 func doc() -> GdApiRouteDoc:
 	return (

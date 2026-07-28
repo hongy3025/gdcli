@@ -14,7 +14,11 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 			status = 408
 		res.error(String(result.get("error", "signal/await failed")), code, status)
 		return
-	res.json(result.get("result", {}))
+	var inner := result.get("result", {})
+	if typeof(inner) != TYPE_DICTIONARY:
+		inner = {"value": inner}
+	inner["ok"] = true
+	res.json(inner)
 
 func doc() -> GdApiRouteDoc:
 	return (
