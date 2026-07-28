@@ -43,6 +43,7 @@ func _init() -> void:
 	test_disconnected_broker_is_conflict()
 	test_dispatch_requires_exact_runtime_path_and_operation()
 	test_dispatch_rejects_unknown_path_params_before_broker()
+	test_mutation_boundary_failures_are_audited()
 	test_timeout_defaults_caps_and_rejects_invalid_values()
 	test_error_codes_map_to_stable_http_statuses()
 	test_success_flattens_runtime_result_into_ok_envelope()
@@ -51,6 +52,7 @@ func _init() -> void:
 	test_redact_recurses_through_nested_values()
 	test_redact_summarizes_base64_and_large_arrays()
 	test_audit_summary_redacts_aliases_and_bounds_unclassified_values()
+	test_redact_bounds_keys_and_unclassified_variants()
 	test_response_is_sent_exactly_once()
 	Engine.remove_meta("gdapi_runtime_broker")
 	Engine.remove_meta("gdapi_plugin")
@@ -76,10 +78,13 @@ func _request(payload: Dictionary = {}) -> Request:
 	return _request_at("/runtime/test", payload)
 
 func _request_at(path: String, payload: Dictionary = {}) -> Request:
+	return _request_raw(path, JSON.stringify(payload))
+
+func _request_raw(path: String, raw_body: String) -> Request:
 	return Request.new({
 		"method": "POST",
 		"path": path,
-		"body": JSON.stringify(payload).to_utf8_buffer(),
+		"body": raw_body.to_utf8_buffer(),
 	})
 
 func _response(server: FakeServer) -> Response:
@@ -123,6 +128,27 @@ func test_dispatch_rejects_unknown_path_params_before_broker() -> void:
 	var server := _dispatch_request(req, broker, "runtime/test")
 	assert_eq(_last_response(server).status, 400, "unknown static-route params are rejected")
 	assert_eq(broker.calls.size(), 0, "malformed params do not reach broker")
+
+func test_mutation_boundary_failures_are_audited() -> void:
+	_assert_mutation_boundary_audited(_request_at("/runtime/other"), "runtime/test", "path mismatch")
+	_assert_mutation_boundary_audited(_request_at("/runtime/"), "runtime/", "empty operation suffix")
+	var params_request := _request()
+	params_request.params = {"unexpected": "value"}
+	_assert_mutation_boundary_audited(params_request, "runtime/test", "unknown params")
+	_assert_mutation_boundary_audited(_request_raw("/runtime/test", "[]"), "runtime/test", "invalid body")
+	_assert_mutation_boundary_audited(_request({"timeout_ms": "slow"}), "runtime/test", "invalid timeout")
+
+func _assert_mutation_boundary_audited(req: Request, op: String, context: String) -> void:
+	var plugin := FakePlugin.new()
+	Engine.set_meta("gdapi_plugin", plugin)
+	var broker := FakeBroker.new()
+	var server := _dispatch_request(req, broker, op, true)
+	assert_eq(_last_response(server).status, 400, context + " status")
+	assert_eq(plugin.events.size(), 1, context + " audit count")
+	if plugin.events.size() == 1:
+		assert_eq(plugin.events[0].ok, false, context + " audit rejection")
+		assert_eq(plugin.events[0].code, ErrorCodes.INVALID_PARAM, context + " audit code")
+	assert_eq(broker.calls.size(), 0, context + " does not reach broker")
 
 func test_timeout_defaults_caps_and_rejects_invalid_values() -> void:
 	var adapter := RuntimeRoute.new()
@@ -247,6 +273,21 @@ func test_audit_summary_redacts_aliases_and_bounds_unclassified_values() -> void
 	if typeof(blob_summary) == TYPE_DICTIONARY and blob_summary.has("type"):
 		assert_eq(blob_summary.type, "bytes", "packed bytes have type summary")
 		assert_eq(blob_summary.size, 64, "packed bytes have size summary")
+
+func test_redact_bounds_keys_and_unclassified_variants() -> void:
+	var long_key := "key_" + "x".repeat(100)
+	var key_summary: Dictionary = RuntimeRoute.new().redact({long_key: "value"})
+	var bounded_key := String(key_summary.keys()[0])
+	assert_true(bounded_key.length() <= 64, "dictionary key length is bounded")
+	assert_eq(key_summary[bounded_key], "value", "bounded key keeps scalar value")
+	var packed_vectors := PackedVector2Array()
+	packed_vectors.append(Vector2(1, 2))
+	var unclassified := [Vector2(1, 2), StringName("name"), NodePath("/root"), RefCounted.new(), Callable(), packed_vectors]
+	for value in unclassified:
+		var summary: Variant = RuntimeRoute.new().redact(value)
+		assert_eq(typeof(summary), TYPE_DICTIONARY, "unclassified variant is summarized")
+		if typeof(summary) == TYPE_DICTIONARY:
+			assert_true(summary.has("type"), "unclassified variant has type")
 
 func test_response_is_sent_exactly_once() -> void:
 	var broker := FakeBroker.new()

@@ -26,15 +26,13 @@ func dispatch(req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool 
 		return
 	var boundary := _validate_boundary(req, op)
 	if not bool(boundary.get("ok", false)):
-		_send_error(res, boundary)
+		_reject(req, res, op, mutation, boundary)
 		return
 	var timeout := operation_timeout(req)
 	var payload_variant: Variant = req.body
-	if timeout < 0 or typeof(payload_variant) != TYPE_DICTIONARY:
+	if not req.body_error.is_empty() or timeout < 0 or typeof(payload_variant) != TYPE_DICTIONARY:
 		var invalid := {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request body must be a JSON object"}
-		if mutation:
-			_audit(op, payload_variant, invalid, false, ErrorCodes.INVALID_PARAM)
-		_send_error(res, invalid)
+		_reject(req, res, op, mutation, invalid)
 		return
 
 	var payload: Dictionary = payload_variant.duplicate(true)
@@ -86,7 +84,7 @@ static func redact(value: Variant) -> Variant:
 func _validate_boundary(req: GdApiRequest, op: String) -> Dictionary:
 	if req == null:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request is required"}
-	if op.is_empty() or not op.begins_with("runtime/") or op.contains("..") or op.contains("//"):
+	if op.is_empty() or not op.begins_with("runtime/") or op.trim_prefix("runtime/").is_empty() or op.contains("..") or op.contains("//"):
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid runtime operation"}
 	if req.path.is_empty() or not req.path.begins_with("/") or req.path != "/" + op:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request path does not match runtime operation"}
@@ -130,6 +128,12 @@ func _send_error(res: GdApiResponse, failure: Dictionary) -> void:
 	var message := String(failure.get("error", "runtime operation failed"))
 	var details: Dictionary = failure.get("details", {}) if typeof(failure.get("details", {})) == TYPE_DICTIONARY else {}
 	res.error(message, code, http_status(code), details)
+
+func _reject(req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool, failure: Dictionary) -> void:
+	if mutation:
+		var payload: Variant = req.body if req != null else null
+		_audit(op, payload, failure, false, String(failure.get("code", ErrorCodes.INVALID_PARAM)))
+	_send_error(res, failure)
 
 func _audit(op: String, payload: Variant, result: Variant, ok: bool, code: String) -> void:
 	AuditLog.record_runtime(op, payload, result, ok, code)

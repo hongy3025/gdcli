@@ -113,3 +113,51 @@ GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/te
 
 Task 7+ real handler migration and Task 9's three new routes remain deferred.
 No routes, CLI/Rust code, or handoff-owned files were changed.
+
+## Fix round 2 on `5142a1f`
+
+### Review findings addressed
+
+- Boundary failures for mutation requests now pass through a single rejection
+  path that records the sanitized audit event before sending the HTTP error.
+  This covers path/op mismatch, the empty `runtime/` suffix, unknown params,
+  malformed JSON bodies, and invalid timeouts; rejected requests still never
+  reach the broker.
+- Audit sanitization now bounds dictionary keys as well as dictionary count and
+  converts every otherwise-unclassified Variant to a bounded type summary.
+  Bool/int/float scalars, short strings, and packed-byte sizes remain useful;
+  large strings, arrays/dictionaries, binary values, and object-like Variants
+  do not copy their contents into records.
+- Added behavioral coverage for mutation rejection audits, empty operation
+  suffixes, bounded keys, and unclassified Variant values.
+
+RED before production changes:
+
+```text
+GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/test_gdscript_units.py -k runtime_route -v
+73 passed, 17 failed
+path/op mismatch and unknown params were not audited; `runtime/` and malformed
+body requests reached the broker; long dictionary keys and unclassified
+Variants were returned without the required bounded summaries.
+```
+
+GREEN focused after production changes:
+
+```text
+GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/test_gdscript_units.py -k runtime_route -v
+1 passed, 12 deselected in 6.39s
+```
+
+GREEN full bounded GDScript unit/debugger matrix:
+
+```text
+GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/test_gdscript_units.py -v
+13 passed in 10.70s
+```
+
+`git diff --check`: exit 0 before staging.
+
+### Deferred RED
+
+Task 7+ real handler integration and Task 9's three new routes remain
+deferred. No route files, CLI/Rust code, or handoff-owned files were changed.
