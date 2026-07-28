@@ -67,6 +67,8 @@ func _capture(message: String, data: Array, session_id: int) -> bool:
 	if String(payload.get("event", "")) == "hello":
 		_attach_to_session(session_id)
 		_broker.mark_connected()
+		if _broker.has_method("_set_active_transport"):
+			_broker.call("_set_active_transport", "engine_debugger")
 		return true
 	_broker.receive(payload)
 	return true

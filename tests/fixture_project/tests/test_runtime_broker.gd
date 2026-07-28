@@ -30,6 +30,10 @@ func _init() -> void:
 	test_unknown_reply_does_not_crash()
 	test_multiple_requests_then_detach()
 	test_request_after_detach_returns_immediately()
+	test_transport_field_initial_none()
+	test_attach_file_transport_sets_transport_file()
+	test_set_active_transport_overrides_label()
+	test_detach_file_transport_returns_to_none()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	if failed > 0:
@@ -166,3 +170,47 @@ func test_request_after_detach_returns_immediately() -> void:
 		received.append(reply))
 	assert_eq(received.size(), 1, "immediate callback")
 	assert_eq(received[0]["code"], "conflict", "conflict because detached")
+
+func test_transport_field_initial_none() -> void:
+	var b: RefCounted = Broker.new()
+	assert_eq(b.status().transport, "none", "initial transport is none")
+
+func test_attach_file_transport_sets_transport_file() -> void:
+	var b: RefCounted = Broker.new()
+	var file_sent: Array = []
+	var send := func(message: Dictionary) -> bool:
+		file_sent.append(message.duplicate(true))
+		return true
+	b.attach_file_transport("abcdef12", send)
+	assert_eq(b.status().transport, "file", "transport flips to file")
+	assert_eq(b.status().state, "connected", "state directly to connected")
+	assert_eq(b.status().session_id, int("abcdef12"), "session_id from probe_id hash")
+	# 验证 sender 真的被设置成 file callable
+	var received: Array = []
+	b.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply))
+	assert_eq(file_sent.size(), 1, "file transport sent the request")
+	assert_eq(b.status().pending, 1, "request is pending")
+	# detach_file_transport 清理
+	b.detach_file_transport("test cleanup")
+	assert_eq(b.status().transport, "none", "transport back to none after detach")
+	assert_eq(b.status().state, "stopped", "state back to stopped after detach")
+	assert_eq(b.status().pending, 0, "pending cleared after detach")
+
+func test_set_active_transport_overrides_label() -> void:
+	var b: RefCounted = Broker.new()
+	b.attach_file_transport("11223344", _make_send())
+	assert_eq(b.status().transport, "file", "file after file transport")
+	b._set_active_transport("engine_debugger")
+	assert_eq(b.status().transport, "engine_debugger", "label switched")
+
+func test_detach_file_transport_returns_to_none() -> void:
+	var b: RefCounted = Broker.new()
+	b.attach_file_transport("aabbccdd", _make_send())
+	# 在没有 attach EngineDebugger 的情况下 detach_file_transport 也应工作
+	b.detach_file_transport("editor stopping")
+	assert_eq(b.status().transport, "none", "transport none after file detach")
+	assert_eq(b.status().state, "stopped", "state stopped after file detach")
+	# 重复 detach 是 no-op,不应抛错
+	b.detach_file_transport("again")
+	assert_eq(b.status().state, "stopped", "still stopped")

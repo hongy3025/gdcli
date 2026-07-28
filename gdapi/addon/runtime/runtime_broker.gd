@@ -30,7 +30,16 @@ var _sender: Callable = Callable()
 var _next_id: int = 1
 ## 第一次 attach 的 unix 时间戳；用于 runtime/status 暴露的 session_started_at 字段。
 ## 多次重连（detach 后再 attach）保持首次值不变，方便客户端判定 session 重启。
-var _session_started_at: float = 0.0
+## 当前活跃 transport 标识:"engine_debugger" / "file" / "none"
+## 默认 "none";EngineDebugger transport 在 hello 到达后置为 "engine_debugger";
+## file transport 在 editor 侧 attach_file_transport() 调用后置为 "file"。
+## 当前 file transport probe_id
+var _file_probe_id: String = ""
+
+## 当前 file transport send callable
+var _file_sender: Callable = Callable()
+
+var _active_transport: String = "none"
 
 ## 返回当前 broker 的可观测状态
 ##
@@ -46,13 +55,10 @@ func status() -> Dictionary:
 	return {
 		"state": _state,
 		"protocol_version": Protocol.VERSION,
-		"session_id": _session_id,
-		"pending": pending_count,
 		"broker_registered": Engine.has_meta("gdapi_runtime_broker"),
 		"session_started_at": _session_started_at,
-	}
-
-## 关联一个 debugger session 和 transport send callable
+		"transport": _active_transport,
+ 	}
 ##
 ## 在切换 session（先 detach 再 attach）或第一次拉起游戏之前调用；
 ## 本方法会先把已有 pending 清掉再绑定新 session，避免悬挂。
@@ -82,6 +88,49 @@ func begin_connect() -> void:
 func mark_connected() -> void:
 	if _state == "connecting":
 		_state = "connected"
+## attach file transport(由 editor 侧文件 transport manager 调用)
+##
+## 把 send callable 切换到 file transport,并把状态推到 connected。
+## EngineDebugger attach 在 hello 先到的情况下优先,这里仅在没 attach
+## 过 EngineDebugger 时把状态推到 connected。
+##
+## @param probe_id probe 标识(全局唯一 hex)
+## @param send file transport 注入的发送 callable
+func attach_file_transport(probe_id: String, send: Callable) -> void:
+	_file_probe_id = probe_id
+	_file_sender = send
+	_active_transport = "file"
+	if _state == "stopped":
+		_state = "connecting"
+	_session_id = probe_id.to_int() if probe_id.is_valid_int() else -1
+	_sender = send
+	if _state == "connecting":
+		_state = "connected"
+	if _session_started_at <= 0.0:
+		_session_started_at = Time.get_unix_time_from_system()
+
+## detach file transport(editor 侧主动关闭时调用)
+##
+## 仅在当前活跃 transport 是 file 时清空 file 状态。
+##
+## @param reason 人类可读的关闭原因
+func detach_file_transport(reason: String = "file transport detached") -> void:
+	if _active_transport != "file":
+		return
+	_file_probe_id = ""
+	_file_sender = Callable()
+	_active_transport = "none"
+	detach(reason)
+
+## 由 transport 路径调用,显式切换活跃 transport 标识
+##
+## EngineDebugger hello 到达时切到 "engine_debugger",让上层能区分
+## 当前生效的 transport。仅更新标识,不触碰 _sender。
+##
+## @param name transport 标识("engine_debugger" / "file" / "none")
+func _set_active_transport(name: String) -> void:
+	_active_transport = name
+
 
 ## 主动断开当前会话,清理所有 pending
 ##

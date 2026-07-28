@@ -10,6 +10,9 @@
 ## - 永远不应该调用 Expression、str2var、randstr、eval 或动态编译；
 ## - 每次收到非 hello 协议消息时记录到本地 ring buffer，供 runtime/log/read 使用；
 ## - hello 阶段推迟 gdapi/runtime_probe_hello_delay_ms 毫秒，方便 E2E 观测 connecting。
+## - 文件 transport:非编辑器进程下总会创建并启动,与 EngineDebugger transport
+##   并存(同时存在);EngineDebugger 抢到 hello 时把 broker._active_transport
+##   置为 engine_debugger,headless 下 file transport 兜底。
 
 @tool
 extends Node
@@ -19,6 +22,7 @@ const NodeOps := preload("res://addons/gdapi/runtime/runtime_node_ops.gd")
 const InputOps := preload("res://addons/gdapi/runtime/runtime_input_ops.gd")
 const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
 const RingBuffer := preload("res://addons/gdapi/runtime/runtime_ring_buffer.gd")
+const FileTransport := preload("res://addons/gdapi/runtime/runtime_transport_file_probe.gd")
 
 ## hello 延迟：从 _ready 到第一条 hello 事件之间的毫秒数。
 ## 在项目设置中通过 gdapi/runtime_probe_hello_delay_ms 覆盖，默认 0。
@@ -30,6 +34,9 @@ var _hello_sent: bool = false
 ## 本地日志/错误 ring buffer,容量 2000 条
 var _ring: RefCounted = RingBuffer.new(2000)
 
+## 文件 transport 实例;非编辑器进程下 _ready() 中创建
+var _file_transport: RefCounted = null
+
 ## 容器,根据 _ready 时机,允许 hello 阶段被推迟
 func _ready() -> void:
 	if not OS.has_feature("debug"):
@@ -40,11 +47,38 @@ func _ready() -> void:
 		# Editor 进程不运行游戏,probe 仅在游戏进程里注册 capture
 		return
 	EngineDebugger.register_message_capture("gdapi", _on_runtime_capture)
+	# 文件 transport:总在游戏进程里启动,与 EngineDebugger 并存。
+	# EngineDebugger 在 headless 不可达时由 file transport 接管。
+	_file_transport = FileTransport.new(_hello_delay_ms)
+	_file_transport.set_request_handler(_handle_file_transport_request)
+	_file_transport.start()
 	if _hello_delay_ms <= 0:
 		_send_hello()
 	else:
 		var t := get_tree().create_timer(_hello_delay_ms / 1000.0)
 		t.timeout.connect(_on_hello_timer_timeout)
+
+## 每帧推动 file transport(扫描 inbox、写 outbox、超时处理)
+func _process(_dt: float) -> void:
+	if _file_transport != null:
+		_file_transport.tick(Time.get_ticks_msec())
+
+## probe 退出时清理 file transport(删除自己的子目录)
+func _exit_tree() -> void:
+	if _file_transport != null:
+		_file_transport.stop()
+
+## file transport 收到 request 时调用;与 EngineDebugger capture 复用同一 _dispatch_async
+##
+## 协程 op(screenshot/assert/signal/sequence)在 await 后返回 reply,非协程 op 同步返回。
+##
+## @param req 协议 v1 request 字典
+## @return 协议 v1 reply 字典(交给 file transport 写 outbox)
+func _handle_file_transport_request(req: Dictionary) -> Dictionary:
+	var op: String = String(req.get("op", ""))
+	var payload: Dictionary = req.get("payload", {})
+	var reply: Dictionary = await _dispatch_async(op, payload)
+	return reply
 
 ## 推迟到了 timer 触发时间后调用此函数
 func _on_hello_timer_timeout() -> void:
