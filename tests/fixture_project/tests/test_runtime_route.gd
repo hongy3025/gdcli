@@ -41,6 +41,8 @@ var failed := 0
 func _init() -> void:
 	print("Running GdApiRuntimeRoute tests...\n")
 	test_disconnected_broker_is_conflict()
+	test_dispatch_requires_exact_runtime_path_and_operation()
+	test_dispatch_rejects_unknown_path_params_before_broker()
 	test_timeout_defaults_caps_and_rejects_invalid_values()
 	test_error_codes_map_to_stable_http_statuses()
 	test_success_flattens_runtime_result_into_ok_envelope()
@@ -48,6 +50,7 @@ func _init() -> void:
 	test_mutation_rejection_is_audited_with_redacted_payload()
 	test_redact_recurses_through_nested_values()
 	test_redact_summarizes_base64_and_large_arrays()
+	test_audit_summary_redacts_aliases_and_bounds_unclassified_values()
 	test_response_is_sent_exactly_once()
 	Engine.remove_meta("gdapi_runtime_broker")
 	Engine.remove_meta("gdapi_plugin")
@@ -70,9 +73,12 @@ func assert_false(value: bool, context: String = "") -> void:
 	assert_eq(value, false, context)
 
 func _request(payload: Dictionary = {}) -> Request:
+	return _request_at("/runtime/test", payload)
+
+func _request_at(path: String, payload: Dictionary = {}) -> Request:
 	return Request.new({
 		"method": "POST",
-		"path": "/runtime/test",
+		"path": path,
 		"body": JSON.stringify(payload).to_utf8_buffer(),
 	})
 
@@ -80,9 +86,12 @@ func _response(server: FakeServer) -> Response:
 	return Response.new(server, 17)
 
 func _dispatch(payload: Dictionary, broker: FakeBroker, mutation: bool = false) -> FakeServer:
+	return _dispatch_request(_request(payload), broker, "runtime/test", mutation)
+
+func _dispatch_request(req: Request, broker: FakeBroker, op: String, mutation: bool = false) -> FakeServer:
 	Engine.set_meta("gdapi_runtime_broker", broker)
 	var server := FakeServer.new()
-	RuntimeRoute.new().dispatch(_request(payload), _response(server), "runtime/test", mutation)
+	RuntimeRoute.new().dispatch(req, _response(server), op, mutation)
 	return server
 
 func _last_response(server: FakeServer) -> Dictionary:
@@ -95,6 +104,25 @@ func test_disconnected_broker_is_conflict() -> void:
 	assert_eq(server.responses.size(), 1, "disconnected broker sends one response")
 	assert_eq(_last_response(server).status, 409, "disconnected broker maps to conflict")
 	assert_eq(_last_response(server).body.code, ErrorCodes.CONFLICT, "disconnected broker code")
+
+func test_dispatch_requires_exact_runtime_path_and_operation() -> void:
+	var broker := FakeBroker.new()
+	var mismatch := _dispatch_request(_request_at("/runtime/other"), broker, "runtime/test")
+	assert_eq(_last_response(mismatch).status, 400, "path/op mismatch is invalid_param")
+	assert_eq(broker.calls.size(), 0, "path/op mismatch does not reach broker")
+	var arbitrary := _dispatch_request(_request_at("/editor/scene/save"), broker, "editor/scene/save")
+	assert_eq(_last_response(arbitrary).status, 400, "arbitrary operation is rejected")
+	assert_eq(broker.calls.size(), 0, "arbitrary operation does not reach broker")
+	var empty_path := _dispatch_request(_request_at(""), broker, "runtime/test")
+	assert_eq(_last_response(empty_path).status, 400, "empty request path is rejected")
+
+func test_dispatch_rejects_unknown_path_params_before_broker() -> void:
+	var broker := FakeBroker.new()
+	var req := _request()
+	req.params = {"unexpected": "value"}
+	var server := _dispatch_request(req, broker, "runtime/test")
+	assert_eq(_last_response(server).status, 400, "unknown static-route params are rejected")
+	assert_eq(broker.calls.size(), 0, "malformed params do not reach broker")
 
 func test_timeout_defaults_caps_and_rejects_invalid_values() -> void:
 	var adapter := RuntimeRoute.new()
@@ -182,6 +210,43 @@ func test_redact_summarizes_base64_and_large_arrays() -> void:
 	assert_eq(redacted.frames.type, "array", "large array type summary")
 	assert_eq(redacted.frames.size, 40, "large array size summary")
 	assert_false(redacted.frames is Array, "large array is not copied into audit")
+
+func test_audit_summary_redacts_aliases_and_bounds_unclassified_values() -> void:
+	var plugin := FakePlugin.new()
+	Engine.set_meta("gdapi_plugin", plugin)
+	var large_dict: Dictionary = {}
+	for i in range(40):
+		large_dict["key_%d" % i] = i
+	var blob := PackedByteArray()
+	blob.resize(64)
+	var broker := FakeBroker.new()
+	broker.next_reply = {"ok": true, "result": {"changed": true}}
+	_dispatch({
+		"api_token": "do-not-log",
+		"nested": {"client_secret": "also-secret"},
+		"large_string": "x".repeat(512),
+		"large_dict": large_dict,
+		"blob": blob,
+	}, broker, true)
+	var payload: Dictionary = plugin.events[0].summary.payload
+	assert_eq(payload.api_token, "[REDACTED]", "api_token alias is redacted")
+	assert_eq(payload.nested.client_secret, "[REDACTED]", "client_secret alias is redacted")
+	var large_string: Variant = payload.get("large_string", null)
+	assert_eq(typeof(large_string), TYPE_DICTIONARY, "large string has bounded summary")
+	if typeof(large_string) == TYPE_DICTIONARY and large_string.has("type"):
+		assert_eq(large_string.type, "string", "large string has bounded type summary")
+		assert_eq(large_string.size, 512, "large string has bounded size summary")
+	var large_dict_summary: Variant = payload.get("large_dict", null)
+	assert_eq(typeof(large_dict_summary), TYPE_DICTIONARY, "large dictionary has bounded summary")
+	if typeof(large_dict_summary) == TYPE_DICTIONARY and large_dict_summary.has("type"):
+		assert_eq(large_dict_summary.type, "dictionary", "large dictionary has bounded type summary")
+		assert_eq(large_dict_summary.size, 40, "large dictionary has bounded size summary")
+		assert_true(large_dict_summary.keys.size() <= 16, "large dictionary keys are bounded")
+	var blob_summary: Variant = RuntimeRoute.new().redact(blob)
+	assert_eq(typeof(blob_summary), TYPE_DICTIONARY, "packed bytes have bounded summary")
+	if typeof(blob_summary) == TYPE_DICTIONARY and blob_summary.has("type"):
+		assert_eq(blob_summary.type, "bytes", "packed bytes have type summary")
+		assert_eq(blob_summary.size, 64, "packed bytes have size summary")
 
 func test_response_is_sent_exactly_once() -> void:
 	var broker := FakeBroker.new()

@@ -67,3 +67,49 @@ GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/te
 - RuntimeProbe operation behavior, full game-process data-plane coverage,
   disconnect/oversize closure, and the three missing node routes remain in
   their later planned tasks.
+
+## Fix round 1 on `c142180`
+
+### Review findings addressed
+
+- Added an adapter boundary gate requiring a non-empty static `/runtime/...`
+  request path that exactly matches the supplied operation, rejecting arbitrary
+  operations and unknown/non-empty `req.params` before broker dispatch.
+- Moved runtime audit sanitization into `GdApiAuditLog.record_runtime()` as a
+  defense-in-depth path shared by `RuntimeRoute.redact()` and actual audit
+  records. It redacts conservative aliases including `api_token` and
+  `client_secret`, bounds strings and dictionaries, and summarizes arrays and
+  packed bytes without copying their contents.
+- Added behavioral tests proving broker non-dispatch for invalid boundaries and
+  bounded conservative summaries for nested aliases, large strings,
+  dictionaries, and `PackedByteArray` values.
+
+RED before production changes:
+
+```text
+GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/test_gdscript_units.py -k runtime_route -v
+43 passed, 11 failed
+path/op mismatch, arbitrary operation, empty path, and unknown params reached the broker;
+api_token/client_secret and large unclassified values were not bounded/redacted.
+```
+
+GREEN after production changes:
+
+```text
+GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/test_gdscript_units.py -k runtime_route -v
+1 passed, 12 deselected in 6.14s
+```
+
+Full bounded GDScript unit/debugger matrix after the fix:
+
+```text
+GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/test_gdscript_units.py -v
+13 passed in 10.62s
+```
+
+`git diff --check`: run before the fix-round commit.
+
+### Deferred RED
+
+Task 7+ real handler migration and Task 9's three new routes remain deferred.
+No routes, CLI/Rust code, or handoff-owned files were changed.

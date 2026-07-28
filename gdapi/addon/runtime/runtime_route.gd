@@ -16,8 +16,6 @@ const DEFAULT_OPERATION_TIMEOUT := 5000
 const MAX_OPERATION_TIMEOUT := 25000
 const BROKER_GRACE_TIMEOUT := 1000
 const MAX_BROKER_TIMEOUT := 26000
-const LARGE_ARRAY_THRESHOLD := 32
-const REDACTED := "[REDACTED]"
 
 ## 将 HTTP route 请求异步派发给运行期 broker。
 ##
@@ -26,8 +24,12 @@ const REDACTED := "[REDACTED]"
 func dispatch(req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool = false) -> void:
 	if res == null or res.is_sent():
 		return
+	var boundary := _validate_boundary(req, op)
+	if not bool(boundary.get("ok", false)):
+		_send_error(res, boundary)
+		return
 	var timeout := operation_timeout(req)
-	var payload_variant: Variant = req.body if req != null else null
+	var payload_variant: Variant = req.body
 	if timeout < 0 or typeof(payload_variant) != TYPE_DICTIONARY:
 		var invalid := {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request body must be a JSON object"}
 		if mutation:
@@ -79,31 +81,20 @@ static func http_status(code: String) -> int:
 ## Recursively make values safe for audit summaries.
 ## Secrets are replaced; binary, base64, and large arrays are summarized by type/size.
 static func redact(value: Variant) -> Variant:
-	if typeof(value) == TYPE_DICTIONARY:
-		var out: Dictionary = {}
-		for key in value:
-			var key_text := String(key)
-			var lowered := key_text.to_lower()
-			if lowered in ["token", "password", "secret", "authorization", "cookie"]:
-				out[key] = REDACTED
-				continue
-			var child: Variant = value[key]
-			if (lowered == "data_base64" or lowered.ends_with("_base64")) and typeof(child) == TYPE_STRING:
-				out[key] = {"type": "base64", "size": String(child).length()}
-			else:
-				out[key] = redact(child)
-		return out
-	if typeof(value) == TYPE_ARRAY:
-		var array: Array = value
-		if array.size() > LARGE_ARRAY_THRESHOLD:
-			return {"type": "array", "size": array.size()}
-		var out_array: Array = []
-		for child in array:
-			out_array.append(redact(child))
-		return out_array
-	if typeof(value) == TYPE_PACKED_BYTE_ARRAY:
-		return {"type": "bytes", "size": value.size()}
-	return value
+	return AuditLog.summarize(value)
+
+func _validate_boundary(req: GdApiRequest, op: String) -> Dictionary:
+	if req == null:
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request is required"}
+	if op.is_empty() or not op.begins_with("runtime/") or op.contains("..") or op.contains("//"):
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid runtime operation"}
+	if req.path.is_empty() or not req.path.begins_with("/") or req.path != "/" + op:
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request path does not match runtime operation"}
+	if typeof(req.params) != TYPE_DICTIONARY:
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request params must be an object"}
+	if not req.params.is_empty():
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "runtime routes do not accept path params"}
+	return {"ok": true}
 
 func _complete(res: GdApiResponse, op: String, payload: Dictionary, mutation: bool, reply: Dictionary) -> void:
 	if res.is_sent():
@@ -141,4 +132,4 @@ func _send_error(res: GdApiResponse, failure: Dictionary) -> void:
 	res.error(message, code, http_status(code), details)
 
 func _audit(op: String, payload: Variant, result: Variant, ok: bool, code: String) -> void:
-	AuditLog.record_runtime(op, redact(payload), redact(result), ok, code)
+	AuditLog.record_runtime(op, payload, result, ok, code)
