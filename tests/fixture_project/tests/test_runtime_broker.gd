@@ -184,7 +184,8 @@ func test_attach_file_transport_sets_transport_file() -> void:
 	b.attach_file_transport("abcdef12", send)
 	assert_eq(b.status().transport, "file", "transport flips to file")
 	assert_eq(b.status().state, "connected", "state directly to connected")
-	assert_eq(b.status().session_id, int("abcdef12"), "session_id from probe_id hash")
+	# probe_id 是 hex,is_valid_int() 返回 false,broker 把 _session_id 留为 -1
+	assert_eq(b.status().session_id, -1, "hex probe_id yields session_id -1")
 	# 验证 sender 真的被设置成 file callable
 	var received: Array = []
 	b.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:

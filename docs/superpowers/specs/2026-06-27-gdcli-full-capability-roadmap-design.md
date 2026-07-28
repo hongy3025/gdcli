@@ -401,15 +401,20 @@ mutation 分为三类：
 - 信号连接与断开、分组添加与移除在保存重开后仍可查询。
 - 每个 mutation 的响应、错误 code、UndoRedo 标记和 audit 行为符合统一 contract。
 
-### M3：Runtime 验证闭环 🟡 结构完成 + 单元层绿灯；端到端验证受 Godot 4.7 headless 限制
+### M3：Runtime 验证闭环 🟡 控制面 + 单元层绿灯；数据面 E2E 待 broker-dispatch refactor
 
-状态：2026-07-23 重新评估
-实施计划：docs/superpowers/plans/2026-07-23-gdcli-m3-closure.md
-验证报告：docs/superpowers/reports/2026-07-23-gdcli-m3-summary.md
+状态：2026-07-29 重新评估（含 M3.1 file transport closure）
+实施计划：`docs/superpowers/plans/2026-07-23-gdcli-m3.closure.md`、
+          `docs/superpowers/plans/2026-07-23-gdcli-m3.1-file-transport.md`
+验证报告：`docs/superpowers/reports/2026-07-23-gdcli-m3-summary.md`、
+          `docs/superpowers/reports/2026-07-24-gdcli-m3.1-summary.md`、
+          `docs/superpowers/reports/2026-07-24-m3.1-failures.md`
 
 M3 结构性骨架（35 个 runtime route、broker / debugger plugin / probe / ring buffer /
 condition / capture ops 等 7 个 runtime 模块、3 套 GDScript 单元测试、1 套 m3 fixture、
-7 套 M3 E2E）已在初始 commit 中就位。本次 closure 进一步落实：
+7 套 M3 E2E）已在初始 commit 中就位。
+
+M3 closure 落实（2026-07-23）：
 
 - Step 0：`runtime/status` 增补 `broker_registered` 与 `session_started_at` 字段。
 - D1：runtime_probe 在延迟 >0 时使用 SceneTreeTimer 推迟 hello。
@@ -418,21 +423,39 @@ condition / capture ops 等 7 个 runtime 模块、3 套 GDScript 单元测试�
   避免 Node2D 字段重定义、`routes/runtime/node/get.gd` doc 字面量未转义修复。
 - `runtime_broker` 新增 `mark_connected()` 由 hello 路径调用。
 
-`cargo fmt --check`、`cargo clippy --workspace`、`cargo test --workspace`、
-`tests/e2e/test_gdscript_units.py`（含 runtime_protocol / runtime_broker / runtime_ring_buffer）
-全部绿灯。
+M3.1 file transport closure（2026-07-29）：
 
-**M3 E2E 在 Godot 4.7 `--headless --editor` 模式下不可达**：编辑器侧只为 game_view 通道
-询问我们的 `_has_capture`，`_setup_session` 仅在编辑器自调试阶段被调用一次（session id = 0），
-后续游戏的 `EngineDebugger.send_message("gdapi", ...)` 不被路由到 `_capture`。这是 Godot
-4.7 headless 编辑器自身行为（不启动游戏进程 TCP 调试端口），不属于本路线图可修复的范畴。
+- `gdapi/addon/runtime/runtime_transport_file_{probe,editor}.gd` 新增一对共享文件系统 transport。
+- `runtime_broker` 新增 `attach_file_transport` / `detach_file_transport` / `_active_transport` 字段
+  / `_set_active_transport()` 方法；与 EngineDebugger transport 并存。
+- `runtime_probe` 在 `_ready` 同时挂上 EngineDebugger capture 与 file transport；`_process` 推动
+  file transport tick；`runtime_debugger_plugin` 在 hello 路径优先抢回 `engine_debugger` 标签。
+- `plugin.gd` 在 `_enter_tree` 启动 file transport manager，`_process` 驱动 tick，`_exit_tree`
+  调用 `stop_all` 同步失败所有 pending。
+- `runtime/status` doc 增补 `transport` 字段（`engine_debugger` / `file` / `none`）。
+- 24 个 M3 route 补 `ok: true` envelope；`runtime_node_ops.tree` visited 数组 bug 修复。
+
+控制面（`runtime/status`、broker 状态机、35 route manifest + doc 完整性）E2E 全部绿灯：
+`tests/e2e/m3/test_runtime_status.py` 4/4 + `tests/e2e/m3/test_m3_contract.py` 3/3 + 单元层 10/10 +
+`cargo test --workspace` exit 0。
+
+数据面（35 个 runtime/* route 的 op 实际执行）E2E 仍 22/37 fail，根因是 M3 阶段架构选择：
+route handler 直接 `load("res://addons/gdapi/runtime/runtime_node_ops.gd")` 在 editor 进程内
+调用，**不走 broker → probe**。在 headless 下，game 进程 SceneTree（`/root/RuntimeMain/...`）
+在 editor 的 SubViewport 容器里，`_resolve` 起始固定为 `SceneTree.root = Window`，找不到
+game node。M3.1 plan § Global Constraints 第 19 行明确禁止修改 35 route，所以这是有意保留。
+全面修复需要独立 plan 把 35 route refactor 为 broker-dispatch（详见 `2026-07-24-m3.1-failures.md`）。
+
+`runtime/status` 在 headless 下真实可达 `connected`（`transport: "file"`）已验证：M3 closure
+report 列出的 Godot 4.7 headless `EngineDebugger` 限制被 file transport 完全绕开。
 
 验收依据：
 
-- M3 单元层（runtime_protocol / runtime_broker / runtime_ring_buffer）8/8 通过。
-- `cargo test --workspace` exit 0。
-- 端到端 runtime E2E 需在 M3.1 引入 fallback transport（file/socket）或非 headless harness
-  后才能 flip 到 ✅。
+- `cargo fmt --check` / `cargo clippy --workspace` / `cargo test --workspace` 全部 exit 0
+- `tests/e2e/test_gdscript_units.py` 10 passed（runtime_protocol / runtime_broker /
+  runtime_ring_buffer / runtime_transport_file_probe / runtime_transport_file_editor）
+- `tests/e2e/m3/test_runtime_status.py` 4/4 + `test_m3_contract.py` 3/3（共 7 passed）
+- `tests/e2e/m3` 数据面 15/37 passed；22 failed 为 M3 阶段架构限制（详见 failures 报告）
 
 内容：
 
