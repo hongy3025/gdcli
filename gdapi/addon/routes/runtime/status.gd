@@ -42,9 +42,10 @@ func doc() -> GdApiRouteDoc:
 			"ok": "bool",
 			"state": "String, stopped|connecting|connected",
 			"protocol_version": "int, 当前为 1",
-			"session_id": "int, EditorDebuggerSession 的 id;未连接时为 -1",
+			"session_id": "int, 当前会话 id(debugger session 或 probe 文件名 hash)",
 			"pending": "int, 当前等待回复的请求数",
 			"broker_registered": "bool, broker 是否已注册到 Engine meta",
-			"session_started_at": "float, 当前 broker 首次 attach 的 unix 时间戳;从未 attach 时为 0",
+			"session_started_at": "float, unix 时间戳",
+			"transport": "String, 当前活跃 transport: engine_debugger | file | none",
 		})
 	)

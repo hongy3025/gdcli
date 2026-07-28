@@ -37,8 +37,10 @@ var _router: Router
 var _runtime_broker: RefCounted = null
 ## M3 runtime debugger plugin 实例(EditorDebuggerPlugin)
 var _runtime_debugger_plugin: RefCounted = null
-
+## M3.1 runtime file transport (editor 侧 fallback transport manager)
+var _runtime_file_transport: RefCounted = null
 ## 日志缓冲区，存储最近的日志条目用于远程查询
+
 var _log_buffer: Array = []
 ## 日志序列号，用于增量获取日志
 var _log_seq: int = 0
@@ -86,11 +88,14 @@ func _enter_tree() -> void:
 	# 传入已实例化的对象才能让 _setup_session / _capture 被编辑器调度。
 	_runtime_debugger_plugin = RuntimeDebuggerPlugin.new()
 	_runtime_debugger_plugin.setup(_runtime_broker)
-	add_debugger_plugin(_runtime_debugger_plugin)
-	# autoload 可以走 IIFE 装载 — Game 进程上 Engine 不会启动该 autoload,
-	# 只有 PlayScene 时作为 detached project 加载 RuntimeProbe。游戏进程中
-	# 通过下述 helper 也手动拉到 node 节点。未主动注入的场景表明尚未运行游戏。
 	add_autoload_singleton("GdApiRuntimeProbe", "res://addons/gdapi/runtime/runtime_probe.gd")
+
+	# M3.1: 启动文件 transport manager(headless 下作为 EngineDebugger 不可达的 fallback)
+	# 顺序:broker 先建好并写入 Engine meta,file transport 启动后扫描 hello.json
+	# 时会调 attach_file_transport,这样 broker._active_transport 切到 file。
+	_runtime_file_transport = preload("res://addons/gdapi/runtime/runtime_transport_file_editor.gd").new()
+	_runtime_file_transport.setup(_runtime_broker)
+	_runtime_file_transport.start()
 
 	print("[gdapi] listening on 127.0.0.1:%d (%d routes)" % [port, _router.count()])
 
@@ -115,6 +120,9 @@ func _exit_tree() -> void:
 	set_process(false)
 	if _server and _server.is_running():
 		_server.stop()
+	# M3.1: 停止文件 transport manager,把 pending 同步失败回 callback
+	if _runtime_file_transport != null:
+		_runtime_file_transport.stop_all("plugin exiting")
 	# M3：先暂停运行期 broker、所有 pending 会立即被失败 callback
 	if _runtime_broker != null:
 		_runtime_broker.detach("plugin exiting")
@@ -125,8 +133,8 @@ func _exit_tree() -> void:
 	Engine.remove_meta("gdapi_runtime_broker")
 	_runtime_broker = null
 	_runtime_debugger_plugin = null
+	_runtime_file_transport = null
 	_delete_meta()
-	Engine.remove_meta("gdapi_plugin")
 
 ## 每帧请求轮询处理
 ##
@@ -140,6 +148,9 @@ func _process(_dt: float) -> void:
 		return
 	if _runtime_broker != null:
 		_runtime_broker.tick(Time.get_ticks_msec())
+	# M3.1: 文件 transport manager 扫描 hello/outbox、处理 timeout
+	if _runtime_file_transport != null:
+		_runtime_file_transport.tick(Time.get_ticks_msec())
 	while true:
 		var req: Variant = _server.poll_request()
 		if req == null:

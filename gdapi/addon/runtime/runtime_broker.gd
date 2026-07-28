@@ -30,6 +30,7 @@ var _sender: Callable = Callable()
 var _next_id: int = 1
 ## 第一次 attach 的 unix 时间戳；用于 runtime/status 暴露的 session_started_at 字段。
 ## 多次重连（detach 后再 attach）保持首次值不变，方便客户端判定 session 重启。
+var _session_started_at: float = 0.0
 ## 当前活跃 transport 标识:"engine_debugger" / "file" / "none"
 ## 默认 "none";EngineDebugger transport 在 hello 到达后置为 "engine_debugger";
 ## file transport 在 editor 侧 attach_file_transport() 调用后置为 "file"。
@@ -55,11 +56,12 @@ func status() -> Dictionary:
 	return {
 		"state": _state,
 		"protocol_version": Protocol.VERSION,
+		"session_id": _session_id,
+		"pending": pending_count,
 		"broker_registered": Engine.has_meta("gdapi_runtime_broker"),
 		"session_started_at": _session_started_at,
 		"transport": _active_transport,
- 	}
-##
+	}
 ## 在切换 session（先 detach 再 attach）或第一次拉起游戏之前调用；
 ## 本方法会先把已有 pending 清掉再绑定新 session，避免悬挂。
 ##
