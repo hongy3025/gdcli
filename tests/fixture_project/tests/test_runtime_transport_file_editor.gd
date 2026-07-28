@@ -28,6 +28,7 @@ func _init() -> void:
 	test_malformed_outbox_reply_preserves_live_broker_pending_request()
 	test_invalid_outbox_reply_preserves_live_broker_pending_request()
 	test_stale_hello_is_removed_and_current_hello_attaches()
+	test_integral_float_hello_pid_attaches()
 	test_hello_requires_generation_metadata()
 	test_disappeared_hello_detaches_probe()
 	test_stale_outbox_reply_cannot_complete_current_request()
@@ -249,12 +250,30 @@ func test_hello_requires_generation_metadata() -> void:
 	t.stop_all("test cleanup")
 	_cleanup(root)
 
+func test_integral_float_hello_pid_attaches() -> void:
+	var root := _make_root()
+	_cleanup(root)
+	var broker: RefCounted = Broker.new()
+	var generation: String = String(broker.begin_generation())
+	var hello := _hello(generation)
+	hello["result"]["pid"] = 1.0
+	_write_json(root.path_join("float-pid/hello.json"), hello)
+	var t := Transport.new(root)
+	t.setup(broker)
+	t.start()
+	t.tick(Time.get_ticks_msec())
+	assert_eq(t.active_probe_ids(), ["float-pid"], "integral float hello pid attaches")
+	t.stop_all("test cleanup")
+	_cleanup(root)
+
 func test_disappeared_hello_detaches_probe() -> void:
 	var root := _make_root()
 	_cleanup(root)
 	var broker: RefCounted = Broker.new()
 	var generation: String = String(broker.begin_generation())
 	_write_json(root.path_join("probe/hello.json"), _hello(generation))
+	_write_json(root.path_join("probe/inbox/stale.json"), {"stale": true})
+	_write_json(root.path_join("probe/outbox/stale.json"), {"stale": true})
 	var t := Transport.new(root)
 	t.setup(broker)
 	t.start()
@@ -264,6 +283,8 @@ func test_disappeared_hello_detaches_probe() -> void:
 	t.tick(Time.get_ticks_msec())
 	assert_eq(t.active_probe_ids().size(), 0, "missing hello detaches probe")
 	assert_eq(broker.status().state, "stopped", "missing hello stops broker")
+	assert_true(not DirAccess.dir_exists_absolute(root.path_join("probe")),
+		"missing hello removes probe directory recursively")
 	t.stop_all("test cleanup")
 	_cleanup(root)
 
@@ -288,6 +309,11 @@ func test_stale_outbox_reply_cannot_complete_current_request() -> void:
 	t.tick(Time.get_ticks_msec())
 	assert_eq(received.size(), 0, "stale outbox does not complete request")
 	assert_eq(broker.status().pending, 1, "stale outbox leaves pending")
+	_write_json(root.path_join("probe/outbox/%d.json" % id),
+		Protocol.reply(id, true, {"generationless": true}))
+	t.tick(Time.get_ticks_msec())
+	assert_eq(received.size(), 0, "generationless outbox does not complete request")
+	assert_eq(broker.status().pending, 1, "generationless outbox leaves pending")
 	t.stop_all("test cleanup")
 	_cleanup(root)
 

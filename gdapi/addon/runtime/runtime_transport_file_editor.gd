@@ -105,7 +105,6 @@ func _scan_hello_files() -> void:
 			var current_hello := _read_json(hello_path)
 			if not _hello_matches_probe(name, current_hello):
 				_detach_probe(name, "probe hello generation changed")
-				_cleanup_probe_dir(name)
 			continue
 		if not FileAccess.file_exists(hello_path):
 			continue
@@ -251,6 +250,7 @@ func _detach_probe(probe_id: String, reason: String) -> void:
 	_probes.erase(probe_id)
 	if _broker != null and _broker.has_method("detach_file_transport"):
 		_broker.call("detach_file_transport", reason, generation)
+	_cleanup_probe_dir(probe_id)
 
 func _cleanup_probe_dir(probe_id: String) -> void:
 	var probe_dir := root_path().path_join(probe_id)
@@ -277,6 +277,11 @@ func _normalize_protocol_integers(message: Dictionary) -> void:
 	var result: Variant = message.get("result", null)
 	if typeof(result) == TYPE_DICTIONARY and typeof(result.get("protocol_version")) == TYPE_FLOAT:
 		result["protocol_version"] = int(result.protocol_version)
+	if String(message.get("kind", "")) == "event" and String(message.get("event", "")) == "hello":
+		if typeof(result) == TYPE_DICTIONARY and typeof(result.get("pid")) == TYPE_FLOAT:
+			var pid_value: float = float(result.pid)
+			if pid_value >= 1.0 and pid_value <= 2147483647.0 and pid_value == floor(pid_value):
+				result["pid"] = int(pid_value)
 
 ## 私有:原子写(先写 .tmp 再 rename)
 func _atomic_write(target_path: String, content: String) -> bool:

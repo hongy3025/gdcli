@@ -166,7 +166,7 @@ func _scan_inbox(_now_msec: int) -> void:
 			inbox.remove(filename)
 			continue
 		var request_generation := String(dict.get("generation", ""))
-		if not request_generation.is_empty() and request_generation != _generation:
+		if not _generation.is_empty() and request_generation != _generation:
 			inbox.remove(filename)
 			continue
 		var id: int = int(dict.id)
