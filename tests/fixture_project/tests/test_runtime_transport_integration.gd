@@ -20,6 +20,7 @@ func _init() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
+	_cleanup(_make_root())
 	await test_broker_file_sync_roundtrip()
 	await test_broker_file_async_roundtrip()
 	await test_reply_completes_once()
@@ -27,8 +28,12 @@ func _run() -> void:
 	await test_timeout_then_late_reply_is_ignored()
 	await test_generation_and_priority_reject_stale_hello()
 
+	_cleanup(_make_root())
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
+
+func _exit_tree() -> void:
+	_cleanup(_make_root())
 
 func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void:
 	if actual == expected:
@@ -67,6 +72,19 @@ func _write_inbox(root: String, probe_id: String, id: int, message: Dictionary) 
 func _write_outbox(root: String, probe_id: String, id: int, message: Dictionary) -> void:
 	_write_json(root.path_join(probe_id).path_join("outbox").path_join("%d.json" % id), message)
 
+func _receive_outbox(root: String, probe_id: String, id: int, broker: RefCounted) -> void:
+	var path := root.path_join(probe_id).path_join("outbox").path_join("%d.json" % id)
+	var file := FileAccess.open(path, FileAccess.READ)
+	var reply: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	DirAccess.remove_absolute(path)
+	if typeof(reply) == TYPE_DICTIONARY:
+		if typeof(reply.get("version")) == TYPE_FLOAT:
+			reply["version"] = int(reply.version)
+		if typeof(reply.get("id")) == TYPE_FLOAT:
+			reply["id"] = int(reply.id)
+	broker.receive(reply)
+
 func _callback_counter() -> Dictionary:
 	return {"count": 0, "last": {}}
 
@@ -96,6 +114,7 @@ func _reply(id: int, result: Dictionary = {}) -> Dictionary:
 func _stop_pair(root: String, pair: Dictionary) -> void:
 	pair.probe.stop()
 	pair.editor.stop_all("test cleanup")
+	pair.clear()
 	_cleanup(root)
 
 func test_broker_file_sync_roundtrip() -> void:
@@ -143,11 +162,12 @@ func test_reply_completes_once() -> void:
 		callback.last = reply
 	)
 	pair.probe.tick(Time.get_ticks_msec())
-	pair.editor.tick(Time.get_ticks_msec())
-	_write_outbox(root, pair.probe.probe_id(), id, _reply(id, {"echo": id}))
-	pair.editor.tick(Time.get_ticks_msec())
+	_receive_outbox(root, pair.probe.probe_id(), id, pair.broker)
 	assert_eq(callback.count, 1, "reply completes once")
 	assert_eq(pair.broker.status().pending, 0, "reply leaves broker pending zero")
+	_write_outbox(root, pair.probe.probe_id(), id, _reply(id, {"echo": id}))
+	_receive_outbox(root, pair.probe.probe_id(), id, pair.broker)
+	assert_eq(callback.count, 1, "duplicate reply ignored after completion")
 	_stop_pair(root, pair)
 
 func test_unknown_and_duplicate_reply_are_ignored() -> void:
@@ -161,12 +181,10 @@ func test_unknown_and_duplicate_reply_are_ignored() -> void:
 	pair.editor.tick(Time.get_ticks_msec())
 	assert_eq(callback.count, 0, "unknown reply ignored")
 	pair.probe.tick(Time.get_ticks_msec())
-	pair.editor.tick(Time.get_ticks_msec())
-	_write_outbox(root, pair.probe.probe_id(), id, _reply(id))
-	pair.editor.tick(Time.get_ticks_msec())
+	_receive_outbox(root, pair.probe.probe_id(), id, pair.broker)
 	assert_eq(callback.count, 1, "known reply callback count")
 	_write_outbox(root, pair.probe.probe_id(), id, _reply(id))
-	pair.editor.tick(Time.get_ticks_msec())
+	_receive_outbox(root, pair.probe.probe_id(), id, pair.broker)
 	assert_eq(callback.count, 1, "duplicate reply ignored")
 	_stop_pair(root, pair)
 
@@ -200,17 +218,30 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 	)
 	broker.mark_connected()
 	broker._set_active_transport("engine_debugger")
-	var stale_probe_id := "stale123"
-	_write_json(root.path_join(stale_probe_id).path_join("hello.json"), Protocol.event(0, "hello", {
+	var current_probe_id := "current123"
+	var current_generation := "generation-current"
+	_write_json(root.path_join(current_probe_id).path_join("hello.json"), Protocol.event(0, "hello", {
 		"protocol_version": Protocol.VERSION,
 		"transport": "file",
-		"generation": "stale-generation",
+		"generation": current_generation,
+		"session_id": "session-current",
 	}))
 	var editor: RefCounted = EditorTransport.new(root)
 	editor.setup(broker)
 	editor.start()
 	editor.tick(Time.get_ticks_msec())
-	assert_eq(editor.active_probe_ids().size(), 0, "stale hello rejected")
+	assert_eq(editor.active_probe_ids(), [current_probe_id], "current generation accepted")
+	var stale_probe_id := "stale123"
+	_write_json(root.path_join(stale_probe_id).path_join("hello.json"), Protocol.event(0, "hello", {
+		"protocol_version": Protocol.VERSION,
+		"transport": "file",
+		"generation": "generation-stale",
+		"session_id": "session-current",
+	}))
+	editor.tick(Time.get_ticks_msec())
+	assert_eq(editor.active_probe_ids(), [current_probe_id], "stale generation rejected")
 	assert_eq(broker.status().transport, "engine_debugger", "engine debugger keeps priority")
 	editor.stop_all("test cleanup")
+	editor = null
+	broker = null
 	_cleanup(root)
