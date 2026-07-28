@@ -65,7 +65,8 @@ func _capture(message: String, data: Array, session_id: int) -> bool:
 		return false
 	# Hello 事件只用来推进状态机；reply 才走 broker.receive。
 	if String(payload.get("event", "")) == "hello":
-		_attach_to_session(session_id)
+		if not _attach_to_session(session_id):
+			return false
 		_broker.mark_connected()
 		if _broker.has_method("_set_active_transport"):
 			_broker.call("_set_active_transport", "engine_debugger")
@@ -80,7 +81,10 @@ func _clear(session_id: int) -> void:
 	if _sessions.has(session_id):
 		_sessions.erase(session_id)
 	if _broker != null:
-		_broker.detach("session cleared")
+		if _broker.has_method("detach_engine_debugger"):
+			_broker.call("detach_engine_debugger", "session cleared")
+		else:
+			_broker.detach("session cleared")
 
 ## 把协议字典通过当前 session 推送给 runtime probe
 ##
@@ -122,15 +126,16 @@ func _lookup_session(session_id: int) -> RefCounted:
 ## 把当前 session 绑定到 broker(由 hello 路径触发)
 ##
 ## @param session_id 已知 session id
-func _attach_to_session(session_id: int) -> void:
+func _attach_to_session(session_id: int) -> bool:
 	if not _sessions.has(session_id):
-		return
+		return false
 	var session: RefCounted = _lookup_session(session_id)
 	if session == null:
 		push_warning("[gdapi] hello arrived but session %d is unavailable" % session_id)
-		return
+		return false
 	if _broker == null:
-		return
+		return false
 	var send := func(message: Dictionary) -> bool:
 		return _send_to_session(session_id, message)
 	_broker.attach(session_id, send)
+	return true

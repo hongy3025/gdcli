@@ -133,20 +133,33 @@ func detach_file_transport(reason: String = "file transport detached", _generati
 	if was_file_active:
 		detach(reason)
 
+## 显式断开 EngineDebugger transport。
+##
+## 保留仍然有效的 file sender 作为 fallback；只有两个 transport 都不可用时
+## 才一次性失败 pending。
+func detach_engine_debugger(reason: String = "engine debugger detached", _generation: String = "") -> void:
+	if not _engine_connected and _engine_sender.is_null():
+		return
+	_engine_sender = Callable()
+	_engine_connected = false
+	_select_transport_sender()
+	if _file_connected and not _file_sender.is_null():
+		_session_id = _file_probe_id.to_int() if _file_probe_id.is_valid_int() else -1
+		_state = "connected"
+		return
+	_session_id = -1
+	_state = "stopped"
+	_fail_pending(reason)
+
 ## 由 transport 路径调用,显式切换活跃 transport 标识
 ##
 ## EngineDebugger hello 到达时切到 "engine_debugger",让上层能区分
 ## 当前生效的 transport。仅更新标识,不触碰 _sender。
 ##
 ## @param name transport 标识("engine_debugger" / "file" / "none")
-func _set_active_transport(name: String) -> void:
-	_active_transport = name
-	if name == "engine_debugger" and not _engine_sender.is_null():
-		_engine_connected = true
-		_sender = _engine_sender
-	elif name == "file" and not _file_sender.is_null():
-		_file_connected = true
-		_sender = _file_sender
+func _set_active_transport(_name: String) -> void:
+	# Compatibility hook; priority remains owned by the central selector.
+	_select_transport_sender()
 
 ## 记录 transport 连通性；generation 由后续 transport 协商使用，保留在
 ## broker 边界以免 transport 自行持有会话状态。
@@ -159,10 +172,11 @@ func set_transport_connected(name: String, connected: bool, generation: String =
 			_select_transport_sender()
 		return
 	if name == "engine_debugger":
-		_engine_connected = connected
 		if not connected:
-			_engine_sender = Callable()
-		_select_transport_sender()
+			detach_engine_debugger("engine debugger disconnected", generation)
+		else:
+			_engine_connected = true
+			_select_transport_sender()
 
 ## 在 EngineDebugger、file、none 之间选择实际 sender。此方法是唯一的
 ## transport 优先级决策点，优先顺序固定为 EngineDebugger > file > none。
@@ -185,10 +199,7 @@ func _select_transport_sender() -> void:
 func detach(reason: String = "runtime detached") -> void:
 	if _state == "stopped" and _pending.is_empty():
 		return
-	var snapshot: Array = []
-	for id in _pending.keys():
-		snapshot.append([id, _pending[id].callback])
-	_pending.clear()
+	_fail_pending(reason)
 	_session_id = -1
 	_sender = Callable()
 	_engine_sender = Callable()
@@ -198,6 +209,12 @@ func detach(reason: String = "runtime detached") -> void:
 	_file_probe_id = ""
 	_active_transport = "none"
 	_state = "stopped"
+
+func _fail_pending(reason: String) -> void:
+	var snapshot: Array = []
+	for id in _pending.keys():
+		snapshot.append([id, _pending[id].callback])
+	_pending.clear()
 	for entry in snapshot:
 		var cb: Callable = entry[1]
 		var id: int = entry[0]

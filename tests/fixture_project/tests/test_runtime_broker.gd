@@ -35,7 +35,9 @@ func _init() -> void:
 	test_transport_field_initial_none()
 	test_attach_file_transport_sets_transport_file()
 	test_engine_debugger_sender_keeps_priority_over_file_transport()
-	test_set_active_transport_overrides_label()
+	test_engine_disconnect_falls_back_to_file_transport()
+	test_both_transports_detach_fail_pending_once()
+	test_set_active_transport_keeps_priority_selection()
 	test_detach_file_transport_returns_to_none()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
@@ -241,12 +243,61 @@ func test_engine_debugger_sender_keeps_priority_over_file_transport() -> void:
 	assert_eq(b.status().transport, "engine_debugger", "engine debugger remains active transport")
 	assert_eq(b.status().session_id, 42, "engine debugger session id remains active")
 
-func test_set_active_transport_overrides_label() -> void:
+func test_engine_disconnect_falls_back_to_file_transport() -> void:
+	var b: RefCounted = Broker.new()
+	var engine_sent: Array = []
+	var file_sent: Array = []
+	b.attach(42, func(message: Dictionary) -> bool:
+		engine_sent.append(message.duplicate(true))
+		return true
+	)
+	b.mark_connected()
+	b.attach_file_transport("file1234", func(message: Dictionary) -> bool:
+		file_sent.append(message.duplicate(true))
+		return true
+	)
+	assert_eq(b.status().transport, "engine_debugger", "engine debugger starts active")
+
+	assert_true(b.has_method("detach_engine_debugger"), "broker exposes explicit engine detach")
+	if not b.has_method("detach_engine_debugger"):
+		return
+	b.call("detach_engine_debugger", "session cleared")
+	assert_eq(b.status().transport, "file", "file transport becomes active after engine disconnect")
+
+	b.request("runtime/status", {}, 5000, func(_reply: Dictionary) -> void: pass)
+	assert_eq(engine_sent.size(), 0, "disconnected engine sender is not reused")
+	assert_eq(file_sent.size(), 1, "file transport receives fallback request")
+
+func test_both_transports_detach_fail_pending_once() -> void:
+	var b: RefCounted = Broker.new()
+	var received: Array = []
+	b.attach(42, func(_message: Dictionary) -> bool:
+		return true
+	)
+	b.mark_connected()
+	b.attach_file_transport("file1234", func(_message: Dictionary) -> bool:
+		return true
+	)
+	b.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply)
+	)
+	assert_true(b.has_method("detach_engine_debugger"), "broker exposes explicit engine detach")
+	if not b.has_method("detach_engine_debugger"):
+		return
+	b.call("detach_engine_debugger", "session cleared")
+	assert_eq(received.size(), 0, "engine detach preserves pending while file fallback is active")
+	b.detach_file_transport("file stopped")
+	assert_eq(received.size(), 1, "last transport detach completes pending once")
+	assert_eq(received[0]["code"], "conflict", "pending fails with conflict")
+	b.detach("duplicate stop")
+	assert_eq(received.size(), 1, "duplicate detach does not repeat callback")
+
+func test_set_active_transport_keeps_priority_selection() -> void:
 	var b: RefCounted = Broker.new()
 	b.attach_file_transport("11223344", _make_send())
 	assert_eq(b.status().transport, "file", "file after file transport")
 	b._set_active_transport("engine_debugger")
-	assert_eq(b.status().transport, "engine_debugger", "label switched")
+	assert_eq(b.status().transport, "file", "unavailable engine cannot override file")
 
 func test_detach_file_transport_returns_to_none() -> void:
 	var b: RefCounted = Broker.new()

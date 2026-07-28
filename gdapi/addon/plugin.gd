@@ -88,6 +88,7 @@ func _enter_tree() -> void:
 	# 传入已实例化的对象才能让 _setup_session / _capture 被编辑器调度。
 	_runtime_debugger_plugin = RuntimeDebuggerPlugin.new()
 	_runtime_debugger_plugin.setup(_runtime_broker)
+	add_debugger_plugin(_runtime_debugger_plugin)
 	add_autoload_singleton("GdApiRuntimeProbe", "res://addons/gdapi/runtime/runtime_probe.gd")
 
 	# M3.1: 启动文件 transport manager(headless 下作为 EngineDebugger 不可达的 fallback)
