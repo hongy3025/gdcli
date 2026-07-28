@@ -28,6 +28,8 @@ func _init() -> void:
 	test_status_returns_pending_count()
 	test_request_timeout_completes_with_timeout()
 	test_unknown_reply_does_not_crash()
+	test_invalid_reply_does_not_complete_pending_request()
+	test_oversized_request_is_rejected_without_sending()
 	test_multiple_requests_then_detach()
 	test_request_after_detach_returns_immediately()
 	test_transport_field_initial_none()
@@ -130,13 +132,8 @@ func test_request_timeout_completes_with_timeout() -> void:
 	var received: Array = []
 	b.request("slow", {}, 5, func(reply: Dictionary) -> void:
 		received.append(reply))
-	# 让 timer 自然到期。
-	var deadline_msec: int = Time.get_ticks_msec() + 100
-	while Time.get_ticks_msec() < deadline_msec:
-		await process_frame
-	# 推动一次 broker 的 _process（如果 broker 用了 timer）。
-	for i in range(3):
-		await process_frame
+	# broker 的 timeout 由 transport 每帧显式推进。
+	b.tick(Time.get_ticks_msec() + 100)
 	assert_eq(received.size(), 1, "timeout callback fired")
 	assert_eq(received[0]["code"], "timeout", "timeout code")
 	assert_eq(b.status().pending, 0, "pending cleared")
@@ -146,6 +143,31 @@ func test_unknown_reply_does_not_crash() -> void:
 	b.attach(3, _make_send())
 	b.receive({"version": 1, "id": 9999, "kind": "reply", "ok": true, "result": {}})
 	assert_eq(b.status().pending, 0, "still zero pending")
+
+func test_invalid_reply_does_not_complete_pending_request() -> void:
+	var b: RefCounted = Broker.new()
+	b.attach(3, _make_send())
+	var received: Array = []
+	var id: int = b.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply))
+	b.receive({"version": 2, "id": id, "kind": "reply", "ok": true})
+	assert_eq(received.size(), 0, "invalid reply does not invoke callback")
+	assert_eq(b.status().pending, 1, "invalid reply leaves request pending")
+	b.receive(Protocol.reply(id, true, {"ready": true}))
+	assert_eq(received.size(), 1, "valid reply completes request")
+	assert_eq(b.status().pending, 0, "valid reply clears pending")
+
+func test_oversized_request_is_rejected_without_sending() -> void:
+	var b: RefCounted = Broker.new()
+	b.attach(3, _make_send())
+	var sent_before: int = sent.size()
+	var received: Array = []
+	b.request("runtime/status", {"body": "x".repeat(Protocol.MAX_MESSAGE_BYTES)}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply))
+	assert_eq(received.size(), 1, "oversized request invokes callback")
+	assert_eq(received[0].get("code", ""), "invalid_param", "oversized request preserves invalid_param")
+	assert_eq(sent.size(), sent_before, "oversized request is not sent")
+	assert_eq(b.status().pending, 0, "oversized request does not enter pending")
 
 func test_multiple_requests_then_detach() -> void:
 	var b: RefCounted = Broker.new()

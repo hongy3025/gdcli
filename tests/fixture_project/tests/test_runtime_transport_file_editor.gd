@@ -2,17 +2,17 @@
 ##
 ## 在 SceneTree 进程里跑通编辑器侧文件 transport 的核心行为：
 ## 1) 扫描 hello.json 发现 probe；
-## 2) request() 写 inbox、等 outbox 回包、把 reply 投到 callback；
-## 3) 未知 id 的 outbox 文件被忽略（不污染 pending）；
-## 4) request 超时清理 pending 字典并触发 timeout callback。
+## 2) broker.request() 通过 send 写 inbox，outbox reply 交给 broker；
+## 3) 未知或格式错误的 outbox 文件删除且不触发 callback。
 ##
-## 测试不依赖真实 Game 进程。StubBroker 提供 attach_file_transport / allocate_id
-## 等最小契约,让 EditorTransport._attach_probe 调用不会报方法缺失。
+## 测试不依赖真实 Game 进程。真实 broker 持有 id、pending 和回调；
+## editor transport 只负责文件收发。
 
 @tool
 extends SceneTree
 
 const Transport := preload("res://addons/gdapi/runtime/runtime_transport_file_editor.gd")
+const Broker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 
 var passed := 0
 var failed := 0
@@ -21,9 +21,9 @@ func _init() -> void:
 	print("Running GdApiRuntimeTransportFileEditor tests...")
 
 	test_scan_picks_up_new_hello_file()
-	test_request_writes_inbox_and_reads_outbox()
-	test_outbox_for_unknown_id_is_ignored()
-	test_request_timeout_clears_pending()
+	test_broker_request_writes_inbox_and_outbox_reply_reaches_broker()
+	test_unknown_outbox_reply_is_deleted_without_callback()
+	test_malformed_outbox_file_is_deleted_without_callback()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	if failed > 0:
@@ -75,49 +75,51 @@ func test_scan_picks_up_new_hello_file() -> void:
 	DirAccess.make_dir_recursive_absolute(root)
 	_seed_probe(root, "probe1234")
 	var t := Transport.new(root)
-	t.setup(StubBroker.new())
+	t.setup(Broker.new())
 	t.start()
 	t.tick(Time.get_ticks_msec())
 	assert_eq(t.active_probe_ids(), ["probe1234"], "hello detected")
 	_cleanup(root)
 
-func test_request_writes_inbox_and_reads_outbox() -> void:
+func test_broker_request_writes_inbox_and_outbox_reply_reaches_broker() -> void:
 	var root := _make_root()
 	_cleanup(root)
 	DirAccess.make_dir_recursive_absolute(root)
 	_seed_probe(root, "probe5678")
-	var broker := StubBroker.new()
+	var broker := Broker.new()
 	var t := Transport.new(root)
 	t.setup(broker)
 	t.start()
 	t.tick(Time.get_ticks_msec())
 	var received: Array = []
-	t.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+	var id: int = broker.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
 		received.append(reply)
 	)
-	# inbox 文件应该被写入
-	var inbox_file := root.path_join("probe5678/inbox/1.json")
+	var inbox_file := root.path_join("probe5678/inbox/%d.json" % id)
 	assert_true(FileAccess.file_exists(inbox_file), "inbox file written")
 	# 模拟 probe 写 outbox
-	var outbox_file := root.path_join("probe5678/outbox/1.json")
+	var outbox_file := root.path_join("probe5678/outbox/%d.json" % id)
 	var of := FileAccess.open(outbox_file, FileAccess.WRITE)
 	of.store_string(JSON.stringify({
-		"version": 1, "id": 1, "kind": "reply",
-		"ok": true, "result": {"echo": 1}
+		"version": 1, "id": id, "kind": "reply",
+		"ok": true, "result": {"echo": id}
 	}))
 	of.close()
 	t.tick(Time.get_ticks_msec())
 	assert_eq(received.size(), 1, "reply callback fired")
-	assert_eq(received[0]["result"]["echo"], 1, "reply payload correct")
+	if not received.is_empty():
+		assert_eq(received[0]["result"]["echo"], id, "reply payload correct")
+	assert_eq(broker.status().pending, 0, "broker pending cleared")
 	_cleanup(root)
 
-func test_outbox_for_unknown_id_is_ignored() -> void:
+func test_unknown_outbox_reply_is_deleted_without_callback() -> void:
 	var root := _make_root()
 	_cleanup(root)
 	DirAccess.make_dir_recursive_absolute(root)
 	_seed_probe(root, "probe9999")
+	var broker := Broker.new()
 	var t := Transport.new(root)
-	t.setup(StubBroker.new())
+	t.setup(broker)
 	t.start()
 	t.tick(Time.get_ticks_msec())
 	var outbox_file := root.path_join("probe9999/outbox/999.json")
@@ -125,42 +127,25 @@ func test_outbox_for_unknown_id_is_ignored() -> void:
 	of.store_string(JSON.stringify({"version":1,"id":999,"kind":"reply","ok":true,"result":{}}))
 	of.close()
 	t.tick(Time.get_ticks_msec())
-	# pending 仍然 0,unknown id 不会触发回调
-	assert_eq(t.pending_count(), 0, "no pending")
+	assert_true(not FileAccess.file_exists(outbox_file), "unknown outbox file deleted")
+	assert_eq(broker.status().pending, 0, "unknown reply does not create pending")
 	_cleanup(root)
 
-func test_request_timeout_clears_pending() -> void:
+func test_malformed_outbox_file_is_deleted_without_callback() -> void:
 	var root := _make_root()
 	_cleanup(root)
 	DirAccess.make_dir_recursive_absolute(root)
-	_seed_probe(root, "probe_to")
+	_seed_probe(root, "probe_bad")
+	var broker := Broker.new()
 	var t := Transport.new(root)
-	t.setup(StubBroker.new())
+	t.setup(broker)
 	t.start()
 	t.tick(Time.get_ticks_msec())
-	var received: Array = []
-	t.request("runtime/status", {}, 30, func(reply: Dictionary) -> void:
-		received.append(reply)
-	)
-	# 推进时间超过 timeout
-	var deadline := Time.get_ticks_msec() + 80
-	while Time.get_ticks_msec() < deadline:
-		await process_frame
-		t.tick(Time.get_ticks_msec())
-	assert_eq(received.size(), 1, "timeout callback fired")
-	assert_eq(received[0]["code"], "timeout", "timeout code")
-	assert_eq(t.pending_count(), 0, "pending cleared")
+	var outbox_file := root.path_join("probe_bad/outbox/not-an-id.json")
+	var of := FileAccess.open(outbox_file, FileAccess.WRITE)
+	of.store_string("not-json")
+	of.close()
+	t.tick(Time.get_ticks_msec())
+	assert_true(not FileAccess.file_exists(outbox_file), "malformed outbox file deleted")
+	assert_eq(broker.status().pending, 0, "malformed reply does not create pending")
 	_cleanup(root)
-
-## 最小 stub,提供 EditorTransport._attach_probe 期望的方法。
-## 不模拟真实 broker 的状态机——只让 attach_file_transport 调用成功即可。
-class StubBroker:
-	extends RefCounted
-	var next_id: int = 0
-	func allocate_id() -> int:
-		next_id += 1
-		return next_id
-	func attach_file_transport(_probe_id: String, _send: Callable) -> void:
-		pass
-	func detach_file_transport(_reason: String = "") -> void:
-		pass

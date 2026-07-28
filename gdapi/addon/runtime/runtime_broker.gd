@@ -98,7 +98,7 @@ func mark_connected() -> void:
 ##
 ## @param probe_id probe 标识(全局唯一 hex)
 ## @param send file transport 注入的发送 callable
-func attach_file_transport(probe_id: String, send: Callable) -> void:
+func attach_file_transport(probe_id: String, send: Callable, _generation: String = "") -> void:
 	_file_probe_id = probe_id
 	_file_sender = send
 	_active_transport = "file"
@@ -116,7 +116,7 @@ func attach_file_transport(probe_id: String, send: Callable) -> void:
 ## 仅在当前活跃 transport 是 file 时清空 file 状态。
 ##
 ## @param reason 人类可读的关闭原因
-func detach_file_transport(reason: String = "file transport detached") -> void:
+func detach_file_transport(reason: String = "file transport detached", _generation: String = "") -> void:
 	if _active_transport != "file":
 		return
 	_file_probe_id = ""
@@ -132,6 +132,20 @@ func detach_file_transport(reason: String = "file transport detached") -> void:
 ## @param name transport 标识("engine_debugger" / "file" / "none")
 func _set_active_transport(name: String) -> void:
 	_active_transport = name
+
+## 记录 transport 连通性；generation 由后续 transport 协商使用，保留在
+## broker 边界以免 transport 自行持有会话状态。
+func set_transport_connected(name: String, connected: bool, generation: String = "") -> void:
+	if name == "file":
+		if connected:
+			_active_transport = "file"
+		elif _active_transport == "file":
+			detach_file_transport("file transport disconnected", generation)
+		return
+	if connected:
+		_active_transport = name
+	elif _active_transport == name:
+		_active_transport = "none"
 
 
 ## 主动断开当前会话,清理所有 pending
@@ -211,7 +225,8 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 ##
 ## @param message runtime 推过来的字典
 func receive(message: Variant) -> void:
-	if typeof(message) != TYPE_DICTIONARY:
+	var verdict: Dictionary = Protocol.validate_message(message)
+	if not bool(verdict.get("ok", false)):
 		return
 	var dict: Dictionary = message
 	var kind: String = String(dict.get("kind", ""))
