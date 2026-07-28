@@ -2,18 +2,9 @@
 
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from .conftest import (
     command_doc,
     exec_ok,
-    project_run,
-    project_stop,
-    wait_for_connected,
-    wait_for,
-    wait_stopped,
 )
 
 
@@ -25,36 +16,31 @@ def test_runtime_status_initial_state_is_stopped(m3_editor):
     assert status["transport"] == "none"
 
 
-def test_runtime_status_after_run_reaches_connected(m3_editor):
-    project_run(m3_editor)
-    try:
-        wait_for_connected(m3_editor, timeout=30.0)
-        status = exec_ok(m3_editor, "runtime/status")
-        assert status["state"] == "connected"
-        assert status["protocol_version"] == 1
-        assert status["transport"] in ("file", "engine_debugger")
-    finally:
-        project_stop(m3_editor)
-        wait_stopped(m3_editor, timeout=30.0)
+def test_runtime_lifecycle_scenario(m3_lifecycle):
+    initial = m3_lifecycle["initial"]
+    assert initial["state"] == "stopped"
+    assert initial["pending"] == 0
 
-
-def test_runtime_status_two_consecutive_runs(m3_editor):
-    # 第一次
-    project_run(m3_editor)
-    wait_for_connected(m3_editor, timeout=30.0)
-    project_stop(m3_editor)
-    wait_stopped(m3_editor, timeout=30.0)
-    assert exec_ok(m3_editor, "runtime/status")["pending"] == 0
-
-    # 第二次
-    project_run(m3_editor)
-    wait_for_connected(m3_editor, timeout=30.0)
-    project_stop(m3_editor)
-    wait_stopped(m3_editor, timeout=30.0)
-    assert exec_ok(m3_editor, "runtime/status")["pending"] == 0
+    assert len(m3_lifecycle["cycles"]) == 2
+    for cycle in m3_lifecycle["cycles"]:
+        assert cycle["started"]["runtime_state"] in ("connecting", "connected")
+        assert cycle["connected"]["state"] == "connected"
+        assert cycle["connected"]["protocol_version"] == 1
+        assert cycle["connected"]["transport"] in ("file", "engine_debugger")
+        assert cycle["stopped"]["runtime_state"] == "stopped"
+        assert cycle["stopped_status"]["state"] == "stopped"
+        assert cycle["stopped_status"]["pending"] == 0
+        assert cycle["runtime_entries"] == []
 
 
 def test_runtime_status_doc_has_returns(m3_editor):
     doc = command_doc(m3_editor, "runtime/status")
     assert doc["summary"]
     assert doc["returns"]["fields"]
+
+
+def test_m3_editor_session_reuses_one_process_and_setup(m3_editor):
+    assert m3_editor.get("build_count") == 1
+    assert m3_editor.get("install_count") == 1
+    assert m3_editor.get("editor_start_count") == 1
+    assert m3_editor.get("editor_pids") == {m3_editor["godot"].pid}

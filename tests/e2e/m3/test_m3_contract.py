@@ -5,15 +5,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 from .conftest import (
     command_doc,
+    exec_error,
     exec_ok,
-    project_run,
-    project_stop,
-    wait_for_connected,
-    wait_stopped,
 )
 
 
@@ -51,11 +46,17 @@ def test_runtime_route_documentation_is_complete(m3_editor):
     assert not bad, f"incomplete docs: {bad[:10]}"
 
 
-def test_lifecycle_two_runs_clean_pending(m3_editor):
-    for cycle in range(2):
-        project_run(m3_editor)
-        wait_for_connected(m3_editor, timeout=30.0)
-        project_stop(m3_editor)
-        wait_stopped(m3_editor, timeout=30.0)
-        pending = exec_ok(m3_editor, "runtime/status").get("pending", 0)
-        assert pending == 0, f"cycle {cycle}: pending={pending}"
+def test_failed_cli_diagnostics_include_runtime_context(m3_editor):
+    error = exec_error(m3_editor, "runtime/node/get", {
+        "node_path": "/root/RuntimeMain/ProbeTarget",
+        "property": "counter",
+    })
+    diagnostics = error.get("diagnostics", {})
+    assert {
+        "command",
+        "exit_code",
+        "stdout",
+        "stderr",
+        "runtime_status",
+        "godot_log_tail",
+    } <= set(diagnostics)

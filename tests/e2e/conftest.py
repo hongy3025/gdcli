@@ -11,6 +11,16 @@ from pathlib import Path
 import pytest
 
 
+E2E_DEADLOCK_TIMEOUT_SECONDS = 180
+
+
+def pytest_collection_modifyitems(items):
+    """Bound deadlocks; operation-specific tests keep their own readiness limits."""
+    timeout_marker = pytest.mark.timeout(E2E_DEADLOCK_TIMEOUT_SECONDS)
+    for item in items:
+        item.add_marker(timeout_marker)
+
+
 def parse_godot_version(output: str) -> tuple[int, int, int]:
     match = re.search(r"(?:v)?(\d+)\.(\d+)(?:\.(\d+))?", output)
     if match is None:
