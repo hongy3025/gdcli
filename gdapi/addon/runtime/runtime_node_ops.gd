@@ -28,6 +28,9 @@ extends RefCounted
 const Codec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const Condition := preload("res://addons/gdapi/runtime/runtime_condition.gd")
 const ALLOWED_CREATE_TYPES := ["Node", "Node2D", "Control", "Marker2D"]
+const DEDICATED_NODE_META := &"gdapi_runtime_dedicated"
+const DEDICATED_FIXTURE_NODE_NAMES := ["ProbeTarget"]
+const INFRASTRUCTURE_NODE_NAMES := ["ProbeInput", "ProbeInputAction", "ProbeFinishedSignal"]
 const MUTABLE_PROPERTIES := [
 	"position", "rotation", "rotation_degrees", "scale", "skew", "pivot_offset",
 	"size", "visible", "modulate", "self_modulate", "process_mode",
@@ -81,6 +84,8 @@ static func set_property(payload: Dictionary) -> Dictionary:
 	if not bool(lookup.get("ok", false)):
 		return lookup
 	var node: Node = lookup.node
+	if not _is_dedicated_target(node):
+		return {"ok": false, "code": "permission_denied", "error": "node is not a dedicated runtime target"}
 	var property: String = String(payload.get("property", ""))
 	var value: Variant = payload.get("value", null)
 	if property.is_empty() or value == null:
@@ -101,6 +106,8 @@ static func call_method(payload: Dictionary) -> Dictionary:
 	if not bool(lookup.get("ok", false)):
 		return lookup
 	var node: Node = lookup.node
+	if not _is_dedicated_target(node):
+		return {"ok": false, "code": "permission_denied", "error": "node is not a dedicated runtime target"}
 	var method: String = String(payload.get("method", ""))
 	if method.is_empty():
 		return {"ok": false, "code": "missing_param", "error": "method is required"}
@@ -163,9 +170,9 @@ static func reparent(payload: Dictionary) -> Dictionary:
 	var new_parent: Node = parent_lookup.node
 	if _is_protected_node(node) or not _is_dedicated_target(node):
 		return {"ok": false, "code": "permission_denied", "error": "node is not a reparentable fixture node"}
-	if _is_protected_node(new_parent) and new_parent != _scene_root():
-		return {"ok": false, "code": "permission_denied", "error": "new parent is protected"}
-	if node == new_parent or _is_descendant_of(node, new_parent, false):
+	if new_parent != _scene_root() and not _is_dedicated_target(new_parent):
+		return {"ok": false, "code": "permission_denied", "error": "new parent is not a dedicated runtime target"}
+	if node == new_parent or _is_descendant_of(new_parent, node, false):
 		return {"ok": false, "code": "conflict", "error": "reparent would create a cycle"}
 	node.get_parent().remove_child(node)
 	new_parent.add_child(node)
@@ -206,6 +213,7 @@ static func create(payload: Dictionary) -> Dictionary:
 			return {"ok": false, "code": "invalid_param", "error": String(decoded.get("error", "invalid VariantCodec property"))}
 		candidate.set(property, decoded.value)
 	candidate.name = node_name
+	_mark_dedicated_node(candidate)
 	parent.add_child(candidate)
 	return {"ok": true, "result": {"node_path": String(candidate.get_path()), "type": type_name, "changed": true, "undoable": false}}
 
@@ -233,6 +241,7 @@ static func duplicate_node(payload: Dictionary) -> Dictionary:
 		if _has_property(source, property) and _has_property(copy, property):
 			copy.set(property, source.get(property))
 	copy.name = node_name
+	_mark_dedicated_node(copy)
 	parent.add_child(copy)
 	return {"ok": true, "result": {"node_path": String(copy.get_path()), "source": String(source.get_path()), "changed": true, "undoable": false}}
 
@@ -478,14 +487,24 @@ static func _is_protected_node(node: Node) -> bool:
 	var tree := Engine.get_main_loop() as SceneTree
 	if node == tree.root or node == _scene_root():
 		return true
-	if String(node.name) == "GdApiRuntimeProbe":
+	if String(node.name) == "GdApiRuntimeProbe" or String(node.name) in INFRASTRUCTURE_NODE_NAMES:
 		return true
 	var script := node.get_script()
 	return script != null and String(script.resource_path).ends_with("/runtime_probe.gd")
 
 static func _is_dedicated_target(node: Node) -> bool:
 	var scene := _scene_root()
-	return node != null and scene != null and node != scene and not _is_protected_node(node) and scene.is_ancestor_of(node)
+	if node == null or scene == null or node == scene or _is_protected_node(node) or not scene.is_ancestor_of(node):
+		return false
+	if bool(node.get_meta(DEDICATED_NODE_META, false)):
+		return true
+	if String(node.name) in DEDICATED_FIXTURE_NODE_NAMES:
+		_mark_dedicated_node(node)
+		return true
+	return false
+
+static func _mark_dedicated_node(node: Node) -> void:
+	node.set_meta(DEDICATED_NODE_META, true)
 
 static func _is_mutable_property(property: String) -> bool:
 	return property in MUTABLE_PROPERTIES

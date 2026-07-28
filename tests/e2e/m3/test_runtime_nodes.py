@@ -165,3 +165,67 @@ def test_runtime_node_mutations_reject_unsafe_targets_without_mutation(m3_runnin
     })
     assert cycle["code"] == "conflict"
     assert exec_ok(m3_running, "runtime/node/info", {"node_path": source})["node_path"] == source
+
+
+def test_runtime_infrastructure_nodes_reject_mutations(m3_running):
+    infrastructure_nodes = ["ProbeInput", "ProbeInputAction", "ProbeFinishedSignal"]
+    cases = []
+    for index, name in enumerate(infrastructure_nodes):
+        infrastructure = f"/root/RuntimeMain/{name}"
+        cases.extend([
+            ("runtime/node/set", {
+                "node_path": infrastructure,
+                "property": "process_mode",
+                "value": 0,
+            }),
+            ("runtime/node/call", {
+                "node_path": infrastructure,
+                "method": "queue_free",
+            }),
+            ("runtime/node/duplicate", {
+                "node_path": infrastructure,
+                "name": f"Task9InfrastructureDuplicate{index}",
+            }),
+            ("runtime/node/rename", {
+                "node_path": infrastructure,
+                "name": f"Task9InfrastructureRenamed{index}",
+            }),
+            ("runtime/node/reparent", {
+                "node_path": infrastructure,
+                "new_parent": "/root/RuntimeMain/ProbeTarget",
+            }),
+            ("runtime/node/remove", {"node_path": infrastructure}),
+        ])
+    for route, payload in cases:
+        error = exec_error(m3_running, route, payload)
+        assert error["code"] == "permission_denied", (route, error)
+    for name in infrastructure_nodes:
+        infrastructure = f"/root/RuntimeMain/{name}"
+        assert exec_ok(m3_running, "runtime/node/info", {"node_path": infrastructure})["node_path"] == infrastructure
+
+
+def test_runtime_created_node_can_reparent_and_remove(m3_running):
+    created = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain",
+        "type": "Node2D",
+        "name": "Task9Mutable",
+    })
+    created_path = created["node_path"]
+    moved = exec_ok(m3_running, "runtime/node/reparent", {
+        "node_path": created_path,
+        "new_parent": "/root/RuntimeMain/ProbeTarget",
+    })
+    assert moved["changed"] is True
+    assert moved["undoable"] is False
+    nested_path = "/root/RuntimeMain/ProbeTarget/Task9Mutable"
+    moved_back = exec_ok(m3_running, "runtime/node/reparent", {
+        "node_path": nested_path,
+        "new_parent": "/root/RuntimeMain",
+    })
+    assert moved_back["changed"] is True
+    removed = exec_ok(m3_running, "runtime/node/remove", {
+        "node_path": created_path,
+    })
+    assert removed["changed"] is True
+    assert removed["undoable"] is False
+    assert exec_error(m3_running, "runtime/node/info", {"node_path": created_path})["code"] == "not_found"

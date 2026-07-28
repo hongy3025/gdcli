@@ -37,6 +37,39 @@ $env:GODOT_BIN='D:\app\devel\Godot\v4.7.1\godot_console.exe'; uv run pytest test
 
 `git diff --check` exited 0. No CLI/Rust files were changed.
 
+## Fix round 1 — dedicated-node safety
+
+Fix base: `9b01a96`
+
+- Replaced the prior scene-descendant mutation rule with an explicit production-side policy: the existing `ProbeTarget` fixture target is allowlisted and tagged on first authorization; runtime-created and duplicated nodes receive the `gdapi_runtime_dedicated` tag; all other scene descendants are rejected for mutation.
+- Protected `ProbeInput`, `ProbeInputAction`, `ProbeFinishedSignal`, and unlisted fixture controls from set/call/remove/reparent/duplicate/rename while keeping read-only inspection available.
+- Restricted reparent destinations to the current scene root or another dedicated target, corrected ancestor reparenting, and preserved true cycle rejection.
+- Added behavioral E2E coverage for all three named infrastructure nodes, successful created-node reparent/remove, and the exact 35-route/no-alias contract; added GDScript coverage for infrastructure and unlisted fixture rejection.
+
+Fix-round RED evidence:
+
+```text
+uv run pytest tests/e2e/m3/test_runtime_nodes.py -k "infrastructure or created_node" -v
+2 failed, 11 deselected
+```
+
+```text
+uv run pytest tests/e2e/test_gdscript_units.py -k runtime_node_ops -v
+2 passed, 7 failed
+```
+
+Fix-round GREEN verification:
+
+```text
+uv run pytest tests/e2e/m3/test_runtime_nodes.py tests/e2e/m3/test_m3_contract.py -v
+17 passed in 27.40s
+```
+
+```text
+uv run pytest tests/e2e/test_gdscript_units.py -v
+14 passed in 10.22s
+```
+
 ## Deferred RED / preserved boundaries
 
 - Later input, capture, log/debug, assert, and signal route families remain deferred to their planned tasks.

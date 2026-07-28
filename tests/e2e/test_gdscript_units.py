@@ -20,6 +20,7 @@ from conftest import run_godot_script
         "res://tests/test_runtime_transport_file_editor.gd",
         "res://tests/test_runtime_transport_integration.gd",
         "res://tests/test_runtime_route.gd",
+        "res://tests/test_runtime_node_ops.gd",
     ],
 )
 def test_gdscript_unit_suite(godot_env, script):

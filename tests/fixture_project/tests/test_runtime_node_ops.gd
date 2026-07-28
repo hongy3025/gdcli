@@ -1,0 +1,99 @@
+## GdApiRuntimeNodeOps dedicated-node safety tests.
+
+@tool
+extends SceneTree
+
+const NodeOps := preload("res://addons/gdapi/runtime/runtime_node_ops.gd")
+
+var passed := 0
+var failed := 0
+
+func _init() -> void:
+	_run.call_deferred()
+
+func _run() -> void:
+	var scene := Node2D.new()
+	scene.name = "Task9Scene"
+	root.add_child(scene)
+	current_scene = scene
+
+	var target := Node2D.new()
+	target.name = "ProbeTarget"
+	scene.add_child(target)
+	var input := Node.new()
+	input.name = "ProbeInput"
+	scene.add_child(input)
+	var action := Node.new()
+	action.name = "ProbeInputAction"
+	scene.add_child(action)
+	var finished := Node.new()
+	finished.name = "ProbeFinishedSignal"
+	scene.add_child(finished)
+	var control := Control.new()
+	control.name = "FixtureControl"
+	scene.add_child(control)
+
+	_assert_permission(NodeOps.set_property({
+		"node_path": "/root/Task9Scene/ProbeInput",
+		"property": "process_mode",
+		"value": 0,
+	}), "infrastructure set")
+	_assert_permission(NodeOps.call_method({
+		"node_path": "/root/Task9Scene/ProbeInput",
+		"method": "queue_free",
+	}), "infrastructure call")
+	_assert_permission(NodeOps.remove({"node_path": "/root/Task9Scene/ProbeInput"}), "infrastructure remove")
+	_assert_permission(NodeOps.reparent({
+		"node_path": "/root/Task9Scene/ProbeInputAction",
+		"new_parent": "/root/Task9Scene/ProbeTarget",
+	}), "infrastructure reparent")
+	_assert_permission(NodeOps.duplicate_node({
+		"node_path": "/root/Task9Scene/ProbeFinishedSignal",
+		"name": "Task9InfrastructureDuplicate",
+	}), "infrastructure duplicate")
+	_assert_permission(NodeOps.rename({
+		"node_path": "/root/Task9Scene/ProbeFinishedSignal",
+		"name": "Task9InfrastructureRenamed",
+	}), "infrastructure rename")
+	_assert_permission(NodeOps.set_property({
+		"node_path": "/root/Task9Scene/FixtureControl",
+		"property": "visible",
+		"value": false,
+	}), "unlisted fixture set")
+
+	var created := NodeOps.create({
+		"parent_path": "/root/Task9Scene",
+		"type": "Node2D",
+		"name": "Task9Created",
+	})
+	_assert_true(created.get("ok", false), "created node is dedicated")
+	var created_path := String(created.get("result", {}).get("node_path", ""))
+	var moved := NodeOps.reparent({
+		"node_path": created_path,
+		"new_parent": "/root/Task9Scene/ProbeTarget",
+	})
+	_assert_true(moved.get("ok", false), "dedicated node can reparent")
+	var moved_back := NodeOps.reparent({
+		"node_path": "/root/Task9Scene/ProbeTarget/Task9Created",
+		"new_parent": "/root/Task9Scene",
+	})
+	_assert_true(moved_back.get("ok", false), "dedicated node can reparent back")
+	var removed := NodeOps.remove({"node_path": created_path})
+	_assert_true(removed.get("ok", false), "dedicated node can be removed")
+
+	scene.free()
+	print("=== Results: %d passed, %d failed ===" % [passed, failed])
+	quit(1 if failed > 0 else 0)
+
+func _assert_permission(result: Dictionary, context: String) -> void:
+	_assert_eq(result.get("code", ""), "permission_denied", context)
+
+func _assert_true(value: bool, context: String) -> void:
+	_assert_eq(value, true, context)
+
+func _assert_eq(actual: Variant, expected: Variant, context: String) -> void:
+	if actual == expected:
+		passed += 1
+	else:
+		failed += 1
+		print("FAIL: %s expected=%s actual=%s" % [context, expected, actual])
