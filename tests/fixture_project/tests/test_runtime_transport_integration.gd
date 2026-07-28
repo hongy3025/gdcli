@@ -72,18 +72,22 @@ func _write_inbox(root: String, probe_id: String, id: int, message: Dictionary) 
 func _write_outbox(root: String, probe_id: String, id: int, message: Dictionary) -> void:
 	_write_json(root.path_join(probe_id).path_join("outbox").path_join("%d.json" % id), message)
 
-func _receive_outbox(root: String, probe_id: String, id: int, broker: RefCounted) -> void:
+func _receive_outbox(root: String, probe_id: String, id: int, broker: RefCounted) -> bool:
 	var path := root.path_join(probe_id).path_join("outbox").path_join("%d.json" % id)
 	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return false
 	var reply: Variant = JSON.parse_string(file.get_as_text())
 	file.close()
 	DirAccess.remove_absolute(path)
-	if typeof(reply) == TYPE_DICTIONARY:
-		if typeof(reply.get("version")) == TYPE_FLOAT:
-			reply["version"] = int(reply.version)
-		if typeof(reply.get("id")) == TYPE_FLOAT:
-			reply["id"] = int(reply.id)
+	if typeof(reply) != TYPE_DICTIONARY:
+		return false
+	if typeof(reply.get("version")) == TYPE_FLOAT:
+		reply["version"] = int(reply.version)
+	if typeof(reply.get("id")) == TYPE_FLOAT:
+		reply["id"] = int(reply.id)
 	broker.receive(reply)
+	return true
 
 func _callback_counter() -> Dictionary:
 	return {"count": 0, "last": {}}
@@ -162,11 +166,11 @@ func test_reply_completes_once() -> void:
 		callback.last = reply
 	)
 	pair.probe.tick(Time.get_ticks_msec())
-	_receive_outbox(root, pair.probe.probe_id(), id, pair.broker)
+	pair.editor.tick(Time.get_ticks_msec())
 	assert_eq(callback.count, 1, "reply completes once")
 	assert_eq(pair.broker.status().pending, 0, "reply leaves broker pending zero")
 	_write_outbox(root, pair.probe.probe_id(), id, _reply(id, {"echo": id}))
-	_receive_outbox(root, pair.probe.probe_id(), id, pair.broker)
+	pair.editor.tick(Time.get_ticks_msec())
 	assert_eq(callback.count, 1, "duplicate reply ignored after completion")
 	_stop_pair(root, pair)
 
@@ -181,10 +185,10 @@ func test_unknown_and_duplicate_reply_are_ignored() -> void:
 	pair.editor.tick(Time.get_ticks_msec())
 	assert_eq(callback.count, 0, "unknown reply ignored")
 	pair.probe.tick(Time.get_ticks_msec())
-	_receive_outbox(root, pair.probe.probe_id(), id, pair.broker)
+	pair.editor.tick(Time.get_ticks_msec())
 	assert_eq(callback.count, 1, "known reply callback count")
 	_write_outbox(root, pair.probe.probe_id(), id, _reply(id))
-	_receive_outbox(root, pair.probe.probe_id(), id, pair.broker)
+	pair.editor.tick(Time.get_ticks_msec())
 	assert_eq(callback.count, 1, "duplicate reply ignored")
 	_stop_pair(root, pair)
 
@@ -218,13 +222,22 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 	)
 	broker.mark_connected()
 	broker._set_active_transport("engine_debugger")
+	assert_eq(broker.status().session_id, 7, "real broker session established")
+	assert_eq(broker.status().transport, "engine_debugger", "engine debugger priority before file hello")
+	if not broker.has_method("begin_generation"):
+		assert_true(false, "generation contract requires broker.begin_generation()")
+		broker = null
+		_cleanup(root)
+		return
+	var stale_generation: String = String(broker.call("begin_generation"))
+	var current_generation: String = String(broker.call("begin_generation"))
+	var session_id: int = int(broker.status().session_id)
 	var current_probe_id := "current123"
-	var current_generation := "generation-current"
 	_write_json(root.path_join(current_probe_id).path_join("hello.json"), Protocol.event(0, "hello", {
 		"protocol_version": Protocol.VERSION,
 		"transport": "file",
 		"generation": current_generation,
-		"session_id": "session-current",
+		"session_id": session_id,
 	}))
 	var editor: RefCounted = EditorTransport.new(root)
 	editor.setup(broker)
@@ -235,8 +248,8 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 	_write_json(root.path_join(stale_probe_id).path_join("hello.json"), Protocol.event(0, "hello", {
 		"protocol_version": Protocol.VERSION,
 		"transport": "file",
-		"generation": "generation-stale",
-		"session_id": "session-current",
+		"generation": stale_generation,
+		"session_id": session_id,
 	}))
 	editor.tick(Time.get_ticks_msec())
 	assert_eq(editor.active_probe_ids(), [current_probe_id], "stale generation rejected")
