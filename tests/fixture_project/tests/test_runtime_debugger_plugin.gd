@@ -27,6 +27,7 @@ func _init() -> void:
 	test_capture_hello_attaches_and_reply_reaches_broker()
 	test_stale_session_clear_does_not_detach_active_session()
 	test_malformed_hello_is_rejected_before_connecting()
+	test_hello_requires_generation_metadata()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
@@ -49,6 +50,10 @@ func _valid_hello() -> Dictionary:
 	return Protocol.event(0, "hello", {
 		"protocol_version": Protocol.VERSION,
 		"node": "behavioral-test",
+		"generation": "test-generation",
+		"pid": 1,
+		"started_at": 1.0,
+		"transport": "engine_debugger",
 	})
 
 func _attach_fake_session(bridge: RefCounted, broker: RefCounted, session_id: int) -> FakeSession:
@@ -87,7 +92,8 @@ func test_capture_hello_attaches_and_reply_reaches_broker() -> void:
 		received.append(reply)
 	)
 	assert_eq(session.sent.size(), 1, "request is sent through fake debugger session")
-	assert_true(bridge.capture("gdapi", [Protocol.reply(request_id, true, {"ready": true})], 17), "reply capture is handled")
+	var generation: String = String(broker.status().get("generation", ""))
+	assert_true(bridge.capture("gdapi", [Protocol.reply(request_id, true, {"ready": true}, "", "", generation)], 17), "reply capture is handled")
 	assert_eq(received.size(), 1, "reply reaches broker callback")
 	assert_eq(received[0].get("ok"), true, "broker receives successful reply")
 
@@ -127,3 +133,13 @@ func test_malformed_hello_is_rejected_before_connecting() -> void:
 	malformed_shape["id"] = "0"
 	assert_false(bridge.capture("gdapi", [malformed_shape], 31), "non-integer hello id is rejected")
 	assert_eq(broker.status().transport, "none", "malformed hello remains disconnected")
+
+func test_hello_requires_generation_metadata() -> void:
+	var bridge: RefCounted = DebuggerBridge.new()
+	var broker: RefCounted = Broker.new()
+	_attach_fake_session(bridge, broker, 37)
+	var incomplete := _valid_hello()
+	var result: Dictionary = incomplete["result"]
+	result.erase("transport")
+	assert_false(bridge.capture("gdapi", [incomplete], 37), "incomplete hello is rejected")
+	assert_eq(broker.status().transport, "none", "incomplete hello leaves broker disconnected")

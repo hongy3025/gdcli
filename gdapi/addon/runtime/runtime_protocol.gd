@@ -34,17 +34,20 @@ const DENIED_OPS := {
 ## @param op 路由名，如 "runtime/status"、"runtime/node/get"
 ## @param payload 业务字段字典；缺省或 null 都会被规范化为空字典
 ## @return 完整消息字典，可直接 JSON.stringify
-static func request(id: int, op: String, payload: Variant = null) -> Dictionary:
+static func request(id: int, op: String, payload: Variant = null, generation: String = "") -> Dictionary:
 	var normalized: Dictionary = {}
 	if typeof(payload) == TYPE_DICTIONARY:
 		normalized = payload
-	return {
+	var message := {
 		"version": VERSION,
 		"id": int(id),
 		"kind": "request",
 		"op": op,
 		"payload": normalized,
 	}
+	if not generation.is_empty():
+		message["generation"] = generation
+	return message
 
 ## 构造一个 protocol v1 reply 消息
 ##
@@ -54,7 +57,7 @@ static func request(id: int, op: String, payload: Variant = null) -> Dictionary:
 ## @param error 失败时携带的错误消息字符串（可选）
 ## @param code 失败时的稳定错误码（可选）
 ## @return 完整消息字典
-static func reply(id: int, ok: bool, result: Variant = null, error: String = "", code: String = "") -> Dictionary:
+static func reply(id: int, ok: bool, result: Variant = null, error: String = "", code: String = "", generation: String = "") -> Dictionary:
 	var message: Dictionary = {
 		"version": VERSION,
 		"id": int(id),
@@ -68,6 +71,8 @@ static func reply(id: int, ok: bool, result: Variant = null, error: String = "",
 		message["error"] = error
 		if code != "":
 			message["code"] = code
+	if not generation.is_empty():
+		message["generation"] = generation
 	return message
 
 ## 构造一个 protocol v1 event 消息（服务端主动推送，无需应答）
@@ -106,12 +111,17 @@ static func validate_message(value: Variant) -> Dictionary:
 	if typeof(raw_id) != TYPE_INT:
 		return _error("invalid_param", "runtime message id must be an integer")
 	var id_int: int = int(raw_id)
-	if id_int < 1:
-		return _error("invalid_param", "runtime message id must be a positive integer")
 
 	var kind: String = String(dict.get("kind", ""))
 	if kind != "request" and kind != "reply" and kind != "event":
 		return _error("invalid_param", "runtime message kind is invalid")
+	var generation: Variant = dict.get("generation", null)
+	if generation != null and typeof(generation) != TYPE_STRING:
+		return _error("invalid_param", "runtime message generation must be a string")
+	if kind != "event" and id_int < 1:
+		return _error("invalid_param", "runtime message id must be a positive integer")
+	if kind == "event" and id_int < 0:
+		return _error("invalid_param", "runtime event id must not be negative")
 
 	if kind == "request":
 		var op: String = String(dict.get("op", ""))

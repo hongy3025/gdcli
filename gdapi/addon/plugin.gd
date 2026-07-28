@@ -85,6 +85,9 @@ func _enter_tree() -> void:
 
 	# M3：创建并注册 runtime broker 和 EditorDebuggerPlugin
 	_runtime_broker = RuntimeBroker.new()
+	# 建立 editor 生命周期的首个 generation；project/run 会在 begin_connect()
+	# 时切换到下一代并再次清理 runtime root。
+	_runtime_broker.begin_generation()
 	Engine.set_meta("gdapi_runtime_broker", _runtime_broker)
 	# 4.7: add_debugger_plugin 需要 EditorDebuggerPlugin 实例(不是 Script)。
 	# 传入已实例化的对象才能让 _setup_session / _capture 被编辑器调度。
@@ -130,6 +133,7 @@ func _exit_tree() -> void:
 	# M3.1: 停止文件 transport manager,把 pending 同步失败回 callback
 	if _runtime_file_transport != null:
 		_runtime_file_transport.stop_all("plugin exiting")
+		_runtime_file_transport.cleanup_root()
 	# M3：先暂停运行期 broker、所有 pending 会立即被失败 callback
 	if _runtime_broker != null:
 		_runtime_broker.detach("plugin exiting")

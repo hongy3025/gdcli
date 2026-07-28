@@ -13,6 +13,7 @@ extends SceneTree
 
 const Transport := preload("res://addons/gdapi/runtime/runtime_transport_file_editor.gd")
 const Broker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
+const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
 var passed := 0
 var failed := 0
@@ -26,6 +27,11 @@ func _init() -> void:
 	test_unknown_outbox_reply_is_deleted_without_callback()
 	test_malformed_outbox_reply_preserves_live_broker_pending_request()
 	test_invalid_outbox_reply_preserves_live_broker_pending_request()
+	test_stale_hello_is_removed_and_current_hello_attaches()
+	test_hello_requires_generation_metadata()
+	test_disappeared_hello_detaches_probe()
+	test_stale_outbox_reply_cannot_complete_current_request()
+	test_stop_all_recursively_removes_probe_files()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	if failed > 0:
@@ -70,7 +76,8 @@ func _seed_probe(root: String, probe_id: String) -> void:
 	var f := FileAccess.open(hello_path, FileAccess.WRITE)
 	f.store_string(JSON.stringify({
 		"version": 1, "id": 0, "kind": "event",
-		"event": "hello", "result": {"protocol_version": 1, "transport": "file"}
+		"event": "hello", "result": {"protocol_version": 1, "generation": "seed-generation",
+			"pid": 1, "started_at": 1.0, "transport": "file"}
 	}))
 	f.close()
 
@@ -113,7 +120,7 @@ func test_broker_request_writes_inbox_and_outbox_reply_reaches_broker() -> void:
 	var of := FileAccess.open(outbox_file, FileAccess.WRITE)
 	of.store_string(JSON.stringify({
 		"version": 1, "id": id, "kind": "reply",
-		"ok": true, "result": {"echo": id}
+		"ok": true, "result": {"echo": id}, "generation": "seed-generation"
 	}))
 	of.close()
 	t.tick(Time.get_ticks_msec())
@@ -145,6 +152,7 @@ func test_unknown_outbox_reply_is_deleted_without_callback() -> void:
 func test_invalid_outbox_reply_preserves_live_broker_pending_request() -> void:
 	var root := _make_root()
 	_cleanup(root)
+
 	DirAccess.make_dir_recursive_absolute(root)
 	_seed_probe(root, "probe_bad")
 	var broker := Broker.new()
@@ -188,4 +196,111 @@ func test_malformed_outbox_reply_preserves_live_broker_pending_request() -> void
 	assert_true(not FileAccess.file_exists(outbox_file), "malformed outbox file deleted")
 	assert_eq(callbacks.size(), 0, "malformed reply does not invoke callback")
 	assert_eq(broker.status().pending, 1, "malformed reply preserves broker pending request")
+	_cleanup(root)
+
+func _write_json(path: String, value: Dictionary) -> void:
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(JSON.stringify(value))
+	f.close()
+
+func _hello(generation: String) -> Dictionary:
+	return {
+		"version": 1, "id": 0, "kind": "event", "event": "hello",
+		"result": {"protocol_version": 1, "generation": generation, "pid": 1,
+			"started_at": 1.0, "transport": "file"},
+	}
+
+func test_stale_hello_is_removed_and_current_hello_attaches() -> void:
+	var root := _make_root()
+	_cleanup(root)
+	var broker: RefCounted = Broker.new()
+	var stale: String = String(broker.begin_generation())
+	var current: String = String(broker.begin_generation())
+	_write_json(root.path_join("stale/hello.json"), _hello(stale))
+	_write_json(root.path_join("current/hello.json"), _hello(current))
+	var t := Transport.new(root)
+	t.setup(broker)
+	t.start()
+	t.tick(Time.get_ticks_msec())
+	assert_eq(t.active_probe_ids(), ["current"], "only current hello attaches")
+	assert_true(not FileAccess.file_exists(root.path_join("stale/hello.json")),
+		"stale hello is removed")
+	t.stop_all("test cleanup")
+	_cleanup(root)
+
+func test_hello_requires_generation_metadata() -> void:
+	var root := _make_root()
+	_cleanup(root)
+	var broker: RefCounted = Broker.new()
+	var generation: String = String(broker.begin_generation())
+	var hello := Protocol.event(0, "hello", {
+		"protocol_version": Protocol.VERSION,
+		"generation": generation,
+	})
+	_write_json(root.path_join("incomplete/hello.json"), hello)
+	var t := Transport.new(root)
+	t.setup(broker)
+	t.start()
+	t.tick(Time.get_ticks_msec())
+	assert_eq(t.active_probe_ids().size(), 0, "incomplete hello is rejected")
+	assert_true(not FileAccess.file_exists(root.path_join("incomplete/hello.json")),
+		"incomplete hello is removed")
+	t.stop_all("test cleanup")
+	_cleanup(root)
+
+func test_disappeared_hello_detaches_probe() -> void:
+	var root := _make_root()
+	_cleanup(root)
+	var broker: RefCounted = Broker.new()
+	var generation: String = String(broker.begin_generation())
+	_write_json(root.path_join("probe/hello.json"), _hello(generation))
+	var t := Transport.new(root)
+	t.setup(broker)
+	t.start()
+	t.tick(Time.get_ticks_msec())
+	assert_eq(t.active_probe_ids(), ["probe"], "probe attached before disappearance")
+	DirAccess.remove_absolute(root.path_join("probe/hello.json"))
+	t.tick(Time.get_ticks_msec())
+	assert_eq(t.active_probe_ids().size(), 0, "missing hello detaches probe")
+	assert_eq(broker.status().state, "stopped", "missing hello stops broker")
+	t.stop_all("test cleanup")
+	_cleanup(root)
+
+func test_stale_outbox_reply_cannot_complete_current_request() -> void:
+	var root := _make_root()
+	_cleanup(root)
+	var broker: RefCounted = Broker.new()
+	var stale: String = String(broker.begin_generation())
+	var current: String = String(broker.begin_generation())
+	_write_json(root.path_join("probe/hello.json"), _hello(current))
+	var t := Transport.new(root)
+	t.setup(broker)
+	t.start()
+	t.tick(Time.get_ticks_msec())
+	var received: Array = []
+	var id: int = broker.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply))
+	assert_eq(received.size(), 0, "current request remains pending before reply")
+	assert_eq(broker.status().pending, 1, "current request enters pending")
+	_write_json(root.path_join("probe/outbox/%d.json" % id),
+		Protocol.reply(id, true, {"stale": true}, "", "", stale))
+	t.tick(Time.get_ticks_msec())
+	assert_eq(received.size(), 0, "stale outbox does not complete request")
+	assert_eq(broker.status().pending, 1, "stale outbox leaves pending")
+	t.stop_all("test cleanup")
+	_cleanup(root)
+
+func test_stop_all_recursively_removes_probe_files() -> void:
+	var root := _make_root()
+	_cleanup(root)
+	var broker: RefCounted = Broker.new()
+	var t := Transport.new(root)
+	t.setup(broker)
+	t.start()
+	_write_json(root.path_join("probe/hello.json"), _hello(broker.begin_generation()))
+	_write_json(root.path_join("probe/inbox/1.json"), {"stale": true})
+	_write_json(root.path_join("probe/outbox/2.json"), {"stale": true})
+	t.stop_all("test cleanup")
+	assert_true(not DirAccess.dir_exists_absolute(root), "stop removes runtime root")
 	_cleanup(root)

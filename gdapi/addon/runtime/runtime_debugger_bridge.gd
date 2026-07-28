@@ -41,7 +41,8 @@ func capture(message: String, data: Array, session_id: int) -> bool:
 	if String(dict.get("event", "")) == "hello":
 		if not _valid_hello(dict):
 			return false
-		if not _attach_to_session(session_id):
+		var hello_result: Dictionary = dict.get("result", {})
+		if not _attach_to_session(session_id, String(hello_result.get("generation", ""))):
 			return false
 		_active_session_id = session_id
 		_broker.mark_connected()
@@ -80,9 +81,24 @@ func _valid_hello(payload: Dictionary) -> bool:
 		return false
 	if typeof(result.get("protocol_version")) != TYPE_INT:
 		return false
+	if result.has("generation") and typeof(result.get("generation")) != TYPE_STRING:
+		return false
+	if not result.has("generation") or String(result.get("generation", "")).is_empty():
+		return false
+	var raw_pid: Variant = result.get("pid", null)
+	if typeof(raw_pid) != TYPE_INT or int(raw_pid) <= 0:
+		return false
+	var raw_started_at: Variant = result.get("started_at", null)
+	if typeof(raw_started_at) != TYPE_INT and typeof(raw_started_at) != TYPE_FLOAT:
+		return false
+	if float(raw_started_at) <= 0.0:
+		return false
+	var transport := String(result.get("transport", ""))
+	if transport != "file" and transport != "engine_debugger":
+		return false
 	return int(result.get("protocol_version")) == Protocol.VERSION
 
-func _attach_to_session(session_id: int) -> bool:
+func _attach_to_session(session_id: int, generation: String = "") -> bool:
 	if not _sessions.has(session_id):
 		return false
 	var session: RefCounted = _lookup_session_value(session_id)
@@ -90,8 +106,7 @@ func _attach_to_session(session_id: int) -> bool:
 		return false
 	var send := func(message: Dictionary) -> bool:
 		return _send_to_session(session_id, message)
-	_broker.attach(session_id, send)
-	return true
+	return bool(_broker.attach(session_id, send, generation))
 
 func _lookup_session_value(session_id: int) -> RefCounted:
 	var cached: Variant = _sessions.get(session_id, null)

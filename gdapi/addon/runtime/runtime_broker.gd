@@ -39,6 +39,11 @@ var _session_started_at: float = 0.0
 ## file transport 在 editor 侧 attach_file_transport() 调用后置为 "file"。
 ## 当前 file transport probe_id
 var _file_probe_id: String = ""
+## 当前运行世代；空字符串表示 legacy v1 测试/会话尚未协商世代。
+var _generation: String = ""
+var _file_generation: String = ""
+var _engine_generation: String = ""
+var _last_attach_accepted: bool = true
 
 ## 当前 file transport send callable
 var _file_sender: Callable = Callable()
@@ -65,35 +70,63 @@ func status() -> Dictionary:
 		"broker_registered": Engine.has_meta("gdapi_runtime_broker"),
 		"session_started_at": _session_started_at,
 		"transport": _active_transport,
+		"generation": _generation,
 	}
 ## 在切换 session（先 detach 再 attach）或第一次拉起游戏之前调用；
 ## 本方法会先把已有 pending 清掉再绑定新 session，避免悬挂。
 ##
 ## @param session_id EditorDebuggerSession.session_id
 ## @param send transport 注入的发送可调用对象（接收 Dictionary 返回 bool）
-func attach(session_id: int, send: Callable) -> void:
+func attach(session_id: int, send: Callable, generation: String = "") -> bool:
+	if not _accept_generation(generation):
+		_last_attach_accepted = false
+		return false
+	_last_attach_accepted = true
 	_prepare_new_session("previous session replaced")
 	_session_id = session_id
 	_engine_sender = send
+	_engine_generation = generation
 	_engine_connected = false
 	_sender = send
 	_state = "connecting"
 	if _session_started_at <= 0.0:
 		_session_started_at = Time.get_unix_time_from_system()
+	return true
 
 ## 把 broker 标记为 connecting 而不绑定 session
 ##
 ## 用于 project/run 已经发起但 debugger plugin 尚未回调之前；后续
 ## attach() 会刷新状态。
-func begin_connect() -> void:
+func begin_connect(generation: String = "") -> String:
+	if generation.is_empty():
+		generation = begin_generation()
+	elif _generation.is_empty():
+		_generation = generation
+		_write_generation_marker()
+	elif _generation != generation:
+		return _generation
 	if _state != "connected":
 		_state = "connecting"
+	return _generation
+
+## 开始新的运行世代，并原子地失效旧 transport/pending。
+## 返回值会同时被 editor 与 probe 写入 hello/request metadata。
+func begin_generation() -> String:
+	_fail_pending("runtime generation replaced")
+	_clear_transports()
+	cleanup_runtime_root()
+	_generation = "%d-%d-%d" % [OS.get_process_id(), Time.get_ticks_usec(), randi()]
+	_state = "stopped"
+	_write_generation_marker()
+	return _generation
 
 ## 把 broker 标记为 connected（probe hello 已到达）
 ##
 ## 由 runtime debugger plugin 在收到 hello 事件时调用；
 ## 仅在状态机处于 connecting 时才推进到 connected。
 func mark_connected() -> void:
+	if not _last_attach_accepted:
+		return
 	if _state == "connecting":
 		_state = "connected"
 	_engine_connected = true
@@ -105,9 +138,12 @@ func mark_connected() -> void:
 ##
 ## @param probe_id probe 标识(全局唯一 hex)
 ## @param send file transport 注入的发送 callable
-func attach_file_transport(probe_id: String, send: Callable, _generation: String = "") -> void:
+func attach_file_transport(probe_id: String, send: Callable, generation: String = "") -> bool:
+	if not _accept_generation(generation):
+		return false
 	_file_probe_id = probe_id
 	_file_sender = send
+	_file_generation = generation
 	_file_connected = true
 	if not _engine_connected and _state == "stopped":
 		_state = "connecting"
@@ -118,17 +154,21 @@ func attach_file_transport(probe_id: String, send: Callable, _generation: String
 	_select_transport_sender()
 	if _session_started_at <= 0.0:
 		_session_started_at = Time.get_unix_time_from_system()
+	return true
 
 ## detach file transport(editor 侧主动关闭时调用)
 ##
 ## 仅在当前活跃 transport 是 file 时清空 file 状态。
 ##
 ## @param reason 人类可读的关闭原因
-func detach_file_transport(reason: String = "file transport detached", _generation: String = "") -> void:
+func detach_file_transport(reason: String = "file transport detached", generation: String = "") -> void:
+	if not generation.is_empty() and generation != _file_generation:
+		return
 	var was_file_active: bool = _active_transport == "file"
 	_file_probe_id = ""
 	_file_sender = Callable()
 	_file_connected = false
+	_file_generation = ""
 	_select_transport_sender()
 	if was_file_active:
 		detach(reason)
@@ -137,11 +177,14 @@ func detach_file_transport(reason: String = "file transport detached", _generati
 ##
 ## 保留仍然有效的 file sender 作为 fallback；只有两个 transport 都不可用时
 ## 才一次性失败 pending。
-func detach_engine_debugger(reason: String = "engine debugger detached", _generation: String = "") -> void:
+func detach_engine_debugger(reason: String = "engine debugger detached", generation: String = "") -> void:
+	if not generation.is_empty() and generation != _engine_generation:
+		return
 	if not _engine_connected and _engine_sender.is_null():
 		return
 	_engine_sender = Callable()
 	_engine_connected = false
+	_engine_generation = ""
 	_select_transport_sender()
 	if _file_connected and not _file_sender.is_null():
 		_session_id = _file_probe_id.to_int() if _file_probe_id.is_valid_int() else -1
@@ -192,6 +235,59 @@ func _select_transport_sender() -> void:
 	_sender = Callable()
 	_active_transport = "none"
 
+func _accept_generation(incoming: String) -> bool:
+	if incoming.is_empty():
+		return _generation.is_empty()
+	if _generation.is_empty():
+		_generation = incoming
+		_write_generation_marker()
+	return incoming == _generation
+
+func _clear_transports() -> void:
+	_session_id = -1
+	_sender = Callable()
+	_engine_sender = Callable()
+	_engine_connected = false
+	_engine_generation = ""
+	_file_sender = Callable()
+	_file_connected = false
+	_file_generation = ""
+	_file_probe_id = ""
+	_active_transport = "none"
+	_state = "stopped"
+	_last_attach_accepted = true
+
+## 清理仅由 gdapi runtime 使用的 root；不会接受任意调用方路径。
+func cleanup_runtime_root() -> void:
+	var root := ProjectSettings.globalize_path("res://.godot/gdapi_runtime").simplify_path()
+	if not root.ends_with(".godot/gdapi_runtime"):
+		return
+	_remove_runtime_tree(root, root)
+
+func _remove_runtime_tree(path: String, root: String) -> void:
+	if path != root and not path.begins_with(root + "/") and not path.begins_with(root + "\\"):
+		return
+	var dir := DirAccess.open(path)
+	if dir != null:
+		for file_name in dir.get_files():
+			var file_path := path.path_join(file_name)
+			if file_path.begins_with(root + "/") or file_path.begins_with(root + "\\"):
+				DirAccess.remove_absolute(file_path)
+		for dir_name in dir.get_directories():
+			_remove_runtime_tree(path.path_join(dir_name), root)
+	DirAccess.remove_absolute(path)
+
+func _write_generation_marker() -> void:
+	var root := ProjectSettings.globalize_path("res://.godot/gdapi_runtime").simplify_path()
+	if not root.ends_with(".godot/gdapi_runtime") or _generation.is_empty():
+		return
+	DirAccess.make_dir_recursive_absolute(root)
+	var f := FileAccess.open(root.path_join("generation.json"), FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify({"generation": _generation}))
+	f.close()
+
 
 ## 主动断开当前会话,清理所有 pending
 ##
@@ -200,15 +296,8 @@ func detach(reason: String = "runtime detached") -> void:
 	if _state == "stopped" and _pending.is_empty():
 		return
 	_fail_pending(reason)
-	_session_id = -1
-	_sender = Callable()
-	_engine_sender = Callable()
-	_engine_connected = false
-	_file_sender = Callable()
-	_file_connected = false
-	_file_probe_id = ""
-	_active_transport = "none"
-	_state = "stopped"
+	_clear_transports()
+	cleanup_runtime_root()
 
 func _fail_pending(reason: String) -> void:
 	var snapshot: Array = []
@@ -249,7 +338,7 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 			})
 		return id
 	var safe_payload: Dictionary = payload
-	var message: Dictionary = Protocol.request(id, op, safe_payload)
+	var message: Dictionary = Protocol.request(id, op, safe_payload, _generation)
 	var verdict: Dictionary = Protocol.validate_message(message)
 	if not bool(verdict.get("ok", false)):
 		if on_complete.is_valid():
@@ -266,6 +355,7 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 		"deadline_msec": deadline_msec,
 		"callback": on_complete,
 		"op": op,
+		"generation": _generation,
 	}
 	if _state == "connecting":
 		_state = "connected"
@@ -283,6 +373,9 @@ func receive(message: Variant) -> void:
 	if not bool(verdict.get("ok", false)):
 		return
 	var dict: Dictionary = message
+	var message_generation := String(dict.get("generation", ""))
+	if not _generation.is_empty() and message_generation != _generation:
+		return
 	var kind: String = String(dict.get("kind", ""))
 	if kind != "reply":
 		# event 由 transport 决定怎么呈现，这里先接受但不回调 request。
@@ -294,6 +387,8 @@ func receive(message: Variant) -> void:
 	if not _pending.has(id):
 		return
 	var entry: Dictionary = _pending[id]
+	if String(entry.get("generation", "")) != message_generation:
+		return
 	_pending.erase(id)
 	var cb: Callable = entry.callback
 	if cb.is_valid():

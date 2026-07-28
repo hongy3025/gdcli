@@ -101,6 +101,10 @@ func _on_runtime_capture(_channel: String, args: Array) -> bool:
 	var request_msg: Dictionary = raw
 	if String(request_msg.get("kind", "")) != "request":
 		return false
+	if _file_transport != null:
+		var request_generation := String(request_msg.get("generation", ""))
+		if not request_generation.is_empty() and request_generation != String(_file_transport.generation()):
+			return false
 	_dispatch(request_msg)
 	return true
 
@@ -115,7 +119,7 @@ func _dispatch(request_msg: Dictionary) -> void:
 	var payload: Dictionary = request_msg.get("payload", {})
 	var reply: Dictionary = await _dispatch_async(op, payload)
 	var ok: bool = bool(reply.get("ok", false))
-	var message: Dictionary = Protocol.reply(id, ok, reply.get("result", {}), String(reply.get("error", "")), String(reply.get("code", "")))
+	var message: Dictionary = Protocol.reply(id, ok, reply.get("result", {}), String(reply.get("error", "")), String(reply.get("code", "")), String(request_msg.get("generation", "")))
 	_send_message(message)
 
 ## 把 op 转成对应 reply
@@ -266,7 +270,11 @@ func _send_hello() -> void:
 	var hello: Dictionary = Protocol.event(0, "hello", {
 		"protocol_version": Protocol.VERSION,
 		"node": OS.get_processor_name(),
+		"generation": String(_file_transport.generation()) if _file_transport != null else "",
+		"pid": OS.get_process_id(),
+		"started_at": Time.get_unix_time_from_system(),
 	})
+	hello["result"]["transport"] = "engine_debugger"
 	_send_message(hello)
 
 ## Wire 发送:把 reply / event 通过 EngineDebugger 推到 editor

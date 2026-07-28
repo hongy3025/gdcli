@@ -26,6 +26,8 @@ var root_dir_override: String = ""
 
 ## 唯一 probe_id,start() 时生成
 var _probe_id: String = ""
+## 运行世代；优先读取 editor 在 runtime root 写入的 marker。
+var _generation: String = ""
 
 ## 是否已 start
 var _started: bool = false
@@ -58,6 +60,9 @@ func probe_id() -> String:
 		_probe_id = _generate_probe_id()
 	return _probe_id
 
+func generation() -> String:
+	return _generation
+
 ## 返回根目录绝对路径
 func root_path() -> String:
 	if not root_dir_override.is_empty():
@@ -74,6 +79,9 @@ func start() -> void:
 		return
 	if _probe_id.is_empty():
 		_probe_id = _generate_probe_id()
+	_generation = _read_generation_marker()
+	if _generation.is_empty():
+		_generation = "%d-%d-%d" % [OS.get_process_id(), Time.get_ticks_usec(), randi()]
 	var dir := root_path().path_join(_probe_id)
 	DirAccess.make_dir_recursive_absolute(dir.path_join("inbox"))
 	DirAccess.make_dir_recursive_absolute(dir.path_join("outbox"))
@@ -88,10 +96,12 @@ func stop() -> void:
 	if not _started:
 		return
 	_started = false
+	_hello_sent = false
+	_hello_due_msec = 0
 	_inflight.clear()
 	_claimed.clear()
 	var dir := root_path().path_join(_probe_id)
-	DirAccess.remove_absolute(dir)
+	_remove_tree(dir, root_path())
 
 ## 每帧调用:处理 hello 推迟、inbox 扫描
 func tick(now_msec: int) -> void:
@@ -109,6 +119,9 @@ func _write_hello_file() -> void:
 	var hello := Protocol.event(0, "hello", {
 		"protocol_version": Protocol.VERSION,
 		"node": OS.get_processor_name(),
+		"generation": _generation,
+		"pid": OS.get_process_id(),
+		"started_at": Time.get_unix_time_from_system(),
 		"transport": "file",
 	})
 	var path := root_path().path_join(_probe_id).path_join("hello.json")
@@ -128,10 +141,17 @@ func _scan_inbox(_now_msec: int) -> void:
 			continue
 		var raw := f.get_as_text()
 		f.close()
-		var dict: Dictionary = JSON.parse_string(raw) if not raw.is_empty() else {}
-		if typeof(dict) != TYPE_DICTIONARY:
+		var parsed: Variant = {}
+		if not raw.is_empty():
+			var parser := JSON.new()
+			if parser.parse(raw) != OK:
+				inbox.remove(filename)
+				continue
+			parsed = parser.data
+		if typeof(parsed) != TYPE_DICTIONARY:
 			inbox.remove(filename)
 			continue
+		var dict: Dictionary = parsed
 		# JSON.parse_string 会把所有数字恢复为 float,Protocol 要求 integer id。
 		# 把 id / version 显式转型为 int 避免 validate_message 误判。
 		if typeof(dict.get("version")) == TYPE_FLOAT:
@@ -145,8 +165,12 @@ func _scan_inbox(_now_msec: int) -> void:
 		if String(dict.get("kind", "")) != "request":
 			inbox.remove(filename)
 			continue
+		var request_generation := String(dict.get("generation", ""))
+		if not request_generation.is_empty() and request_generation != _generation:
+			inbox.remove(filename)
+			continue
 		var id: int = int(dict.id)
-		if not _claim_inbox(id):
+		if not _claim_inbox(id, request_generation):
 			inbox.remove(filename)
 			continue
 		# 删除 inbox 防止重复消费；领取后异步处理只拥有内存中的 request。
@@ -157,11 +181,14 @@ func _scan_inbox(_now_msec: int) -> void:
 		_start_request(id, dict)
 
 ## 原子领取 request id；同一 id 的后续 inbox 文件只会被删除，不会再次分派。
-func _claim_inbox(id: int) -> bool:
+func _claim_inbox(id: int, generation: String = "") -> bool:
 	if _claimed.has(id):
 		return false
 	_claimed[id] = true
-	_inflight[id] = {"deadline_msec": Time.get_ticks_msec() + _handler_timeout()}
+	_inflight[id] = {
+		"deadline_msec": Time.get_ticks_msec() + _handler_timeout(),
+		"generation": generation,
+	}
 	return true
 
 func _handler_timeout() -> int:
@@ -184,7 +211,8 @@ func _expire_inflight(now_msec: int) -> void:
 		var state: Dictionary = _inflight[id]
 		if state.has("reply") or now_msec < int(state.get("deadline_msec", now_msec + 1)):
 			continue
-		state["reply"] = _error_reply(id, "timeout", "runtime handler timed out")
+		state["reply"] = _error_reply(id, "timeout", "runtime handler timed out",
+			String(state.get("generation", "")))
 		_inflight[id] = state
 
 ## 启动一个独立 request 协程。同步 handler 会在本调用内完成；
@@ -199,7 +227,7 @@ func _start_request(id: int, message: Dictionary) -> void:
 func _finish_request(id: int, handler_reply: Variant) -> void:
 	if not _inflight.has(id):
 		return
-	var reply: Dictionary = _make_reply(id, handler_reply)
+	var reply: Dictionary = _make_reply(id, handler_reply, String(_inflight[id].get("generation", "")))
 	var state: Dictionary = _inflight[id]
 	state["reply"] = reply
 	_inflight[id] = state
@@ -211,22 +239,22 @@ func _write_reply(id: int, reply: Dictionary) -> bool:
 	return _atomic_write(out_path, JSON.stringify(reply))
 
 ## 把 handler body 转为一个已验证且有界的 protocol reply。
-func _make_reply(id: int, handler_reply: Variant) -> Dictionary:
+func _make_reply(id: int, handler_reply: Variant, generation: String = "") -> Dictionary:
 	if typeof(handler_reply) != TYPE_DICTIONARY:
-		return _error_reply(id, "invalid_param", "runtime handler returned an invalid reply")
+		return _error_reply(id, "invalid_param", "runtime handler returned an invalid reply", generation)
 	var reply_body: Dictionary = handler_reply
 	if typeof(reply_body.get("ok", null)) != TYPE_BOOL:
-		return _error_reply(id, "invalid_param", "runtime handler reply must contain boolean ok")
+		return _error_reply(id, "invalid_param", "runtime handler reply must contain boolean ok", generation)
 	var reply := Protocol.reply(id, bool(reply_body.ok), reply_body.get("result", null),
-		String(reply_body.get("error", "")), String(reply_body.get("code", "")))
+		String(reply_body.get("error", "")), String(reply_body.get("code", "")), generation)
 	var verdict: Dictionary = Protocol.validate_message(reply)
 	if not bool(verdict.get("ok", false)):
 		return _error_reply(id, String(verdict.get("code", "invalid_param")),
-			"runtime handler reply is invalid: %s" % String(verdict.get("error", "invalid reply")))
+			"runtime handler reply is invalid: %s" % String(verdict.get("error", "invalid reply")), generation)
 	return reply
 
-func _error_reply(id: int, code: String, error: String) -> Dictionary:
-	return Protocol.reply(id, false, null, error, code)
+func _error_reply(id: int, code: String, error: String, generation: String = "") -> Dictionary:
+	return Protocol.reply(id, false, null, error, code, generation)
 
 ## 私有:分派 request 到已注册 handler,或返回 not_supported
 func _dispatch_request(req: Dictionary) -> Variant:
@@ -257,3 +285,28 @@ func _generate_probe_id() -> String:
 	for i in 8:
 		out += hex[rng.randi() % 16]
 	return out
+
+func _read_generation_marker() -> String:
+	var path := root_path().path_join("generation.json")
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return ""
+	var raw: Variant = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(raw) != TYPE_DICTIONARY:
+		return ""
+	var generation: Variant = raw.get("generation", "")
+	return String(generation) if typeof(generation) == TYPE_STRING else ""
+
+func _remove_tree(path: String, root: String) -> void:
+	if path != root and not path.begins_with(root + "/") and not path.begins_with(root + "\\"):
+		return
+	var dir := DirAccess.open(path)
+	if dir != null:
+		for file_name in dir.get_files():
+			var file_path := path.path_join(file_name)
+			if file_path.begins_with(root + "/") or file_path.begins_with(root + "\\"):
+				DirAccess.remove_absolute(file_path)
+		for dir_name in dir.get_directories():
+			_remove_tree(path.path_join(dir_name), root)
+	DirAccess.remove_absolute(path)

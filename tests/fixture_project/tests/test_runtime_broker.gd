@@ -39,6 +39,9 @@ func _init() -> void:
 	test_both_transports_detach_fail_pending_once()
 	test_set_active_transport_keeps_priority_selection()
 	test_detach_file_transport_returns_to_none()
+	test_begin_generation_replaces_pending_and_binds_requests()
+	test_stale_generation_reply_is_ignored()
+	test_stale_transport_generation_cannot_attach()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	if failed > 0:
@@ -309,3 +312,47 @@ func test_detach_file_transport_returns_to_none() -> void:
 	# 重复 detach 是 no-op,不应抛错
 	b.detach_file_transport("again")
 	assert_eq(b.status().state, "stopped", "still stopped")
+
+func test_begin_generation_replaces_pending_and_binds_requests() -> void:
+	var b: RefCounted = Broker.new()
+	var received: Array = []
+	b.attach(7, _make_send())
+	b.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply))
+	var generation_a: String = b.begin_generation()
+	var generation_b: String = b.begin_generation()
+	assert_true(not generation_a.is_empty(), "generation is non-empty")
+	assert_true(generation_a != generation_b, "generations are unique")
+	assert_eq(received.size(), 1, "restart fails old pending exactly once")
+	assert_eq(b.status().pending, 0, "restart clears pending")
+	b.attach(7, _make_send(), generation_b)
+	b.begin_connect(generation_b)
+	b.request("runtime/status", {}, 5000, func(_reply: Dictionary) -> void: pass)
+	assert_eq(sent.back().get("generation"), generation_b, "request binds current generation")
+	assert_eq(b.status().generation, generation_b, "status exposes current generation")
+
+func test_stale_generation_reply_is_ignored() -> void:
+	var b: RefCounted = Broker.new()
+	var generation_a: String = b.begin_generation()
+	var generation_b: String = b.begin_generation()
+	b.begin_connect(generation_b)
+	var received: Array = []
+	var id: int = b.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply))
+	b.receive(Protocol.reply(id, true, {"stale": true}, "", "", generation_a))
+	assert_eq(received.size(), 0, "stale reply does not complete request")
+	assert_eq(b.status().pending, 1, "stale reply leaves current pending")
+	b.receive(Protocol.reply(id, true, {"current": true}, "", "", generation_b))
+	assert_eq(received.size(), 1, "current reply completes request")
+	assert_eq(received[0].get("generation"), generation_b, "current reply reaches callback")
+
+func test_stale_transport_generation_cannot_attach() -> void:
+	var b: RefCounted = Broker.new()
+	var generation_a: String = b.begin_generation()
+	var generation_b: String = b.begin_generation()
+	assert_false(b.attach_file_transport("stale", _make_send(), generation_a),
+		"stale file hello is rejected")
+	assert_eq(b.status().transport, "none", "stale hello does not connect")
+	assert_true(b.attach_file_transport("current", _make_send(), generation_b),
+		"current file hello attaches")
+	assert_eq(b.status().transport, "file", "current hello connects")

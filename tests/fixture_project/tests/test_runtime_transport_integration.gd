@@ -236,12 +236,21 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 		return
 	var stale_generation: String = String(broker.call("begin_generation"))
 	var current_generation: String = String(broker.call("begin_generation"))
+	# begin_generation intentionally detaches the previous transport; bind the
+	# current debugger session to the new generation before testing priority.
+	broker.attach(7, func(message: Dictionary) -> bool:
+		engine_sent.append(message)
+		return true
+	, current_generation)
+	broker.mark_connected()
 	var session_id: int = int(broker.status().session_id)
 	var current_probe_id := "current123"
 	_write_json(root.path_join(current_probe_id).path_join("hello.json"), Protocol.event(0, "hello", {
 		"protocol_version": Protocol.VERSION,
 		"transport": "file",
 		"generation": current_generation,
+		"pid": 1,
+		"started_at": 1.0,
 		"session_id": session_id,
 	}))
 	var editor: RefCounted = EditorTransport.new(root)
@@ -254,6 +263,8 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 		"protocol_version": Protocol.VERSION,
 		"transport": "file",
 		"generation": stale_generation,
+		"pid": 1,
+		"started_at": 1.0,
 		"session_id": session_id,
 	}))
 	editor.tick(Time.get_ticks_msec())
