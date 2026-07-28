@@ -90,7 +90,7 @@
 - Consumes: `broker.request(op, payload, timeout_ms, callback)` as the only request entry point.
 - Produces: broker methods `attach_file_transport(probe_id, send, generation)`, `detach_file_transport(reason, generation)`, `set_transport_connected(name, connected, generation)`, and transport `send(message) -> bool`; `_scan_outbox()` calls `broker.receive(reply)` after deleting a valid file.
 
-- [ ] **Step 1: Add RED assertions.** Assert `GdApiRuntimeTransportFileEditor.pending_count()` is absent from the business path, a broker request writes `inbox/<broker id>.json`, an outbox reply invokes the broker callback, pending returns to zero, and unknown/duplicate replies do not invoke any callback.
+- [ ] **Step 1: Add RED assertions.** Assert the editor file transport exposes no business `request`, `pending_count`, or local timeout path; a broker request writes `inbox/<broker id>.json`, an outbox reply invokes the broker callback, pending returns to zero, and unknown/duplicate/malformed replies do not invoke any callback or consume a live broker pending entry. Add an EngineDebugger/file selection assertion that an attached file probe cannot replace an already-connected EngineDebugger sender.
 
 - [ ] **Step 2: Run RED.**
 
@@ -102,11 +102,11 @@
 
 - [ ] **Step 4: Add bounds/validation at the broker boundary.** Validate request and reply with `Protocol.validate_message`, reject a serialized message over `Protocol.MAX_MESSAGE_BYTES` with `invalid_param`, and preserve stable codes instead of mapping failures to `unknown`.
 
-- [ ] **Step 5: Run GREEN.**
+- [ ] **Step 5: Run GREEN for this task and preserve later RED evidence.**
 
-  Run: `uv run pytest tests/e2e/test_gdscript_units.py -k "runtime_broker or runtime_transport_file_editor or runtime_transport_integration" -v`
+  Run: `$env:GODOT_BIN='D:\\app\\devel\\Godot\\v4.7.1\\godot_console.exe'; uv run pytest tests/e2e/test_gdscript_units.py -k "runtime_broker or runtime_transport_file_editor" -v`
 
-  Expected: all existing broker/editor tests plus every sync/unknown/duplicate/late-reply combination test pass; callback count is exactly one and broker pending is zero.
+  Expected: all broker/editor ownership, priority, malformed/unknown/duplicate/late-reply tests pass; callback count is exactly one and broker pending is zero. Run the separate integration script afterward and record its async/generation failures as intentional RED for Tasks 3 and 5; do not claim that later-task RED is Task 2 failure.
 
 - [ ] **Step 6: Check and commit.**
 
