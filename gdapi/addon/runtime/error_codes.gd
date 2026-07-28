@@ -13,6 +13,22 @@ const UNSAFE_OPERATION := "unsafe_operation"
 const TIMEOUT := "timeout"
 const GODOT_ERROR := "godot_error"
 
+const HTTP_STATUS := {
+	MISSING_PARAM: 400,
+	INVALID_PARAM: 400,
+	INVALID_PATH: 400,
+	PERMISSION_DENIED: 403,
+	UNSAFE_OPERATION: 403,
+	NOT_FOUND: 404,
+	CONFLICT: 409,
+	TIMEOUT: 408,
+	NOT_SUPPORTED: 501,
+	GODOT_ERROR: 500,
+}
+
+static func http_status(code: String) -> int:
+	return int(HTTP_STATUS.get(code, 500))
+
 static func require_force(res: GdApiResponse, force: bool, operation: String) -> bool:
 	if force:
 		return true

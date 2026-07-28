@@ -15,3 +15,10 @@ static func record(route: String, safety: String, summary: Dictionary, ok: bool,
 		"ok": ok,
 		"code": code,
 	})
+
+static func record_runtime(route: String, payload: Variant, result: Variant, ok: bool, code: String = "") -> void:
+	record(route, "runtime", {
+		"operation": route,
+		"payload": payload,
+		"result": result,
+	}, ok, code)

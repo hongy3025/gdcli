@@ -108,6 +108,12 @@ func error(msg: String, code: String = "error", status: int = 400, details: Dict
 		body["details"] = details
 	json(body)
 
+## 查询响应是否已经发送。
+##
+## 异步 route adapter 使用该查询和本地 completion 标志共同防止迟到回调重复回复。
+func is_sent() -> bool:
+	return _sent
+
 ## 内部发送方法
 ##
 ## 实际发送响应到客户端，确保每个请求只发送一次响应。
