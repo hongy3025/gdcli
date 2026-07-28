@@ -18,6 +18,8 @@ gdapi/addon/bin/windows/
 .venv/
 __pycache__/
 *.pyc
+*.uid
 .pytest_cache/
 .pi-subagents/
 .pi/tasks
+/pi-session*
