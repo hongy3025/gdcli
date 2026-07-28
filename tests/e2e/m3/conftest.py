@@ -184,9 +184,22 @@ def _parse_payload(result: subprocess.CompletedProcess[str]) -> dict[str, Any] |
     return None
 
 
-def _runtime_status_snapshot(env: dict[str, Any], failed_args: list[str]) -> Any:
+def _runtime_status_snapshot(
+    env: dict[str, Any],
+    failed_args: list[str],
+    failed_result: subprocess.CompletedProcess[str] | None = None,
+) -> Any:
     if failed_args[:2] == ["exec", "runtime/status"]:
-        return {"error": "runtime/status itself failed"}
+        if failed_result is not None:
+            payload = _parse_payload(failed_result)
+            if payload is not None:
+                return payload
+            return {
+                "exit_code": failed_result.returncode,
+                "stdout": failed_result.stdout,
+                "stderr": failed_result.stderr,
+            }
+        return {"error": "runtime/status result unavailable"}
     status_args = ["exec", "runtime/status", "--project", str(env["project"])]
     status = _run_cli(env, status_args, timeout=5.0)
     payload = _parse_payload(status)
@@ -207,7 +220,7 @@ def _diagnostics(
         "exit_code": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
-        "runtime_status": _runtime_status_snapshot(env, args),
+        "runtime_status": _runtime_status_snapshot(env, args, result),
         "godot_log_tail": _read_log_tail(env),
     }
     env["last_diagnostics"] = diagnostics
@@ -473,7 +486,7 @@ def attach_game(env: dict[str, Any], *, recovery_restarts: int = RECOVERY_RESTAR
         raise last_error
 
 
-def detach_game(env: dict[str, Any]) -> None:
+def detach_game(env: dict[str, Any]) -> dict[str, Any] | None:
     """Stop the current game, wait for broker detachment, and remove stale transport files."""
     errors: list[BaseException] = []
     stopped_status: dict[str, Any] | None = None
@@ -485,8 +498,6 @@ def detach_game(env: dict[str, Any]) -> None:
         stopped_status = wait_stopped(env, timeout=15.0)
     except BaseException as exc:
         errors.append(exc)
-    if not errors:
-        env["game_attached"] = False
     try:
         cleanup_stale_runtime(env)
     except BaseException as exc:
@@ -510,6 +521,7 @@ def detach_game(env: dict[str, Any]) -> None:
             )
             diagnostics = _diagnostics(env, fallback_args, fallback_result)
         raise HarnessFailure("game teardown failed", diagnostics) from errors[0]
+    env["game_attached"] = False
     return stopped_status
 
 
@@ -527,14 +539,16 @@ def reset_fixture(env: dict[str, Any]) -> dict[str, Any]:
 
 def project_run(env: dict) -> dict:
     """Start the fixture scene via project/run."""
+    result = exec_ok(env, "project/run")
     env["game_run_count"] += 1
-    return exec_ok(env, "project/run")
+    return result
 
 
 def project_stop(env: dict) -> dict:
     """Stop the running game via project/stop."""
+    result = exec_ok(env, "project/stop")
     env["game_stop_count"] += 1
-    return exec_ok(env, "project/stop")
+    return result
 
 
 def exec_ok(env: dict, route: str, data: dict | None = None) -> dict[str, Any]:

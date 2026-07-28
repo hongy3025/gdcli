@@ -45,7 +45,7 @@ Addressed on top of `4b868fe`:
 
 - Readiness/reset polling now raises `HarnessFailure` with command, exit code, stdout, stderr, runtime status, and Godot log tail. Recovery warnings retain the same structured evidence and no longer replace the original failure.
 - `game_attached` remains true until both stop and stopped-state polling succeed. Editor teardown retries game teardown, then terminates/kills the editor and records diagnostics.
-- Added injected failure tests for pending/disconnect teardown and fake-process kill behavior.
+- Added injected failure tests for pending/teardown failure and fake-process kill behavior.
 - Added stale-file cleanup before editor attach and after reset, plus a connected-game reset lifecycle test. Shared data-plane fixture reset remains deferred to Task 10.
 - Setup counters now derive from completed build/install/editor-start lifecycle events rather than literal values.
 
@@ -61,4 +61,28 @@ Fix-round GREEN, with the explicit Godot 4.7.1 override:
 ```text
 $env:GODOT_BIN='D:\app\devel\Godot\v4.7.1\godot_console.exe'; uv run pytest tests/e2e/m3/test_harness.py tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_m3_contract.py -v --durations=20 --timeout=180
 10 passed in 11.57s
+```
+
+## Fix round 2 — teardown/status/counter findings
+
+Addressed on top of `89008cd`:
+
+- `detach_game` now clears `game_attached` only after stop, stopped-state polling, and stale-runtime cleanup all succeed. Cleanup-only failures retain ownership, raise structured diagnostics, and enter editor teardown retry/force-kill handling.
+- Status diagnostics now preserve the actual last `runtime/status` payload, including failed or non-connected results; they no longer substitute a generic self-failed marker.
+- `game_run_count` and `game_stop_count` increment only after their respective CLI lifecycle command succeeds.
+- Added cleanup-only, last-status, and failed-command-counter regressions.
+- No real disconnect/pending transition test was added: the currently migrated runtime operation is synchronous, while async assert/signal routes remain outside Task 8. The pending cleanup coverage is injected harness behavior only.
+
+Fix-round RED:
+
+```text
+uv run pytest tests/e2e/m3/test_harness.py -v --timeout=30
+4 failed: cleanup-only teardown cleared attachment; readiness/reset diagnostics replaced the last status payload; failed lifecycle commands incremented counters
+```
+
+Fix-round GREEN, with the explicit Godot 4.7.1 override:
+
+```text
+$env:GODOT_BIN='D:\app\devel\Godot\v4.7.1\godot_console.exe'; uv run pytest tests/e2e/m3/test_harness.py tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_m3_contract.py -v --durations=20 --timeout=180
+14 passed in 11.59s
 ```
