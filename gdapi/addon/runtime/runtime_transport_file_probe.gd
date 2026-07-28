@@ -15,6 +15,9 @@ extends RefCounted
 
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
+const DEFAULT_HANDLER_TIMEOUT_MS := 5_000
+const MAX_HANDLER_TIMEOUT_MS := 25_000
+
 ## hello_delay_ms >0 时,start() 后推迟该毫秒数再写 hello.json
 var hello_delay_ms: int = 0
 
@@ -30,9 +33,16 @@ var _started: bool = false
 ## request handler,由 editor 侧 bridge 调用;签名 (msg) -> reply
 var _handler: Callable = Callable()
 
+## 单个 handler 的超时；默认值与 runtime operation timeout 一致。
+var handler_timeout_ms: int = DEFAULT_HANDLER_TIMEOUT_MS
+
 ## 已领取但尚未写出 reply 的 request id。值仅用于保活异步处理；
 ## id 是否存在才是唯一的状态契约。
 var _inflight: Dictionary = {}
+
+## 当前 probe 生命周期内已领取的 request id。完成后仍保留，避免重放 inbox
+## 在 outbox 被编辑器消费后再次执行副作用。
+var _claimed: Dictionary = {}
 
 ## hello 定时器到期时刻
 var _hello_due_msec: int = 0
@@ -79,6 +89,7 @@ func stop() -> void:
 		return
 	_started = false
 	_inflight.clear()
+	_claimed.clear()
 	var dir := root_path().path_join(_probe_id)
 	DirAccess.remove_absolute(dir)
 
@@ -88,6 +99,8 @@ func tick(now_msec: int) -> void:
 		return
 	if not _hello_sent and hello_delay_ms > 0 and now_msec >= _hello_due_msec:
 		_write_hello_file()
+	_expire_inflight(now_msec)
+	_retry_pending_replies()
 	_scan_inbox(now_msec)
 
 ## 私有:写 hello.json
@@ -139,20 +152,47 @@ func _scan_inbox(_now_msec: int) -> void:
 		# 删除 inbox 防止重复消费；领取后异步处理只拥有内存中的 request。
 		if inbox.remove(filename) != OK:
 			_inflight.erase(id)
+			_claimed.erase(id)
 			continue
 		_start_request(id, dict)
 
 ## 原子领取 request id；同一 id 的后续 inbox 文件只会被删除，不会再次分派。
 func _claim_inbox(id: int) -> bool:
-	if _inflight.has(id):
+	if _claimed.has(id):
 		return false
-	_inflight[id] = true
+	_claimed[id] = true
+	_inflight[id] = {"deadline_msec": Time.get_ticks_msec() + _handler_timeout()}
 	return true
+
+func _handler_timeout() -> int:
+	return clampi(handler_timeout_ms, 1, MAX_HANDLER_TIMEOUT_MS)
+
+## 将已经完成但首次落盘失败的 reply 重试；成功前保留 inflight 状态。
+func _retry_pending_replies() -> void:
+	for raw_id in _inflight.keys():
+		var id: int = int(raw_id)
+		var state: Dictionary = _inflight[id]
+		if not state.has("reply"):
+			continue
+		if _write_reply(id, state.reply):
+			_inflight.erase(id)
+
+## 给仍在等待 handler 的 request 写入一次 timeout reply。
+func _expire_inflight(now_msec: int) -> void:
+	for raw_id in _inflight.keys():
+		var id: int = int(raw_id)
+		var state: Dictionary = _inflight[id]
+		if state.has("reply") or now_msec < int(state.get("deadline_msec", now_msec + 1)):
+			continue
+		state["reply"] = _error_reply(id, "timeout", "runtime handler timed out")
+		_inflight[id] = state
 
 ## 启动一个独立 request 协程。同步 handler 会在本调用内完成；
 ## suspended handler 会在其 await 的 signal/resume 后继续到 _finish_request。
 func _start_request(id: int, message: Dictionary) -> void:
 	var handler_reply: Variant = await _dispatch_request(message)
+	if not _inflight.has(id) or Dictionary(_inflight[id]).has("reply"):
+		return
 	_finish_request(id, handler_reply)
 
 ## 规范化 handler 输出、验证 protocol v1 reply，并且无论成功或失败都释放 inflight。
@@ -160,9 +200,15 @@ func _finish_request(id: int, handler_reply: Variant) -> void:
 	if not _inflight.has(id):
 		return
 	var reply: Dictionary = _make_reply(id, handler_reply)
+	var state: Dictionary = _inflight[id]
+	state["reply"] = reply
+	_inflight[id] = state
+	if _write_reply(id, reply):
+		_inflight.erase(id)
+
+func _write_reply(id: int, reply: Dictionary) -> bool:
 	var out_path := root_path().path_join(_probe_id).path_join("outbox").path_join(str(id) + ".json")
-	_atomic_write(out_path, JSON.stringify(reply))
-	_inflight.erase(id)
+	return _atomic_write(out_path, JSON.stringify(reply))
 
 ## 把 handler body 转为一个已验证且有界的 protocol reply。
 func _make_reply(id: int, handler_reply: Variant) -> Dictionary:
@@ -188,15 +234,19 @@ func _dispatch_request(req: Dictionary) -> Variant:
 		return {"ok": false, "code": "not_supported", "error": "no handler registered"}
 	return await _handler.call(req)
 
-## 私有:原子写（先写 .tmp 再 rename）
-func _atomic_write(target_path: String, content: String) -> void:
+## 私有:原子写（先写 .tmp 再 rename），返回写入和 rename 都成功的结果。
+func _atomic_write(target_path: String, content: String) -> bool:
 	var tmp_path := target_path + ".tmp"
 	var f := FileAccess.open(tmp_path, FileAccess.WRITE)
 	if f == null:
-		return
+		return false
 	f.store_string(content)
+	var write_error := f.get_error()
 	f.close()
-	DirAccess.rename_absolute(tmp_path, target_path)
+	if write_error != OK:
+		DirAccess.remove_absolute(tmp_path)
+		return false
+	return DirAccess.rename_absolute(tmp_path, target_path) == OK
 
 ## 私有:生成 8 字符 hex probe id
 func _generate_probe_id() -> String:

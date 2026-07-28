@@ -18,6 +18,9 @@ func _run() -> void:
 	test_start_writes_hello_file()
 	test_inbox_request_triggers_callback()
 	await test_suspended_request_claims_duplicate_id_and_finishes_once()
+	await test_suspended_request_times_out_once()
+	test_completed_request_id_never_restarts_after_outbox_consumed()
+	test_failed_outbox_write_retries_without_losing_reply()
 	test_malformed_handler_reply_becomes_structured_error()
 	test_oversized_handler_reply_becomes_structured_error()
 
@@ -165,6 +168,94 @@ func test_suspended_request_claims_duplicate_id_and_finishes_once() -> void:
 	assert_true(not t._inflight.has(42), "finished request clears inflight")
 	t.tick(Time.get_ticks_msec())
 	assert_eq(tracker.calls, 1, "finished duplicate request is never restarted")
+	t.stop()
+	_cleanup(root)
+
+func test_suspended_request_times_out_once() -> void:
+	var root := _make_root()
+	var t := Transport.new(0, root)
+	t.handler_timeout_ms = 1
+	var tracker := {"calls": 0}
+	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
+		tracker.calls += 1
+		await create_timer(60.0).timeout
+		return {"ok": true}
+	)
+	t.start()
+	var probe_dir := root.path_join(t.probe_id())
+	_write_request(probe_dir.path_join("inbox/45.json"), 45)
+	var now := Time.get_ticks_msec()
+	t.tick(now)
+	assert_eq(tracker.calls, 1, "timeout handler starts once")
+	assert_true(t._inflight.has(45), "timeout handler enters inflight")
+	t.tick(now + 2)
+	var out_path := probe_dir.path_join("outbox/45.json")
+	var reply := _read_reply(out_path)
+	assert_true(Protocol.validate_message(reply).ok, "timeout reply is protocol valid")
+	assert_eq(reply.get("code", ""), "timeout", "timeout reply has stable code")
+	assert_true(not t._inflight.has(45), "timeout clears inflight")
+	var first_timeout_reply := JSON.stringify(reply)
+	t.tick(now + 3)
+	assert_eq(JSON.stringify(_read_reply(out_path)), first_timeout_reply, "timeout reply is written once")
+	_write_request(probe_dir.path_join("inbox/duplicate-45.json"), 45)
+	t.tick(now + 4)
+	assert_eq(tracker.calls, 1, "timed out id never restarts")
+	t.stop()
+	_cleanup(root)
+
+func test_completed_request_id_never_restarts_after_outbox_consumed() -> void:
+	var root := _make_root()
+	var t := Transport.new(0, root)
+	var tracker := {"calls": 0}
+	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
+		tracker.calls += 1
+		return {"ok": true}
+	)
+	t.start()
+	var probe_dir := root.path_join(t.probe_id())
+	_write_request(probe_dir.path_join("inbox/46.json"), 46)
+	t.tick(Time.get_ticks_msec())
+	assert_eq(tracker.calls, 1, "sync request starts once")
+	assert_true(not t._inflight.has(46), "sync reply clears inflight")
+	var out_path := probe_dir.path_join("outbox/46.json")
+	assert_true(FileAccess.file_exists(out_path), "sync reply reaches outbox")
+	_write_request(probe_dir.path_join("inbox/replayed-before-consume-46.json"), 46)
+	t.tick(Time.get_ticks_msec())
+	assert_eq(tracker.calls, 1, "sync-completed id never restarts before outbox consumption")
+	DirAccess.remove_absolute(out_path)
+	_write_request(probe_dir.path_join("inbox/replayed-46.json"), 46)
+	t.tick(Time.get_ticks_msec())
+	assert_eq(tracker.calls, 1, "completed id never restarts after outbox consumption")
+	assert_true(not FileAccess.file_exists(probe_dir.path_join("inbox/replayed-46.json")), "completed duplicate is removed")
+	t.stop()
+	_cleanup(root)
+
+func test_failed_outbox_write_retries_without_losing_reply() -> void:
+	var root := _make_root()
+	var t := Transport.new(0, root)
+	var tracker := {"calls": 0}
+	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
+		tracker.calls += 1
+		return {"ok": true, "result": {"saved": true}}
+	)
+	t.start()
+	var probe_dir := root.path_join(t.probe_id())
+	var blocked_tmp := probe_dir.path_join("outbox/47.json.tmp")
+	DirAccess.make_dir_absolute(blocked_tmp)
+	_write_request(probe_dir.path_join("inbox/47.json"), 47)
+	t.tick(Time.get_ticks_msec())
+	assert_eq(tracker.calls, 1, "write failure dispatches handler once")
+	assert_true(t._inflight.has(47), "write failure retains inflight reply")
+	assert_true(not FileAccess.file_exists(probe_dir.path_join("outbox/47.json")), "write failure emits no partial outbox")
+	DirAccess.remove_absolute(blocked_tmp)
+	t.tick(Time.get_ticks_msec())
+	var reply := _read_reply(probe_dir.path_join("outbox/47.json"))
+	assert_true(Protocol.validate_message(reply).ok, "retried outbox reply is protocol valid")
+	assert_eq(reply.get("result", {}).get("saved", false), true, "retried outbox preserves reply")
+	assert_true(not t._inflight.has(47), "successful retry clears inflight")
+	_write_request(probe_dir.path_join("inbox/replayed-47.json"), 47)
+	t.tick(Time.get_ticks_msec())
+	assert_eq(tracker.calls, 1, "retried completion never redispatches id")
 	t.stop()
 	_cleanup(root)
 
