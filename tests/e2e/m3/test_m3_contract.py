@@ -14,7 +14,7 @@ from .conftest import (
 
 EXPECTED_RUNTIME_ROUTES = (
     {"runtime/status", "runtime/scene/tree"}
-    | {f"runtime/node/{name}" for name in ["info", "get", "set", "call", "find", "remove", "reparent"]}
+    | {f"runtime/node/{name}" for name in ["info", "get", "set", "call", "find", "remove", "reparent", "create", "duplicate", "rename"]}
     | {f"runtime/input/{name}" for name in ["key", "mouse", "gamepad", "touch", "action", "sequence"]}
     | {f"runtime/screenshot/{name}" for name in ["viewport", "camera", "frames"]}
     | {f"runtime/log/{name}" for name in ["read", "clear"]}
@@ -26,10 +26,16 @@ EXPECTED_RUNTIME_ROUTES = (
 
 def test_runtime_manifest_match(m3_editor):
     routes = set(exec_ok(m3_editor, "gdapi/routes")["routes"])
+    assert len({route for route in routes if route.startswith("runtime/")}) == 35
     missing = EXPECTED_RUNTIME_ROUTES - routes
     assert not missing, f"missing runtime routes: {sorted(missing)}"
     unexpected_runtime = {r for r in routes if r.startswith("runtime/")} - EXPECTED_RUNTIME_ROUTES
     assert not unexpected_runtime, f"unexpected runtime routes: {sorted(unexpected_runtime)}"
+
+
+def test_runtime_manifest_has_no_aliases(m3_editor):
+    routes = [route for route in exec_ok(m3_editor, "gdapi/routes")["routes"] if route.startswith("runtime/")]
+    assert len(routes) == len(set(routes)) == 35
 
 
 def test_runtime_route_documentation_is_complete(m3_editor):

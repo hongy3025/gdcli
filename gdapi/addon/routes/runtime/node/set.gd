@@ -1,21 +1,10 @@
 ## runtime/node/set — 设置运行期节点属性
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var payload: Dictionary = req.body
-	var ops := load("res://addons/gdapi/runtime/runtime_node_ops.gd")
-	var result: Dictionary = ops.set_property(payload)
-	if not bool(result.get("ok", false)):
-		var code: String = String(result.get("code", "godot_error"))
-		res.error(String(result.get("error", "runtime/node/set failed")), code, 500)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/node/set", true)
 
 func doc() -> GdApiRouteDoc:
 	return (

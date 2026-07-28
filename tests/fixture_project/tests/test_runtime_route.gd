@@ -9,6 +9,16 @@ const Request := preload("res://addons/gdapi/runtime/request.gd")
 const Response := preload("res://addons/gdapi/runtime/response.gd")
 const RuntimeRoute := preload("res://addons/gdapi/runtime/runtime_route.gd")
 const RuntimeNodeGetRoute := preload("res://addons/gdapi/routes/runtime/node/get.gd")
+const RuntimeSceneTreeRoute := preload("res://addons/gdapi/routes/runtime/scene/tree.gd")
+const RuntimeNodeInfoRoute := preload("res://addons/gdapi/routes/runtime/node/info.gd")
+const RuntimeNodeSetRoute := preload("res://addons/gdapi/routes/runtime/node/set.gd")
+const RuntimeNodeCallRoute := preload("res://addons/gdapi/routes/runtime/node/call.gd")
+const RuntimeNodeFindRoute := preload("res://addons/gdapi/routes/runtime/node/find.gd")
+const RuntimeNodeRemoveRoute := preload("res://addons/gdapi/routes/runtime/node/remove.gd")
+const RuntimeNodeReparentRoute := preload("res://addons/gdapi/routes/runtime/node/reparent.gd")
+const RuntimeNodeCreateRoute := preload("res://addons/gdapi/routes/runtime/node/create.gd")
+const RuntimeNodeDuplicateRoute := preload("res://addons/gdapi/routes/runtime/node/duplicate.gd")
+const RuntimeNodeRenameRoute := preload("res://addons/gdapi/routes/runtime/node/rename.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
@@ -44,6 +54,7 @@ func _init() -> void:
 	test_disconnected_broker_is_conflict()
 	test_dispatch_requires_exact_runtime_path_and_operation()
 	test_runtime_node_get_dispatches_through_broker()
+	test_scene_node_routes_dispatch_through_broker()
 	test_dispatch_rejects_unknown_path_params_before_broker()
 	test_mutation_boundary_failures_are_audited()
 	test_timeout_defaults_caps_and_rejects_invalid_values()
@@ -144,6 +155,32 @@ func test_runtime_node_get_dispatches_through_broker() -> void:
 	assert_false(_last_response(server).body.has("changed"), "runtime/node/get is not a mutation")
 	assert_false(_last_response(server).body.has("undoable"), "runtime/node/get has no undo contract")
 	assert_false(_last_response(server).body.has("operation"), "runtime/node/get has no mutation operation summary")
+
+func test_scene_node_routes_dispatch_through_broker() -> void:
+	var cases := [
+		{"route": "runtime/scene/tree", "script": RuntimeSceneTreeRoute, "mutation": false},
+		{"route": "runtime/node/info", "script": RuntimeNodeInfoRoute, "mutation": false},
+		{"route": "runtime/node/get", "script": RuntimeNodeGetRoute, "mutation": false},
+		{"route": "runtime/node/set", "script": RuntimeNodeSetRoute, "mutation": true},
+		{"route": "runtime/node/call", "script": RuntimeNodeCallRoute, "mutation": true},
+		{"route": "runtime/node/find", "script": RuntimeNodeFindRoute, "mutation": false},
+		{"route": "runtime/node/remove", "script": RuntimeNodeRemoveRoute, "mutation": true},
+		{"route": "runtime/node/reparent", "script": RuntimeNodeReparentRoute, "mutation": true},
+		{"route": "runtime/node/create", "script": RuntimeNodeCreateRoute, "mutation": true},
+		{"route": "runtime/node/duplicate", "script": RuntimeNodeDuplicateRoute, "mutation": true},
+		{"route": "runtime/node/rename", "script": RuntimeNodeRenameRoute, "mutation": true},
+	]
+	for item in cases:
+		var broker := FakeBroker.new()
+		broker.next_reply = {"ok": true, "result": {"changed": true}}
+		Engine.set_meta("gdapi_runtime_broker", broker)
+		var server := FakeServer.new()
+		item.script.new().handle(_request_at("/" + item.route), _response(server))
+		assert_eq(broker.calls.size(), 1, item.route + " dispatches through broker")
+		if broker.calls.size() == 1:
+			assert_eq(broker.calls[0].op, item.route, item.route + " uses exact broker operation")
+		if item.mutation:
+			assert_eq(_last_response(server).body.undoable, false, item.route + " is not undoable")
 
 func test_dispatch_rejects_unknown_path_params_before_broker() -> void:
 	var broker := FakeBroker.new()

@@ -27,11 +27,18 @@ extends RefCounted
 
 const Codec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const Condition := preload("res://addons/gdapi/runtime/runtime_condition.gd")
+const ALLOWED_CREATE_TYPES := ["Node", "Node2D", "Control", "Marker2D"]
+const MUTABLE_PROPERTIES := [
+	"position", "rotation", "rotation_degrees", "scale", "skew", "pivot_offset",
+	"size", "visible", "modulate", "self_modulate", "process_mode",
+	"counter", "spawn_position", "input_keys", "input_mouse", "input_gamepad",
+	"input_touch", "input_actions",
+]
 
 ## 返回 root 节点的子节点树。最大深度由 payload.max_depth 控制(默认 16,最大 32)。
 static func tree(payload: Dictionary) -> Dictionary:
 	var max_depth: int = clampi(int(payload.get("max_depth", 16)), 1, 32)
-	var root: Node = (Engine.get_main_loop() as SceneTree).root
+	var root: Node = _scene_root()
 	if root == null:
 		return {"ok": false, "code": "not_found", "error": "scene root is unavailable"}
 	var out: Dictionary = _serialize_node(root, 0, max_depth, [])
@@ -80,11 +87,12 @@ static func set_property(payload: Dictionary) -> Dictionary:
 		return {"ok": false, "code": "missing_param", "error": "property and value are required"}
 	if not _has_property(node, property):
 		return {"ok": false, "code": "not_found", "error": "property does not exist: %s" % property}
+	if not _is_mutable_property(property):
+		return {"ok": false, "code": "permission_denied", "error": "property is not in the runtime allowlist: %s" % property}
 	var decoded: Dictionary = Codec.decode(value)
-	if decoded.get("ok", false):
-		node.set(property, decoded.value)
-		return {"ok": true, "result": {"undoable": false, "changed": true, "property": property}}
-	node.set(property, value)
+	if not bool(decoded.get("ok", false)):
+		return {"ok": false, "code": "invalid_param", "error": String(decoded.get("error", "invalid VariantCodec value"))}
+	node.set(property, decoded.value)
 	return {"ok": true, "result": {"undoable": false, "changed": true, "property": property}}
 
 ## 实现 runtime/node/call
@@ -102,8 +110,16 @@ static func call_method(payload: Dictionary) -> Dictionary:
 	var allowlist: PackedStringArray = allowlist_meta
 	if not (method in allowlist):
 		return {"ok": false, "code": "permission_denied", "error": "method is not in allowlist: %s" % method}
-	var args: Array = payload.get("args", [])
-	var result: Variant = node.callv(method, args)
+	var args: Variant = payload.get("args", [])
+	if typeof(args) != TYPE_ARRAY:
+		return {"ok": false, "code": "invalid_param", "error": "args must be an array"}
+	var decoded_args: Array = []
+	for encoded in args:
+		var decoded_arg := Codec.decode(encoded)
+		if not bool(decoded_arg.get("ok", false)):
+			return {"ok": false, "code": "invalid_param", "error": String(decoded_arg.get("error", "invalid VariantCodec argument"))}
+		decoded_args.append(decoded_arg.value)
+	var result: Variant = node.callv(method, decoded_args)
 	var encoded: Variant = Codec.from_variant(result) if result != null else {"plain": null}
 	return {"ok": true, "result": {"result": encoded, "method": method}}
 
@@ -124,8 +140,10 @@ static func remove(payload: Dictionary) -> Dictionary:
 	if not bool(lookup.get("ok", false)):
 		return lookup
 	var node: Node = lookup.node
-	if node == (Engine.get_main_loop() as SceneTree).root:
-		return {"ok": false, "code": "permission_denied", "error": "cannot remove scene root"}
+	if _is_protected_node(node):
+		return {"ok": false, "code": "permission_denied", "error": "cannot remove protected runtime node"}
+	if not _is_dedicated_target(node):
+		return {"ok": false, "code": "permission_denied", "error": "node is outside the current scene"}
 	if node.get_parent() == null:
 		return {"ok": false, "code": "permission_denied", "error": "cannot remove orphan node"}
 	var path_str: String = String(node.get_path())
@@ -143,13 +161,102 @@ static func reparent(payload: Dictionary) -> Dictionary:
 	if not bool(parent_lookup.get("ok", false)):
 		return parent_lookup
 	var new_parent: Node = parent_lookup.node
-	if not _is_descendant_of(node, new_parent, false):
-		pass
-	else:
+	if _is_protected_node(node) or not _is_dedicated_target(node):
+		return {"ok": false, "code": "permission_denied", "error": "node is not a reparentable fixture node"}
+	if _is_protected_node(new_parent) and new_parent != _scene_root():
+		return {"ok": false, "code": "permission_denied", "error": "new parent is protected"}
+	if node == new_parent or _is_descendant_of(node, new_parent, false):
 		return {"ok": false, "code": "conflict", "error": "reparent would create a cycle"}
 	node.get_parent().remove_child(node)
 	new_parent.add_child(node)
 	return {"ok": true, "result": {"new_parent": String(new_parent.get_path()), "undoable": false}}
+
+## 创建运行期 allowlisted 节点。
+static func create(payload: Dictionary) -> Dictionary:
+	var parent_lookup := _resolve(String(payload.get("parent_path", "")))
+	if not bool(parent_lookup.get("ok", false)):
+		return parent_lookup
+	var parent: Node = parent_lookup.node
+	if parent != _scene_root():
+		return {"ok": false, "code": "permission_denied", "error": "create parent must be the current scene root"}
+	var name_result := _validate_node_name(String(payload.get("name", "")))
+	if not bool(name_result.get("ok", false)):
+		return name_result
+	var node_name := String(name_result.name)
+	if parent.has_node(NodePath(node_name)):
+		return {"ok": false, "code": "conflict", "error": "node name already exists: %s" % node_name}
+	var type_name := String(payload.get("type", ""))
+	if type_name not in ALLOWED_CREATE_TYPES:
+		return {"ok": false, "code": "permission_denied", "error": "node type is not in the runtime allowlist: %s" % type_name}
+	var candidate := ClassDB.instantiate(type_name) as Node
+	if candidate == null:
+		return {"ok": false, "code": "invalid_param", "error": "node type cannot be instantiated: %s" % type_name}
+	var properties: Variant = payload.get("properties", {})
+	if typeof(properties) != TYPE_DICTIONARY:
+		candidate.free()
+		return {"ok": false, "code": "invalid_param", "error": "properties must be an object"}
+	for property_key in properties:
+		var property := String(property_key)
+		if not _is_mutable_property(property) or not _has_property(candidate, property):
+			candidate.free()
+			return {"ok": false, "code": "permission_denied", "error": "property is not allowed for create: %s" % property}
+		var decoded := Codec.decode(properties[property_key])
+		if not bool(decoded.get("ok", false)):
+			candidate.free()
+			return {"ok": false, "code": "invalid_param", "error": String(decoded.get("error", "invalid VariantCodec property"))}
+		candidate.set(property, decoded.value)
+	candidate.name = node_name
+	parent.add_child(candidate)
+	return {"ok": true, "result": {"node_path": String(candidate.get_path()), "type": type_name, "changed": true, "undoable": false}}
+
+## 复制当前场景中的专用节点，保留 Godot duplicate() 复制的 typed properties。
+static func duplicate_node(payload: Dictionary) -> Dictionary:
+	var lookup := _resolve(String(payload.get("node_path", "")))
+	if not bool(lookup.get("ok", false)):
+		return lookup
+	var source: Node = lookup.node
+	if not _is_dedicated_target(source):
+		return {"ok": false, "code": "permission_denied", "error": "only dedicated scene nodes may be duplicated"}
+	var parent := source.get_parent()
+	if parent == null:
+		return {"ok": false, "code": "permission_denied", "error": "source node has no parent"}
+	var name_result := _validate_node_name(String(payload.get("name", "")))
+	if not bool(name_result.get("ok", false)):
+		return name_result
+	var node_name := String(name_result.name)
+	if parent.has_node(NodePath(node_name)):
+		return {"ok": false, "code": "conflict", "error": "node name already exists: %s" % node_name}
+	var copy := ClassDB.instantiate(source.get_class()) as Node
+	if copy == null:
+		return {"ok": false, "code": "godot_error", "error": "failed to instantiate duplicate node"}
+	for property in MUTABLE_PROPERTIES:
+		if _has_property(source, property) and _has_property(copy, property):
+			copy.set(property, source.get(property))
+	copy.name = node_name
+	parent.add_child(copy)
+	return {"ok": true, "result": {"node_path": String(copy.get_path()), "source": String(source.get_path()), "changed": true, "undoable": false}}
+
+## 重命名当前场景中的专用节点。
+static func rename(payload: Dictionary) -> Dictionary:
+	var lookup := _resolve(String(payload.get("node_path", "")))
+	if not bool(lookup.get("ok", false)):
+		return lookup
+	var node: Node = lookup.node
+	if not _is_dedicated_target(node):
+		return {"ok": false, "code": "permission_denied", "error": "only dedicated scene nodes may be renamed"}
+	var name_result := _validate_node_name(String(payload.get("name", "")))
+	if not bool(name_result.get("ok", false)):
+		return name_result
+	var node_name := String(name_result.name)
+	if node.name == node_name:
+		return {"ok": true, "result": {"node_path": String(node.get_path()), "changed": false, "undoable": false}}
+	var parent := node.get_parent()
+	if parent == null:
+		return {"ok": false, "code": "permission_denied", "error": "node has no parent"}
+	if parent.has_node(NodePath(node_name)):
+		return {"ok": false, "code": "conflict", "error": "node name already exists: %s" % node_name}
+	node.name = node_name
+	return {"ok": true, "result": {"node_path": String(node.get_path()), "old_name": String(lookup.node_path).get_file(), "changed": true, "undoable": false}}
 
 ## 实现 runtime/assert/condition
 ##
@@ -345,16 +452,53 @@ static func _resolve(node_path: String) -> Dictionary:
 		return {"ok": false, "code": "missing_param", "error": "node_path is required"}
 	if not node_path.begins_with("/root/"):
 		return {"ok": false, "code": "invalid_param", "error": "node_path must start with /root/"}
+	if node_path.contains("//") or node_path.contains("\\"):
+		return {"ok": false, "code": "invalid_path", "error": "node_path contains an invalid separator"}
+	for part in node_path.trim_prefix("/root/").split("/"):
+		if part.is_empty() or part == "." or part == "..":
+			return {"ok": false, "code": "invalid_path", "error": "node_path contains traversal segments"}
 	var tree_root: Node = (Engine.get_main_loop() as SceneTree).root
 	var rel: String = node_path.substr(("/root/").length())
-	var parts: Array = rel.split("/")
-	var pos: Node = tree_root
-	for part in parts:
-		var child: Node = pos.get_node_or_null(NodePath(part))
-		if child == null:
-			return {"ok": false, "code": "not_found", "error": "node not found: " + node_path}
-		pos = child
+	var pos: Node = tree_root.get_node_or_null(NodePath(rel))
+	if pos == null:
+		return {"ok": false, "code": "not_found", "error": "node not found: " + node_path}
 	return {"ok": true, "node": pos, "node_path": node_path}
+
+static func _scene_root() -> Node:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return null
+	if tree.current_scene != null:
+		return tree.current_scene
+	return tree.root
+
+static func _is_protected_node(node: Node) -> bool:
+	if node == null:
+		return true
+	var tree := Engine.get_main_loop() as SceneTree
+	if node == tree.root or node == _scene_root():
+		return true
+	if String(node.name) == "GdApiRuntimeProbe":
+		return true
+	var script := node.get_script()
+	return script != null and String(script.resource_path).ends_with("/runtime_probe.gd")
+
+static func _is_dedicated_target(node: Node) -> bool:
+	var scene := _scene_root()
+	return node != null and scene != null and node != scene and not _is_protected_node(node) and scene.is_ancestor_of(node)
+
+static func _is_mutable_property(property: String) -> bool:
+	return property in MUTABLE_PROPERTIES
+
+static func _validate_node_name(value: String) -> Dictionary:
+	var name := value.strip_edges()
+	if name.is_empty():
+		return {"ok": false, "code": "missing_param", "error": "node name is required"}
+	if name == "." or name == ".." or name.contains("/") or name.contains("\\"):
+		return {"ok": false, "code": "invalid_param", "error": "node name must be a single path segment"}
+	if name in ["root", "RuntimeMain", "GdApiRuntimeProbe"]:
+		return {"ok": false, "code": "permission_denied", "error": "node name is protected: %s" % name}
+	return {"ok": true, "name": name}
 
 ## 序列化一个 node -> dict
 static func _serialize_node(node: Node, depth: int, max_depth: int, visited: Array) -> Dictionary:

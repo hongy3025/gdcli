@@ -1,21 +1,10 @@
 ## runtime/node/call — 在运行期节点上调用方法(仅限 allowlist)
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var payload: Dictionary = req.body
-	var ops := load("res://addons/gdapi/runtime/runtime_node_ops.gd")
-	var result: Dictionary = ops.call_method(payload)
-	if not bool(result.get("ok", false)):
-		var code: String = String(result.get("code", "godot_error"))
-		res.error(String(result.get("error", "runtime/node/call failed")), code, 500)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/node/call", true)
 
 func doc() -> GdApiRouteDoc:
 	return (

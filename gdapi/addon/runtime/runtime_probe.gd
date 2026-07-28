@@ -144,6 +144,12 @@ func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 			return NodeOps.remove(payload)
 		"runtime/node/reparent":
 			return NodeOps.reparent(payload)
+		"runtime/node/create":
+			return NodeOps.create(payload)
+		"runtime/node/duplicate":
+			return NodeOps.duplicate_node(payload)
+		"runtime/node/rename":
+			return NodeOps.rename(payload)
 		"runtime/input/key":
 			return InputOps.key(payload)
 		"runtime/input/mouse":
