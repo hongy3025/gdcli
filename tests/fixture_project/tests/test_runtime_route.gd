@@ -8,6 +8,7 @@ extends SceneTree
 const Request := preload("res://addons/gdapi/runtime/request.gd")
 const Response := preload("res://addons/gdapi/runtime/response.gd")
 const RuntimeRoute := preload("res://addons/gdapi/runtime/runtime_route.gd")
+const RuntimeNodeGetRoute := preload("res://addons/gdapi/routes/runtime/node/get.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
@@ -42,6 +43,7 @@ func _init() -> void:
 	print("Running GdApiRuntimeRoute tests...\n")
 	test_disconnected_broker_is_conflict()
 	test_dispatch_requires_exact_runtime_path_and_operation()
+	test_runtime_node_get_dispatches_through_broker()
 	test_dispatch_rejects_unknown_path_params_before_broker()
 	test_mutation_boundary_failures_are_audited()
 	test_timeout_defaults_caps_and_rejects_invalid_values()
@@ -120,6 +122,19 @@ func test_dispatch_requires_exact_runtime_path_and_operation() -> void:
 	assert_eq(broker.calls.size(), 0, "arbitrary operation does not reach broker")
 	var empty_path := _dispatch_request(_request_at(""), broker, "runtime/test")
 	assert_eq(_last_response(empty_path).status, 400, "empty request path is rejected")
+
+func test_runtime_node_get_dispatches_through_broker() -> void:
+	var broker := FakeBroker.new()
+	Engine.set_meta("gdapi_runtime_broker", broker)
+	var server := FakeServer.new()
+	RuntimeNodeGetRoute.new().handle(
+		_request_at("/runtime/node/get", {
+			"node_path": "/root/RuntimeMain/ProbeTarget",
+			"property": "spawn_position",
+		}),
+		_response(server),
+	)
+	assert_eq(broker.calls.size(), 1, "runtime/node/get dispatches through broker")
 
 func test_dispatch_rejects_unknown_path_params_before_broker() -> void:
 	var broker := FakeBroker.new()

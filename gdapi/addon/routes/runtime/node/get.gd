@@ -1,21 +1,10 @@
 ## runtime/node/get — 读取运行期节点属性,自动经 VariantCodec 编码
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var payload: Dictionary = req.body
-	var ops := load("res://addons/gdapi/runtime/runtime_node_ops.gd")
-	var result: Dictionary = ops.get_property(payload)
-	if not bool(result.get("ok", false)):
-		var code: String = String(result.get("code", "godot_error"))
-		res.error(String(result.get("error", "runtime/node/get failed")), code, 500)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/node/get")
 
 func doc() -> GdApiRouteDoc:
 	return (
@@ -25,6 +14,6 @@ func doc() -> GdApiRouteDoc:
 		.param("property", "String", true, "属性名", "")
 		.example("{\"node_path\":\"/root/RuntimeMain/ProbeTarget\",\"property\":\"counter\"}")
 		.returns("属性值", {
-			"value": "Object, 其中 type 与 value 字段详见 VariantCodec，或纯 plain 值",
+			"value": "VariantCodec 对象（例如 Vector2 为 {type, value}），或 plain 值",
 		})
 	)

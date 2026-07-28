@@ -39,6 +39,12 @@ from e2e.m2.helpers import (  # noqa: E402
 M3_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m3_project"
 
 
+def runtime_route_source(route: str) -> str:
+    """Read a runtime route from the addon source tree for source-contract checks."""
+    route_path = repo_root() / "gdapi" / "addon" / "routes" / Path(*route.split("/"))
+    return route_path.with_suffix(".gd").read_text(encoding="utf-8")
+
+
 def _gdcli_ping(env_root: Path, godot_bin: str) -> bool:
     try:
         result = subprocess.run(
@@ -189,6 +195,10 @@ def exec_ok(env: dict, route: str, data: dict | None = None) -> dict[str, Any]:
         print("\n[gdcli failed]", args)
         print("STDOUT:", result.stdout)
         print("STDERR:", result.stderr)
+        pytest.fail(
+            f"{route}: expected success (exit {result.returncode}); "
+            f"stderr={result.stderr.strip()!r} stdout={result.stdout.strip()!r}"
+        )
     payload = json.loads(result.stdout)
     assert payload.get("ok") is True, f"{route}: {payload}"
     return payload
