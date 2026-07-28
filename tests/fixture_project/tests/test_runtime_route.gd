@@ -135,6 +135,15 @@ func test_runtime_node_get_dispatches_through_broker() -> void:
 		_response(server),
 	)
 	assert_eq(broker.calls.size(), 1, "runtime/node/get dispatches through broker")
+	if broker.calls.size() == 1:
+		assert_eq(broker.calls[0].op, "runtime/node/get", "runtime/node/get uses exact broker operation")
+		assert_eq(broker.calls[0].payload, {
+			"node_path": "/root/RuntimeMain/ProbeTarget",
+			"property": "spawn_position",
+		}, "runtime/node/get forwards exact read-only payload")
+	assert_false(_last_response(server).body.has("changed"), "runtime/node/get is not a mutation")
+	assert_false(_last_response(server).body.has("undoable"), "runtime/node/get has no undo contract")
+	assert_false(_last_response(server).body.has("operation"), "runtime/node/get has no mutation operation summary")
 
 func test_dispatch_rejects_unknown_path_params_before_broker() -> void:
 	var broker := FakeBroker.new()

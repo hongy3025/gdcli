@@ -28,14 +28,14 @@ GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/m3
 The focused GDScript route test also failed as intended:
 
 ```text
-uv run pytest tests/e2e/test_gdscript_units.py -k runtime_route -v
+GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/test_gdscript_units.py -k runtime_route -v
 1 failed: runtime/node/get dispatches through broker — expected 1, got 0
 ```
 
 GREEN:
 
 ```text
-uv run pytest tests/e2e/test_gdscript_units.py -k runtime_route -v
+GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/test_gdscript_units.py -k runtime_route -v
 1 passed, 12 deselected in 6.43s
 
 GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe uv run pytest tests/e2e/m3/test_runtime_nodes.py::test_runtime_node_get_set_call -v
