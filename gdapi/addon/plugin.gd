@@ -11,6 +11,7 @@ extends EditorPlugin
 const Router := preload("res://addons/gdapi/runtime/router.gd")
 const RuntimeBroker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 const RuntimeDebuggerPlugin := preload("res://addons/gdapi/runtime/runtime_debugger_plugin.gd")
+const RuntimeDebuggerRegistration := preload("res://addons/gdapi/runtime/runtime_debugger_registration.gd")
 const RuntimeProbe := preload("res://addons/gdapi/runtime/runtime_probe.gd")
 ## 元数据文件路径，用于存储服务器连接信息
 const META_PATH := "res://.godot/gdapi.json"
@@ -37,6 +38,7 @@ var _router: Router
 var _runtime_broker: RefCounted = null
 ## M3 runtime debugger plugin 实例(EditorDebuggerPlugin)
 var _runtime_debugger_plugin: RefCounted = null
+var _runtime_debugger_registration: RefCounted = null
 ## M3.1 runtime file transport (editor 侧 fallback transport manager)
 var _runtime_file_transport: RefCounted = null
 ## 日志缓冲区，存储最近的日志条目用于远程查询
@@ -88,7 +90,11 @@ func _enter_tree() -> void:
 	# 传入已实例化的对象才能让 _setup_session / _capture 被编辑器调度。
 	_runtime_debugger_plugin = RuntimeDebuggerPlugin.new()
 	_runtime_debugger_plugin.setup(_runtime_broker)
-	add_debugger_plugin(_runtime_debugger_plugin)
+	_runtime_debugger_registration = RuntimeDebuggerRegistration.new()
+	_runtime_debugger_registration.setup(_runtime_debugger_plugin,
+		func(debugger) -> void: add_debugger_plugin(debugger),
+		func(debugger) -> void: remove_debugger_plugin(debugger))
+	_runtime_debugger_registration.register()
 	add_autoload_singleton("GdApiRuntimeProbe", "res://addons/gdapi/runtime/runtime_probe.gd")
 
 	# M3.1: 启动文件 transport manager(headless 下作为 EngineDebugger 不可达的 fallback)
@@ -128,12 +134,13 @@ func _exit_tree() -> void:
 	if _runtime_broker != null:
 		_runtime_broker.detach("plugin exiting")
 	# 关闭 debugger plugin(4.7: 同样传 instance)
-	if _runtime_debugger_plugin != null and self.has_method("remove_debugger_plugin"):
-		self.remove_debugger_plugin(_runtime_debugger_plugin)
+	if _runtime_debugger_registration != null:
+		_runtime_debugger_registration.unregister()
 	remove_autoload_singleton("GdApiRuntimeProbe")
 	Engine.remove_meta("gdapi_runtime_broker")
 	_runtime_broker = null
 	_runtime_debugger_plugin = null
+	_runtime_debugger_registration = null
 	_runtime_file_transport = null
 	_delete_meta()
 

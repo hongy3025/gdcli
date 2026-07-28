@@ -8,22 +8,29 @@
 ## 1. _setup_session(session_id) —— 拿到 EditorDebuggerSession 引用，缓存可用 session id；
 ## 2. _capture(message, data, session_id) —— 收到 runtime probe 推过来的 hello / reply，
 ##    hello 触发 broker attach + mark_connected，reply 走 broker.receive；
-## 3. _clear(session_id) —— broker.detach("session cleared") + 移除本地缓存。
+## 3. _clear(session_id) —— 仅活动 session 触发 broker.detach("session cleared")。
 
 @tool
 extends EditorDebuggerPlugin
 
+const DebuggerBridge := preload("res://addons/gdapi/runtime/runtime_debugger_bridge.gd")
+
 ## 由 setup() 注入的 broker 实例
 var _broker: RefCounted = null
+## 可在 headless Godot 中单测的 capture/setup/clear 行为桥接。
+var _bridge: RefCounted = null
 
-## session_id -> true (已建立 session 的占位,真正取引用走 _lookup_session)
-var _sessions: Dictionary = {}
+func _init() -> void:
+	_bridge = DebuggerBridge.new()
 
 ## 配置 broker
 ##
 ## @param broker 已经 setup 完毕的 GdApiRuntimeBroker 实例
 func setup(broker: RefCounted) -> void:
 	_broker = broker
+	var lookup := func(session_id: int) -> Variant:
+		return _lookup_session(session_id)
+	_bridge.setup(broker, lookup)
 
 ## 是否希望接收 capture "gdapi"
 ##
@@ -40,7 +47,7 @@ func _has_capture(name: String) -> bool:
 ##
 ## @param session_id 编辑器为新调试会话分配的 id
 func _setup_session(session_id: int) -> void:
-	_sessions[session_id] = true
+	_bridge.setup_session(session_id)
 
 ## 接收 runtime probe 推过来的 reply / event / hello
 ##
@@ -54,61 +61,19 @@ func _setup_session(session_id: int) -> void:
 ## @param session_id 对应 debugger session id
 ## @return true 表示已处理
 func _capture(message: String, data: Array, session_id: int) -> bool:
-	if message != "gdapi":
-		return false
-	if _broker == null:
-		return true
-	if data.is_empty():
-		return true
-	var payload: Variant = data[0]
-	if typeof(payload) != TYPE_DICTIONARY:
-		return false
-	# Hello 事件只用来推进状态机；reply 才走 broker.receive。
-	if String(payload.get("event", "")) == "hello":
-		if not _attach_to_session(session_id):
-			return false
-		_broker.mark_connected()
-		if _broker.has_method("_set_active_transport"):
-			_broker.call("_set_active_transport", "engine_debugger")
-		return true
-	_broker.receive(payload)
-	return true
+	return _bridge.capture(message, data, session_id)
 
 ## EditorDebuggerSession 断开时回调
 ##
 ## @param session_id 已断开的 session
 func _clear(session_id: int) -> void:
-	if _sessions.has(session_id):
-		_sessions.erase(session_id)
-	if _broker != null:
-		if _broker.has_method("detach_engine_debugger"):
-			_broker.call("detach_engine_debugger", "session cleared")
-		else:
-			_broker.detach("session cleared")
+	_bridge.clear(session_id)
 
 ## 把协议字典通过当前 session 推送给 runtime probe
 ##
 ## 返回 bool,告诉 broker 是否真的送达。session 引用每次发送时通过父类
 ## `get_session(id)` 现取,避免缓存悬空引用。
 ##
-## @param session_id 目标 session
-## @param message 协议 v1 字典
-func _send_to_session(session_id: int, message: Dictionary) -> bool:
-	if not _sessions.has(session_id):
-		return false
-	var session: RefCounted = _lookup_session(session_id)
-	if session == null:
-		return false
-	var method_exists: bool = false
-	for m in session.get_method_list():
-		if String(m.name) == "send_message":
-			method_exists = true
-			break
-	if not method_exists:
-		return false
-	session.send_message("gdapi", [message])
-	return true
-
 ## 在编辑器中检索 EditorDebuggerSession。
 ##
 ## Godot 4.7 父类 `EditorDebuggerPlugin` 暴露 `get_session(id)`;
@@ -122,20 +87,3 @@ func _lookup_session(session_id: int) -> RefCounted:
 		if session != null:
 			return session
 	return null
-
-## 把当前 session 绑定到 broker(由 hello 路径触发)
-##
-## @param session_id 已知 session id
-func _attach_to_session(session_id: int) -> bool:
-	if not _sessions.has(session_id):
-		return false
-	var session: RefCounted = _lookup_session(session_id)
-	if session == null:
-		push_warning("[gdapi] hello arrived but session %d is unavailable" % session_id)
-		return false
-	if _broker == null:
-		return false
-	var send := func(message: Dictionary) -> bool:
-		return _send_to_session(session_id, message)
-	_broker.attach(session_id, send)
-	return true

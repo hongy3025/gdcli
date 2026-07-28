@@ -1,23 +1,32 @@
-## GdApiRuntimeDebuggerPlugin unit tests.
+## Behavioral tests for the runtime debugger bridge and registration lifecycle.
 ##
-## Exercises the EditorDebuggerPlugin capture contract with a fake session payload.
+## EditorDebuggerPlugin is a virtual editor-only Godot class, so the tests
+## instantiate the narrow production bridge used by that plugin instead.
 
 @tool
 extends SceneTree
 
 const Broker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
+const DebuggerBridge := preload("res://addons/gdapi/runtime/runtime_debugger_bridge.gd")
+const DebuggerRegistration := preload("res://addons/gdapi/runtime/runtime_debugger_registration.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
-const DEBUGGER_SOURCE := "res://addons/gdapi/runtime/runtime_debugger_plugin.gd"
+class FakeSession extends RefCounted:
+	var sent: Array = []
+
+	func send_message(channel: String, payload: Array) -> void:
+		sent.append({"channel": channel, "payload": payload})
 
 var passed := 0
 var failed := 0
 
 func _init() -> void:
-	print("Running GdApiRuntimeDebuggerPlugin tests...\n")
+	print("Running GdApiRuntimeDebugger behavioral tests...\n")
 
-	test_capture_contract_handles_fake_hello()
-	test_capture_contract_bridges_replies_to_broker()
+	test_registration_calls_add_and_remove_once()
+	test_capture_hello_attaches_and_reply_reaches_broker()
+	test_stale_session_clear_does_not_detach_active_session()
+	test_malformed_hello_is_rejected_before_connecting()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
@@ -33,49 +42,88 @@ func assert_eq(actual, expected, context: String = "") -> void:
 func assert_true(value: bool, context: String = "") -> void:
 	assert_eq(value, true, context)
 
-func _debugger_source() -> String:
-	var file := FileAccess.open(DEBUGGER_SOURCE, FileAccess.READ)
-	if file == null:
-		return ""
-	var source := file.get_as_text()
-	file.close()
-	return source
+func assert_false(value: bool, context: String = "") -> void:
+	assert_eq(value, false, context)
 
-func test_capture_contract_handles_fake_hello() -> void:
-	var fake_session := {
-		"session_id": 17,
-		"message": "gdapi",
-		"data": [{
-			"version": Protocol.VERSION,
-			"kind": "event",
-			"event": "hello",
-			"result": {},
-		}],
-	}
-	var source := _debugger_source()
-	assert_eq(fake_session.message, "gdapi", "fake session uses gdapi capture")
-	assert_eq(fake_session.data[0].event, "hello", "fake session carries hello payload")
-	assert_true(source.contains("func _has_capture(name: String) -> bool"), "capture hook is declared")
-	assert_true(source.contains("_attach_to_session(session_id)"), "hello attaches the debugger session")
-	assert_true(source.contains("_broker.mark_connected()"), "hello marks the broker connected")
-	assert_true(source.contains("detach_engine_debugger"), "clear path uses explicit engine detach")
+func _valid_hello() -> Dictionary:
+	return Protocol.event(0, "hello", {
+		"protocol_version": Protocol.VERSION,
+		"node": "behavioral-test",
+	})
 
-func test_capture_contract_bridges_replies_to_broker() -> void:
-	var fake_reply := {
-		"version": Protocol.VERSION,
-		"id": 9,
-		"kind": "reply",
-		"ok": true,
-		"result": {"ready": true},
-	}
-	var source := _debugger_source()
-	assert_eq(fake_reply.kind, "reply", "fake session carries a reply payload")
-	assert_eq(fake_reply.version, Protocol.VERSION, "fake reply preserves protocol v1")
-	assert_true(source.contains("_broker.receive(payload)"), "reply capture enters broker.receive")
-	assert_true(source.contains("return true"), "handled captures acknowledge the debugger")
-	assert_true(source.contains("send_message(\"gdapi\", [message])"), "requests use the debugger channel")
+func _attach_fake_session(bridge: RefCounted, broker: RefCounted, session_id: int) -> FakeSession:
+	var session := FakeSession.new()
+	bridge.setup(broker)
+	bridge.setup_session(session_id)
+	bridge.set_session_override(session_id, session)
+	return session
 
-	# Keep a real broker in this test so the fixture continues to load the same
-	# protocol/broker boundary as the production capture bridge.
+func test_registration_calls_add_and_remove_once() -> void:
+	var calls: Array = []
+	var fake_plugin := RefCounted.new()
+	var registration: RefCounted = DebuggerRegistration.new()
+	registration.setup(fake_plugin,
+		func(_plugin: Object) -> void: calls.append("add"),
+		func(_plugin: Object) -> void: calls.append("remove"))
+	registration.register()
+	registration.register()
+	assert_eq(calls, ["add"], "registration calls add once")
+	assert_true(registration.registered, "registration state is observable")
+	registration.unregister()
+	registration.unregister()
+	assert_eq(calls, ["add", "remove"], "unregistration calls remove once")
+	assert_false(registration.registered, "unregistration state is observable")
+
+func test_capture_hello_attaches_and_reply_reaches_broker() -> void:
+	var bridge: RefCounted = DebuggerBridge.new()
 	var broker: RefCounted = Broker.new()
-	assert_eq(broker.status().protocol_version, Protocol.VERSION, "broker remains protocol v1")
+	var session := _attach_fake_session(bridge, broker, 17)
+	assert_true(bridge.capture("gdapi", [_valid_hello()], 17), "valid hello is handled")
+	assert_eq(broker.status().transport, "engine_debugger", "hello activates engine debugger")
+	assert_eq(broker.status().session_id, 17, "hello binds session id")
+
+	var received: Array = []
+	var request_id: int = broker.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply)
+	)
+	assert_eq(session.sent.size(), 1, "request is sent through fake debugger session")
+	assert_true(bridge.capture("gdapi", [Protocol.reply(request_id, true, {"ready": true})], 17), "reply capture is handled")
+	assert_eq(received.size(), 1, "reply reaches broker callback")
+	assert_eq(received[0].get("ok"), true, "broker receives successful reply")
+
+func test_stale_session_clear_does_not_detach_active_session() -> void:
+	var bridge: RefCounted = DebuggerBridge.new()
+	var broker: RefCounted = Broker.new()
+	_attach_fake_session(bridge, broker, 23)
+	assert_true(bridge.capture("gdapi", [_valid_hello()], 23), "active hello is handled")
+	var received: Array = []
+	broker.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply)
+	)
+	bridge.setup_session(99)
+	bridge.clear(99)
+	assert_eq(broker.status().transport, "engine_debugger", "stale clear keeps active transport")
+	assert_eq(broker.status().pending, 1, "stale clear keeps pending request")
+	assert_eq(received.size(), 0, "stale clear does not fail callback")
+
+	bridge.clear(23)
+	assert_eq(broker.status().transport, "none", "active clear detaches engine transport")
+	assert_eq(broker.status().pending, 0, "active clear drains pending")
+	assert_eq(received.size(), 1, "active clear fails pending once")
+	bridge.clear(23)
+	assert_eq(received.size(), 1, "duplicate clear does not repeat callback")
+
+func test_malformed_hello_is_rejected_before_connecting() -> void:
+	var bridge: RefCounted = DebuggerBridge.new()
+	var broker: RefCounted = Broker.new()
+	_attach_fake_session(bridge, broker, 31)
+	var malformed := _valid_hello()
+	malformed["version"] = 2
+	assert_false(bridge.capture("gdapi", [malformed], 31), "wrong-version hello is rejected")
+	assert_eq(broker.status().transport, "none", "wrong-version hello does not activate transport")
+	assert_eq(broker.status().state, "stopped", "wrong-version hello leaves broker stopped")
+
+	var malformed_shape := _valid_hello()
+	malformed_shape["id"] = "0"
+	assert_false(bridge.capture("gdapi", [malformed_shape], 31), "non-integer hello id is rejected")
+	assert_eq(broker.status().transport, "none", "malformed hello remains disconnected")
