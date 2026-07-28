@@ -73,12 +73,11 @@ func _exit_tree() -> void:
 ## 协程 op(screenshot/assert/signal/sequence)在 await 后返回 reply,非协程 op 同步返回。
 ##
 ## @param req 协议 v1 request 字典
-## @return 协议 v1 reply 字典(交给 file transport 写 outbox)
-func _handle_file_transport_request(req: Dictionary) -> Dictionary:
+## @return 协议 v1 reply 字典或 awaitable result(交给 file transport 写 outbox)
+func _handle_file_transport_request(req: Dictionary) -> Variant:
 	var op: String = String(req.get("op", ""))
 	var payload: Dictionary = req.get("payload", {})
-	var reply: Dictionary = await _dispatch_async(op, payload)
-	return reply
+	return await _dispatch_async(op, payload)
 
 ## 推迟到了 timer 触发时间后调用此函数
 func _on_hello_timer_timeout() -> void:

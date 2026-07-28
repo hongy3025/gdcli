@@ -110,6 +110,7 @@ func _sync_handler(message: Dictionary) -> Dictionary:
 
 func _async_handler(message: Dictionary) -> Dictionary:
 	await process_frame
+	await process_frame
 	return {"ok": true, "result": {"echo": int(message.get("id", -1))}}
 
 func _reply(id: int, result: Dictionary = {}) -> Dictionary:
@@ -148,7 +149,11 @@ func test_broker_file_async_roundtrip() -> void:
 	)
 	pair.probe.tick(Time.get_ticks_msec())
 	assert_true(not FileAccess.file_exists(root.path_join(pair.probe.probe_id()).path_join("outbox/%d.json" % id)),
-		"async outbox waits for suspended handler")
+		"async outbox waits before first resume")
+	await process_frame
+	pair.probe.tick(Time.get_ticks_msec())
+	assert_true(not FileAccess.file_exists(root.path_join(pair.probe.probe_id()).path_join("outbox/%d.json" % id)),
+		"async outbox waits before second resume")
 	await process_frame
 	pair.probe.tick(Time.get_ticks_msec())
 	pair.editor.tick(Time.get_ticks_msec())
