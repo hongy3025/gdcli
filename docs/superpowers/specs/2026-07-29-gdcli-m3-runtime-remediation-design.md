@@ -29,6 +29,20 @@ transport 骨架，但数据面没有形成闭环。2026-07-29 的完整 M3 E2E 
 7. M3 pytest fixture 为函数级，每个测试重复构建、安装、启动 editor 和运行游戏。四个
    status 测试中 23.67/28.89 秒消耗在 setup。
 
+## Route manifest reconciliation (2026-07-29)
+
+原始 M3 文档把 runtime route 数量写为 35，但已落地的 route/op 清单实际只有 32 条。
+经用户确认，缺失的三条公开 runtime route 补齐为：
+
+- `runtime/node/create`
+- `runtime/node/duplicate`
+- `runtime/node/rename`
+
+三条 route 属于 runtime node mutation family，必须与现有 node route 一样通过 broker 在 game
+进程执行，返回 `undoable:false`，成功与拒绝均审计。它们不是 editor-side `node/*` route
+的 alias；必须拥有独立 protocol op、route doc、fixture 行为和真实 CLI E2E。补齐后 M3
+runtime manifest 精确为 35 条，data-plane route 精确为 34 条。
+
 ## 目标
 
 1. 完成 35 条 M3 runtime route 的真实 game-process 数据面闭环。
