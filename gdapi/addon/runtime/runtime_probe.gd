@@ -102,8 +102,9 @@ func _on_runtime_capture(_channel: String, args: Array) -> bool:
 	if String(request_msg.get("kind", "")) != "request":
 		return false
 	if _file_transport != null:
+		var active_generation := String(_file_transport.generation())
 		var request_generation := String(request_msg.get("generation", ""))
-		if not request_generation.is_empty() and request_generation != String(_file_transport.generation()):
+		if not active_generation.is_empty() and request_generation != active_generation:
 			return false
 	_dispatch(request_msg)
 	return true

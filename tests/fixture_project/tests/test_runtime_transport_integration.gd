@@ -10,6 +10,7 @@ extends SceneTree
 const Broker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 const EditorTransport := preload("res://addons/gdapi/runtime/runtime_transport_file_editor.gd")
 const ProbeTransport := preload("res://addons/gdapi/runtime/runtime_transport_file_probe.gd")
+const RuntimeProbe := preload("res://addons/gdapi/runtime/runtime_probe.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
 var passed := 0
@@ -27,6 +28,7 @@ func _run() -> void:
 	await test_unknown_and_duplicate_reply_are_ignored()
 	await test_timeout_then_late_reply_is_ignored()
 	await test_generation_and_priority_reject_stale_hello()
+	test_runtime_probe_rejects_generationless_engine_request()
 
 	_cleanup(_make_root())
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
@@ -272,5 +274,30 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 	assert_eq(broker.status().transport, "engine_debugger", "engine debugger keeps priority")
 	editor.stop_all("test cleanup")
 	editor = null
+	broker = null
+	_cleanup(root)
+
+func test_runtime_probe_rejects_generationless_engine_request() -> void:
+	var root := _make_root()
+	_cleanup(root)
+	DirAccess.make_dir_recursive_absolute(root)
+	var broker: RefCounted = Broker.new()
+	var generation: String = String(broker.call("begin_generation"))
+	_write_json(root.path_join("generation.json"), {"generation": generation})
+	var transport: RefCounted = ProbeTransport.new(0, root)
+	transport.start()
+	var probe: Node = RuntimeProbe.new()
+	probe._file_transport = transport
+	probe.record_log("info", "must remain")
+
+	var request := Protocol.request(91, "runtime/log/clear", {})
+	var accepted: bool = probe._on_runtime_capture("gdapi", [request])
+	assert_eq(transport.generation(), generation, "probe adopts broker generation")
+	assert_eq(accepted, false, "generationless EngineDebugger request is ignored")
+	assert_eq(probe.ring_buffer().size(), 1, "ignored request is not dispatched or replied")
+
+	probe.free()
+	probe = null
+	transport.stop()
 	broker = null
 	_cleanup(root)
