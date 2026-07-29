@@ -174,7 +174,9 @@ def test_real_high_entropy_single_frame_fits_then_cumulative_reply_is_rejected(m
     assert error["code"] == "invalid_param"
     assert "4 MiB" in error["error"]
     assert time.monotonic() - started < 10
-    assert exec_ok(m3_running, "runtime/status")["state"] == "connected"
+    status_after = exec_ok(m3_running, "runtime/status")
+    assert status_after["state"] == "connected"
+    assert status_after["pending"] == 0
     _png_signature_present(exec_ok(m3_running, "runtime/screenshot/viewport"))
 
 

@@ -17,6 +17,8 @@ class_name GdApiRuntimeBroker
 extends RefCounted
 
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
+const DEFAULT_REQUEST_TIMEOUT_MS := 5_000
+const MAX_REQUEST_TIMEOUT_MS := 26_000
 
 ## 三态机器：stopped / connecting / connected
 var _state: String = "stopped"
@@ -349,7 +351,11 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 				"request_id": id,
 			})
 		return id
-	var bounded_timeout: int = timeout_ms if timeout_ms > 0 else 5000
+	var bounded_timeout := clampi(
+		timeout_ms if timeout_ms > 0 else DEFAULT_REQUEST_TIMEOUT_MS,
+		1,
+		MAX_REQUEST_TIMEOUT_MS
+	)
 	var deadline_msec: int = Time.get_ticks_msec() + bounded_timeout
 	_pending[id] = {
 		"deadline_msec": deadline_msec,
@@ -371,6 +377,8 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 func receive(message: Variant) -> void:
 	var verdict: Dictionary = Protocol.validate_message(message)
 	if not bool(verdict.get("ok", false)):
+		if Protocol.message_exceeds_limit(message):
+			_complete_oversized_reply(message, verdict)
 		return
 	var dict: Dictionary = message
 	var message_generation := String(dict.get("generation", ""))
@@ -389,10 +397,39 @@ func receive(message: Variant) -> void:
 	var entry: Dictionary = _pending[id]
 	if String(entry.get("generation", "")) != message_generation:
 		return
-	_pending.erase(id)
+	entry = _take_pending(id)
 	var cb: Callable = entry.callback
 	if cb.is_valid():
 		cb.call(dict)
+
+## A size-invalid reply still contains enough bounded envelope metadata to
+## correlate it with one live request. Complete that request immediately so a
+## transport boundary cannot turn an explicit bound violation into a timeout.
+func _complete_oversized_reply(message: Variant, verdict: Dictionary) -> void:
+	if typeof(message) != TYPE_DICTIONARY:
+		return
+	var dict: Dictionary = message
+	if int(dict.get("version", -1)) != Protocol.VERSION:
+		return
+	if String(dict.get("kind", "")) != "reply":
+		return
+	var raw_id: Variant = dict.get("id", null)
+	if typeof(raw_id) != TYPE_INT or int(raw_id) < 1:
+		return
+	var message_generation := String(dict.get("generation", ""))
+	if not _generation.is_empty() and message_generation != _generation:
+		return
+	var id := int(raw_id)
+	if not _pending.has(id):
+		return
+	var pending_generation := String(Dictionary(_pending[id]).get("generation", ""))
+	if pending_generation != message_generation:
+		return
+	_complete_with_failure(
+		id,
+		String(verdict.get("code", "invalid_param")),
+		String(verdict.get("error", "runtime reply exceeds protocol bounds"))
+	)
 
 ## 由 transport 周期性调用,清理已超时请求
 ##
@@ -412,10 +449,9 @@ func tick(now_msec: int) -> void:
 ## @param code 失败 code
 ## @param error 失败说明
 func _complete_with_failure(id: int, code: String, error: String) -> void:
-	if not _pending.has(id):
+	var entry := _take_pending(id)
+	if entry.is_empty():
 		return
-	var entry: Dictionary = _pending[id]
-	_pending.erase(id)
 	var cb: Callable = entry.callback
 	if cb.is_valid():
 		cb.call({
@@ -424,6 +460,15 @@ func _complete_with_failure(id: int, code: String, error: String) -> void:
 			"error": error,
 			"request_id": id,
 		})
+
+## Remove ownership before invoking user code. Late replies, timeout ticks and
+## disconnect cleanup all observe the id as completed, even during re-entrancy.
+func _take_pending(id: int) -> Dictionary:
+	if not _pending.has(id):
+		return {}
+	var entry: Dictionary = _pending[id]
+	_pending.erase(id)
+	return entry
 
 ## attach 前先把旧 pending 清理干净,避免重复 callback
 func _prepare_new_session(reason: String) -> void:

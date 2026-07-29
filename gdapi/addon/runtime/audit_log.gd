@@ -15,10 +15,13 @@ static func record(route: String, safety: String, summary: Dictionary, ok: bool,
 	var plugin = Engine.get_meta("gdapi_plugin")
 	if not plugin or not plugin.has_method("audit_event"):
 		return
+	var safe_summary: Variant = summarize(summary)
 	plugin.audit_event({
 		"route": route,
 		"safety": safety,
-		"summary": summary,
+		"summary": safe_summary if typeof(safe_summary) == TYPE_DICTIONARY else {
+			"type": type_string(typeof(summary)),
+		},
 		"ok": ok,
 		"code": code,
 	})

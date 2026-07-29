@@ -30,6 +30,8 @@ func _init() -> void:
 	test_unknown_reply_does_not_crash()
 	test_invalid_reply_does_not_complete_pending_request()
 	test_oversized_request_is_rejected_without_sending()
+	test_oversized_reply_completes_once_without_waiting_for_timeout()
+	test_broker_timeout_is_bounded_to_route_grace_limit()
 	test_multiple_requests_then_detach()
 	test_request_after_detach_returns_immediately()
 	test_transport_field_initial_none()
@@ -174,6 +176,39 @@ func test_oversized_request_is_rejected_without_sending() -> void:
 	assert_eq(received[0].get("code", ""), "invalid_param", "oversized request preserves invalid_param")
 	assert_eq(sent.size(), sent_before, "oversized request is not sent")
 	assert_eq(b.status().pending, 0, "oversized request does not enter pending")
+
+func test_oversized_reply_completes_once_without_waiting_for_timeout() -> void:
+	var b: RefCounted = Broker.new()
+	b.attach(3, _make_send())
+	var received: Array = []
+	var id: int = b.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
+		received.append(reply))
+	var oversized := Protocol.reply(id, true, {
+		"blob": "x".repeat(Protocol.MAX_MESSAGE_BYTES),
+	})
+	b.receive(oversized)
+	assert_eq(received.size(), 1, "oversized reply completes immediately")
+	if received.size() == 1:
+		assert_eq(received[0].get("code", ""), "invalid_param",
+			"oversized reply preserves invalid_param")
+	assert_eq(b.status().pending, 0, "oversized reply erases pending before callback")
+	b.receive(Protocol.reply(id, true, {"late": true}))
+	b.tick(Time.get_ticks_msec() + 100000)
+	b.detach("late disconnect")
+	assert_eq(received.size(), 1, "oversized reply path completes exactly once")
+
+func test_broker_timeout_is_bounded_to_route_grace_limit() -> void:
+	var b: RefCounted = Broker.new()
+	b.attach(3, _make_send())
+	var received: Array = []
+	var started := Time.get_ticks_msec()
+	b.request("runtime/status", {}, 999999, func(reply: Dictionary) -> void:
+		received.append(reply))
+	b.tick(started + 26001)
+	assert_eq(received.size(), 1, "broker caps timeout at 26 seconds")
+	if received.size() == 1:
+		assert_eq(received[0].get("code", ""), "timeout", "bounded broker timeout code")
+	assert_eq(b.status().pending, 0, "bounded broker timeout clears pending")
 
 func test_multiple_requests_then_detach() -> void:
 	var b: RefCounted = Broker.new()

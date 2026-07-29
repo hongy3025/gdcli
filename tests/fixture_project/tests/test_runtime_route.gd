@@ -61,6 +61,7 @@ func _init() -> void:
 	test_capture_routes_dispatch_through_broker_as_read_only()
 	test_dispatch_rejects_unknown_path_params_before_broker()
 	test_mutation_boundary_failures_are_audited()
+	test_oversized_request_is_rejected_before_broker_and_audited()
 	test_timeout_defaults_caps_and_rejects_invalid_values()
 	test_error_codes_map_to_stable_http_statuses()
 	test_success_flattens_runtime_result_into_ok_envelope()
@@ -222,6 +223,25 @@ func test_mutation_boundary_failures_are_audited() -> void:
 	_assert_mutation_boundary_audited(_request_raw("/runtime/test", "[]"), "runtime/test", "invalid body")
 	_assert_mutation_boundary_audited(_request({"timeout_ms": "slow"}), "runtime/test", "invalid timeout")
 
+func test_oversized_request_is_rejected_before_broker_and_audited() -> void:
+	var plugin := FakePlugin.new()
+	Engine.set_meta("gdapi_plugin", plugin)
+	var broker := FakeBroker.new()
+	var secret := "task16-route-secret"
+	var request := _request({
+		"authorization": secret,
+		"blob": "x".repeat(Protocol.MAX_MESSAGE_BYTES),
+	})
+	var server := _dispatch_request(request, broker, "runtime/test", true)
+	assert_eq(_last_response(server).status, 400, "oversized route request is invalid_param")
+	assert_eq(_last_response(server).body.get("code", ""), ErrorCodes.INVALID_PARAM,
+		"oversized route request preserves stable code")
+	assert_eq(broker.calls.size(), 0, "oversized route request never reaches broker")
+	assert_eq(plugin.events.size(), 1, "oversized mutation request is audited once")
+	if plugin.events.size() == 1:
+		assert_false(JSON.stringify(plugin.events[0]).contains(secret),
+			"oversized mutation audit does not contain the secret value")
+
 func _assert_mutation_boundary_audited(req: Request, op: String, context: String) -> void:
 	var plugin := FakePlugin.new()
 	Engine.set_meta("gdapi_plugin", plugin)
@@ -239,6 +259,8 @@ func test_timeout_defaults_caps_and_rejects_invalid_values() -> void:
 	assert_eq(adapter.operation_timeout(_request()), 5000, "missing timeout uses default")
 	assert_eq(adapter.operation_timeout(_request({"timeout_ms": 5000.0})), 5000,
 		"exact integral float timeout is accepted")
+	assert_eq(adapter.operation_timeout(_request({"timeout_ms": 25000})), 25000,
+		"maximum operation timeout is accepted")
 	assert_eq(adapter.operation_timeout(_request({"timeout_ms": 99999})), 25000, "timeout is capped")
 	var broker := FakeBroker.new()
 	broker.next_reply = {"ok": true, "result": {"ready": true}}

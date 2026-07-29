@@ -178,15 +178,17 @@ func _scan_inbox(_now_msec: int) -> void:
 			dict["version"] = int(dict.version)
 		if typeof(dict.get("id")) == TYPE_FLOAT:
 			dict["id"] = int(dict.id)
+		var request_generation := String(dict.get("generation", ""))
+		if not _generation.is_empty() and request_generation != _generation:
+			inbox.remove(filename)
+			continue
 		var verdict := Protocol.validate_message(dict)
 		if not bool(verdict.get("ok", false)):
 			inbox.remove(filename)
+			if Protocol.message_exceeds_limit(dict):
+				_reject_oversized_request(dict, verdict)
 			continue
 		if String(dict.get("kind", "")) != "request":
-			inbox.remove(filename)
-			continue
-		var request_generation := String(dict.get("generation", ""))
-		if not _generation.is_empty() and request_generation != _generation:
 			inbox.remove(filename)
 			continue
 		var id: int = int(dict.id)
@@ -286,8 +288,40 @@ func _finish_request(id: int, handler_reply: Variant) -> void:
 		_abandon_disconnected_inflight()
 
 func _write_reply(id: int, reply: Dictionary) -> bool:
+	var verdict := Protocol.validate_message(reply)
+	if not bool(verdict.get("ok", false)):
+		return false
 	var out_path := root_path().path_join(_probe_id).path_join("outbox").path_join(str(id) + ".json")
 	return _atomic_write(out_path, JSON.stringify(reply))
+
+## Convert a correlatable oversized request into one bounded reply. The id is
+## claimed before writing so duplicate inbox files cannot execute or reply twice.
+func _reject_oversized_request(request: Dictionary, verdict: Dictionary) -> void:
+	if int(request.get("version", -1)) != Protocol.VERSION:
+		return
+	if String(request.get("kind", "")) != "request":
+		return
+	var raw_id: Variant = request.get("id", null)
+	if typeof(raw_id) != TYPE_INT or int(raw_id) < 1:
+		return
+	var generation := String(request.get("generation", ""))
+	if not _generation.is_empty() and generation != _generation:
+		return
+	var id := int(raw_id)
+	if not _claim_inbox(id, generation, request.get("payload", {})):
+		return
+	var state: Dictionary = _inflight[id]
+	state["reply"] = _error_reply(
+		id,
+		String(verdict.get("code", "invalid_param")),
+		String(verdict.get("error", "runtime request exceeds protocol bounds")),
+		generation
+	)
+	_inflight[id] = state
+	if _write_reply(id, state.reply):
+		_inflight.erase(id)
+	elif not _endpoint_exists():
+		_abandon_disconnected_inflight()
 
 func _endpoint_exists() -> bool:
 	var probe_dir := root_path().path_join(_probe_id)

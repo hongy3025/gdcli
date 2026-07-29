@@ -128,6 +128,9 @@ func _attach_probe(probe_id: String, hello: Dictionary) -> void:
 	DirAccess.make_dir_recursive_absolute(probe_root.path_join("outbox"))
 	var self_ref := self
 	var send := func(message: Dictionary) -> bool:
+		var verdict := Protocol.validate_message(message)
+		if not bool(verdict.get("ok", false)):
+			return false
 		var raw_id: Variant = message.get("id", 0)
 		var id_int: int = int(raw_id)
 		var inbox_path := root_path().path_join(probe_id).path_join("inbox").path_join(str(id_int) + ".json")
@@ -177,6 +180,9 @@ func _scan_outbox() -> void:
 			_normalize_protocol_integers(reply)
 			var verdict: Dictionary = Protocol.validate_message(reply)
 			if not bool(verdict.get("ok", false)):
+				if Protocol.message_exceeds_limit(reply):
+					if _broker != null and _broker.has_method("receive"):
+						_broker.call("receive", reply)
 				continue
 			if String(reply.get("kind", "")) != "reply":
 				continue

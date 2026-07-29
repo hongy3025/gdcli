@@ -135,11 +135,22 @@ static func validate_message(value: Variant) -> Dictionary:
 		return _error("invalid_param", "runtime message payload must be an object when present")
 
 	# 体积检查放在最后，避免在大 payload 上做无效的类型校验开销
-	var size: int = JSON.stringify(dict).to_utf8_buffer().size()
-	if size > MAX_MESSAGE_BYTES:
+	if message_size_bytes(dict) > MAX_MESSAGE_BYTES:
 		return _error("invalid_param", "runtime message exceeds 4 MiB")
 
 	return {"ok": true}
+
+## Return the exact UTF-8 wire size used by the protocol bound.
+static func message_size_bytes(value: Variant) -> int:
+	return JSON.stringify(value).to_utf8_buffer().size()
+
+## Return true only when the serialized value exceeds the protocol limit.
+static func message_exceeds_limit(value: Variant) -> bool:
+	return message_size_bytes(value) > MAX_MESSAGE_BYTES
+
+## Route-side request validation uses the same protocol envelope as broker/probe.
+static func validate_request(op: String, payload: Dictionary) -> Dictionary:
+	return validate_message(request(1, op, payload))
 
 ## 判断一个 op 是否被当前协议拒绝（仅在 validate_message 内部使用，
 ## 但暴露给 runtime_probe 等需要主动跳过的场景）

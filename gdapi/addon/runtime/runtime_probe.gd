@@ -106,6 +106,9 @@ func _exit_tree() -> void:
 ## @param req 协议 v1 request 字典
 ## @return 协议 v1 reply 字典或 awaitable result(交给 file transport 写 outbox)
 func _handle_file_transport_request(req: Dictionary) -> Variant:
+	var boundary := _validate_request_boundary(req)
+	if not bool(boundary.get("ok", false)):
+		return boundary
 	var op: String = String(req.get("op", ""))
 	var payload: Dictionary = req.get("payload", {})
 	return await _dispatch_async(op, payload)
@@ -128,17 +131,16 @@ func _on_runtime_capture(channel: String, args: Array) -> bool:
 	var raw: Variant = args[0]
 	if typeof(raw) != TYPE_DICTIONARY:
 		return false
+	var request_msg: Dictionary = raw
+	if not _generation_matches(request_msg):
+		return false
 	var verdict: Dictionary = Protocol.validate_message(raw)
 	if not bool(verdict.get("ok", false)):
+		if Protocol.message_exceeds_limit(request_msg):
+			return _send_request_rejection(request_msg, verdict)
 		return false
-	var request_msg: Dictionary = raw
 	if String(request_msg.get("kind", "")) != "request":
 		return false
-	if _file_transport != null:
-		var active_generation := String(_file_transport.generation())
-		var request_generation := String(request_msg.get("generation", ""))
-		if not active_generation.is_empty() and request_generation != active_generation:
-			return false
 	_dispatch(request_msg)
 	return true
 
@@ -154,7 +156,59 @@ func _dispatch(request_msg: Dictionary) -> void:
 	var reply: Dictionary = await _dispatch_async(op, payload)
 	var ok: bool = bool(reply.get("ok", false))
 	var message: Dictionary = Protocol.reply(id, ok, reply.get("result", {}), String(reply.get("error", "")), String(reply.get("code", "")), String(request_msg.get("generation", "")))
+	var verdict := Protocol.validate_message(message)
+	if not bool(verdict.get("ok", false)):
+		message = Protocol.reply(
+			id,
+			false,
+			null,
+			String(verdict.get("error", "runtime reply exceeds protocol bounds")),
+			String(verdict.get("code", "invalid_param")),
+			String(request_msg.get("generation", ""))
+		)
 	_send_message(message)
+
+func _validate_request_boundary(request_msg: Dictionary) -> Dictionary:
+	if not _generation_matches(request_msg):
+		return {
+			"ok": false,
+			"code": "conflict",
+			"error": "runtime request generation does not match active probe",
+		}
+	var verdict := Protocol.validate_message(request_msg)
+	if not bool(verdict.get("ok", false)):
+		return verdict
+	if String(request_msg.get("kind", "")) != "request":
+		return {
+			"ok": false,
+			"code": "invalid_param",
+			"error": "runtime probe only accepts request messages",
+		}
+	return {"ok": true}
+
+func _generation_matches(request_msg: Dictionary) -> bool:
+	if _file_transport == null:
+		return true
+	var active_generation := String(_file_transport.generation())
+	return active_generation.is_empty() or String(request_msg.get("generation", "")) == active_generation
+
+func _send_request_rejection(request_msg: Dictionary, verdict: Dictionary) -> bool:
+	if int(request_msg.get("version", -1)) != Protocol.VERSION:
+		return false
+	if String(request_msg.get("kind", "")) != "request":
+		return false
+	var raw_id: Variant = request_msg.get("id", null)
+	if typeof(raw_id) != TYPE_INT or int(raw_id) < 1:
+		return false
+	var rejection := Protocol.reply(
+		int(raw_id),
+		false,
+		null,
+		String(verdict.get("error", "runtime request exceeds protocol bounds")),
+		String(verdict.get("code", "invalid_param")),
+		String(request_msg.get("generation", ""))
+	)
+	return _send_message(rejection)
 
 ## 把 op 转成对应 reply
 func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
@@ -362,6 +416,9 @@ func _send_hello() -> void:
 
 ## Wire 发送:把 reply / event 通过 EngineDebugger 推到 editor
 func _send_message(message: Dictionary) -> bool:
+	var verdict := Protocol.validate_message(message)
+	if not bool(verdict.get("ok", false)):
+		return false
 	if not _engine_debugger_registered or EngineDebugger == null or not EngineDebugger.is_active():
 		return false
 	EngineDebugger.send_message(DEBUGGER_CHANNEL, [message])

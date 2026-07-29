@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -108,7 +109,15 @@ def _disconnect_active_file_probe(env: dict[str, Any]) -> tuple[Path, str]:
     assert len(hello_paths) == 1
     hello_path = hello_paths[0]
     hello_json = hello_path.read_text(encoding="utf-8")
-    hello_path.unlink()
+    deadline = time.monotonic() + 1.0
+    while True:
+        try:
+            hello_path.unlink()
+            break
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
     wait_for(
         lambda: (
             exec_ok(env, "runtime/status").get("state") == "stopped"
@@ -424,6 +433,23 @@ def test_transport_disconnect_completes_await_once_and_cleans_late_runtime_work(
         interval=0.02,
     )
     _assert_async_resources_clean(m3_running)
+
+
+def test_transport_disconnect_completes_long_call_once_with_zero_pending(m3_running):
+    caller = _start_cli(m3_running, "runtime/node/call", {
+        "node_path": TARGET,
+        "method": "block_then_emit_finished",
+        "args": [300],
+        "timeout_ms": 25000,
+    })
+    _wait_for_pending(m3_running)
+    hello_path, hello_json = _disconnect_active_file_probe(m3_running)
+    error, stderr = _finish_cli(caller, success=False)
+    assert error["code"] == "conflict"
+    assert stderr.count("Error (409):") == 1
+    assert exec_ok(m3_running, "runtime/status")["pending"] == 0
+    _restore_file_probe(m3_running, hello_path, hello_json)
+    assert exec_ok(m3_running, "runtime/status")["pending"] == 0
 
 
 def test_legacy_immediate_emit_does_not_satisfy_future_await(m3_running):

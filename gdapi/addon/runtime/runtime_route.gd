@@ -9,6 +9,7 @@ class_name GdApiRuntimeRoute
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
 const RuntimeBroker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
+const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
@@ -37,6 +38,10 @@ func dispatch(req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool 
 
 	var payload: Dictionary = payload_variant.duplicate(true)
 	payload["timeout_ms"] = timeout
+	var protocol_verdict := Protocol.validate_request(op, payload)
+	if not bool(protocol_verdict.get("ok", false)):
+		_reject(req, res, op, mutation, protocol_verdict)
+		return
 	var broker_timeout := mini(timeout + BROKER_GRACE_TIMEOUT, MAX_BROKER_TIMEOUT)
 	var broker: Variant = RuntimeBroker.instance()
 	if broker == null or not broker.has_method("request"):
