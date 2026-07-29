@@ -19,6 +19,7 @@ const MAX_CAMERA_PATH_LENGTH := 1024
 const MAX_ENCODED_BYTES := Protocol.MAX_MESSAGE_BYTES
 const PROTOCOL_ENVELOPE_RESERVE := 512
 
+
 static func viewport(payload: Dictionary) -> Dictionary:
 	var validated := validate_viewport_payload(payload)
 	if not bool(validated.get("ok", false)):
@@ -32,6 +33,7 @@ static func viewport(payload: Dictionary) -> Dictionary:
 		return _failure("timeout", "viewport capture timed out")
 	return await _capture_viewport(tree.root, {}, {}, deadline_msec)
 
+
 static func camera(payload: Dictionary) -> Dictionary:
 	var validated := validate_camera_payload(payload)
 	if not bool(validated.get("ok", false)):
@@ -43,8 +45,10 @@ static func camera(payload: Dictionary) -> Dictionary:
 	await RenderingServer.frame_post_draw
 	if _deadline_reached(deadline_msec):
 		return _failure("timeout", "camera capture timed out")
-	return await _capture_viewport(resolved.viewport, {"camera": validated.node_path}, {},
-		deadline_msec)
+	return await _capture_viewport(
+		resolved.viewport, {"camera": validated.node_path}, {}, deadline_msec
+	)
+
 
 static func frames(payload: Dictionary) -> Dictionary:
 	var validated := validate_frames_payload(payload)
@@ -71,10 +75,15 @@ static func frames(payload: Dictionary) -> Dictionary:
 		await RenderingServer.frame_post_draw
 		if _deadline_reached(deadline_msec):
 			return _failure("timeout", "frame capture timed out")
-		var captured := await _capture_viewport(source, {"index": i}, {
-			"frames": frames_arr,
-			"count": frames_arr.size(),
-		}, deadline_msec)
+		var captured := await _capture_viewport(
+			source,
+			{"index": i},
+			{
+				"frames": frames_arr,
+				"count": frames_arr.size(),
+			},
+			deadline_msec
+		)
 		if not bool(captured.get("ok", false)):
 			return captured
 		var frame: Dictionary = captured.result
@@ -84,14 +93,17 @@ static func frames(payload: Dictionary) -> Dictionary:
 			return finalized
 	return finalized
 
+
 static func validate_viewport_payload(payload: Variant) -> Dictionary:
 	if typeof(payload) != TYPE_DICTIONARY:
 		return _failure("invalid_param", "capture payload must be an object")
-	var timeout := _strict_integer(payload, "timeout_ms", DEFAULT_OPERATION_TIMEOUT_MS, 1,
-		MAX_OPERATION_TIMEOUT_MS)
+	var timeout := _strict_integer(
+		payload, "timeout_ms", DEFAULT_OPERATION_TIMEOUT_MS, 1, MAX_OPERATION_TIMEOUT_MS
+	)
 	if not bool(timeout.get("ok", false)):
 		return timeout
 	return {"ok": true, "timeout_ms": timeout.value}
+
 
 static func validate_camera_payload(payload: Variant) -> Dictionary:
 	var common := validate_viewport_payload(payload)
@@ -103,6 +115,7 @@ static func validate_camera_payload(payload: Variant) -> Dictionary:
 	if not bool(path_result.get("ok", false)):
 		return path_result
 	return {"ok": true, "timeout_ms": common.timeout_ms, "node_path": path_result.path}
+
 
 static func validate_frames_payload(payload: Variant) -> Dictionary:
 	var common := validate_viewport_payload(payload)
@@ -128,6 +141,7 @@ static func validate_frames_payload(payload: Variant) -> Dictionary:
 		"camera_path": camera_path.path,
 	}
 
+
 static func validate_camera_path(value: Variant, required: bool) -> Dictionary:
 	if typeof(value) != TYPE_STRING:
 		return _failure("invalid_param", "camera path must be a string")
@@ -142,11 +156,12 @@ static func validate_camera_path(value: Variant, required: bool) -> Dictionary:
 		return _failure("invalid_param", "camera path must be an absolute /root path")
 	return {"ok": true, "path": path}
 
+
 ## Check the complete protocol reply, including a conservative id/generation envelope.
 static func protocol_result_fits(result: Variant) -> bool:
-	var envelope := Protocol.reply(9_223_372_036_854_775_807, true, result, "", "",
-		"g".repeat(128))
+	var envelope := Protocol.reply(9_223_372_036_854_775_807, true, result, "", "", "g".repeat(128))
 	return JSON.stringify(envelope).to_utf8_buffer().size() <= MAX_ENCODED_BYTES
+
 
 ## Serialize the complete aggregate before checking the same operation deadline.
 ## The post-serialization gate prevents a final frame from succeeding after its
@@ -159,6 +174,7 @@ static func finalize_frames_result(frames_arr: Array, deadline_msec: int) -> Dic
 	if not fits:
 		return _failure("invalid_param", "encoded capture reply exceeds 4 MiB")
 	return {"ok": true, "result": aggregate}
+
 
 static func _resolve_camera(node_path: String) -> Dictionary:
 	var tree := Engine.get_main_loop() as SceneTree
@@ -178,11 +194,16 @@ static func _resolve_camera(node_path: String) -> Dictionary:
 		return _failure("not_found", "camera viewport is unavailable")
 	return {"ok": true, "viewport": viewport}
 
+
 ## Reject an oversized source before CPU readback. This deliberately does not
 ## resize a full-size Image after allocation: callers must provide a bounded
 ## viewport/render target when they need a smaller capture.
-static func _capture_viewport(viewport_node: Viewport, metadata: Dictionary,
-		current_result: Dictionary = {}, deadline_msec: int = -1) -> Dictionary:
+static func _capture_viewport(
+	viewport_node: Viewport,
+	metadata: Dictionary,
+	current_result: Dictionary = {},
+	deadline_msec: int = -1
+) -> Dictionary:
 	if viewport_node == null:
 		return _failure("not_found", "viewport is unavailable")
 	if _deadline_expired(deadline_msec):
@@ -193,10 +214,12 @@ static func _capture_viewport(viewport_node: Viewport, metadata: Dictionary,
 	var result := capture_texture(texture, metadata, current_result, deadline_msec)
 	return result
 
+
 ## Public test seam around the allocation boundary. A fake texture can prove
 ## get_image() is never reached for an oversized source.
-static func capture_texture(texture: Variant, metadata: Dictionary,
-		current_result: Dictionary = {}, deadline_msec: int = -1) -> Dictionary:
+static func capture_texture(
+	texture: Variant, metadata: Dictionary, current_result: Dictionary = {}, deadline_msec: int = -1
+) -> Dictionary:
 	if texture == null:
 		return _failure("godot_error", "viewport texture is unavailable")
 	var source_width := int(texture.get_width())
@@ -204,8 +227,7 @@ static func capture_texture(texture: Variant, metadata: Dictionary,
 	if source_width <= 0 or source_height <= 0:
 		return _failure("godot_error", "viewport texture has invalid dimensions")
 	if source_width > MAX_WIDTH or source_height > MAX_HEIGHT:
-		return _failure("invalid_param",
-			"capture source exceeds the 1920x1080 pre-readback limit")
+		return _failure("invalid_param", "capture source exceeds the 1920x1080 pre-readback limit")
 	if _deadline_expired(deadline_msec):
 		return _failure("timeout", "capture timed out before readback")
 	var image: Image = texture.get_image()
@@ -216,8 +238,7 @@ static func capture_texture(texture: Variant, metadata: Dictionary,
 	if image.get_width() <= 0 or image.get_height() <= 0:
 		return _failure("godot_error", "viewport image has invalid dimensions")
 	if image.get_width() > MAX_WIDTH or image.get_height() > MAX_HEIGHT:
-		return _failure("invalid_param",
-			"capture image exceeds the 1920x1080 allocation limit")
+		return _failure("invalid_param", "capture image exceeds the 1920x1080 allocation limit")
 	var png_bytes := image.save_png_to_buffer()
 	if _deadline_expired(deadline_msec):
 		return _failure("timeout", "capture timed out during PNG encoding")
@@ -243,22 +264,30 @@ static func capture_texture(texture: Variant, metadata: Dictionary,
 		"data_base64": data_base64,
 	}
 	item.merge(metadata, true)
-	if not protocol_result_fits(item if current_result.is_empty() else {
-		"frames": current_result.get("frames", []) + [item],
-		"count": int(current_result.get("count", 0)) + 1,
-	}):
+	if not protocol_result_fits(
+		(
+			item
+			if current_result.is_empty()
+			else {
+				"frames": current_result.get("frames", []) + [item],
+				"count": int(current_result.get("count", 0)) + 1,
+			}
+		)
+	):
 		return _failure("invalid_param", "encoded capture reply exceeds 4 MiB")
 	if _deadline_expired(deadline_msec):
 		return _failure("timeout", "capture timed out during protocol size validation")
 	return {"ok": true, "result": item}
 
+
 static func _protocol_size(result: Variant) -> int:
-	var envelope := Protocol.reply(9_223_372_036_854_775_807, true, result, "", "",
-		"g".repeat(128))
+	var envelope := Protocol.reply(9_223_372_036_854_775_807, true, result, "", "", "g".repeat(128))
 	return JSON.stringify(envelope).to_utf8_buffer().size()
 
-static func _strict_integer(payload: Dictionary, key: String, default_value: int,
-		minimum: int, maximum: int) -> Dictionary:
+
+static func _strict_integer(
+	payload: Dictionary, key: String, default_value: int, minimum: int, maximum: int
+) -> Dictionary:
 	if not payload.has(key):
 		return {"ok": true, "value": default_value}
 	var raw: Variant = payload[key]
@@ -275,14 +304,18 @@ static func _strict_integer(payload: Dictionary, key: String, default_value: int
 		return {"ok": true, "value": int(number)}
 	return _failure("invalid_param", "%s must be an integer" % key)
 
+
 static func _deadline_reached(deadline_msec: int) -> bool:
 	return Time.get_ticks_msec() >= deadline_msec
+
 
 static func _deadline_expired(deadline_msec: int) -> bool:
 	return deadline_msec >= 0 and _deadline_reached(deadline_msec)
 
+
 static func _failure(code: String, error: String) -> Dictionary:
 	return {"ok": false, "code": code, "error": error}
+
 
 static func png_bytes_to_sha256(png_bytes: PackedByteArray) -> String:
 	var context := HashingContext.new()

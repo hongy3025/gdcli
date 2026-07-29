@@ -53,6 +53,7 @@ var _file_connected: bool = false
 
 var _active_transport: String = "none"
 
+
 ## 返回当前 broker 的可观测状态
 ##
 ## 含 session_id 让外部路由可以判定"是否同一会话";
@@ -74,6 +75,8 @@ func status() -> Dictionary:
 		"transport": _active_transport,
 		"generation": _generation,
 	}
+
+
 ## 在切换 session（先 detach 再 attach）或第一次拉起游戏之前调用；
 ## 本方法会先把已有 pending 清掉再绑定新 session，避免悬挂。
 ##
@@ -95,6 +98,7 @@ func attach(session_id: int, send: Callable, generation: String = "") -> bool:
 		_session_started_at = Time.get_unix_time_from_system()
 	return true
 
+
 ## 把 broker 标记为 connecting 而不绑定 session
 ##
 ## 用于 project/run 已经发起但 debugger plugin 尚未回调之前；后续
@@ -111,6 +115,7 @@ func begin_connect(generation: String = "") -> String:
 		_state = "connecting"
 	return _generation
 
+
 ## 开始新的运行世代，并原子地失效旧 transport/pending。
 ## 返回值会同时被 editor 与 probe 写入 hello/request metadata。
 func begin_generation() -> String:
@@ -123,6 +128,7 @@ func begin_generation() -> String:
 	_notify_pending_failures(pending_snapshot, "runtime generation replaced")
 	return _generation
 
+
 ## 把 broker 标记为 connected（probe hello 已到达）
 ##
 ## 由 runtime debugger plugin 在收到 hello 事件时调用；
@@ -134,6 +140,8 @@ func mark_connected() -> void:
 		_state = "connected"
 	_engine_connected = true
 	_select_transport_sender()
+
+
 ## attach file transport(由 editor 侧文件 transport manager 调用)
 ##
 ## 保存 file transport 的 send callable，并按 EngineDebugger > file > none
@@ -159,12 +167,15 @@ func attach_file_transport(probe_id: String, send: Callable, generation: String 
 		_session_started_at = Time.get_unix_time_from_system()
 	return true
 
+
 ## detach file transport(editor 侧主动关闭时调用)
 ##
 ## 仅在当前活跃 transport 是 file 时清空 file 状态。
 ##
 ## @param reason 人类可读的关闭原因
-func detach_file_transport(reason: String = "file transport detached", generation: String = "") -> void:
+func detach_file_transport(
+	reason: String = "file transport detached", generation: String = ""
+) -> void:
 	if not generation.is_empty() and generation != _file_generation:
 		return
 	var was_file_active: bool = _active_transport == "file"
@@ -176,11 +187,14 @@ func detach_file_transport(reason: String = "file transport detached", generatio
 	if was_file_active:
 		detach(reason)
 
+
 ## 显式断开 EngineDebugger transport。
 ##
 ## 保留仍然有效的 file sender 作为 fallback；只有两个 transport 都不可用时
 ## 才一次性失败 pending。
-func detach_engine_debugger(reason: String = "engine debugger detached", generation: String = "") -> void:
+func detach_engine_debugger(
+	reason: String = "engine debugger detached", generation: String = ""
+) -> void:
 	if not generation.is_empty() and generation != _engine_generation:
 		return
 	if not _engine_connected and _engine_sender.is_null():
@@ -197,6 +211,7 @@ func detach_engine_debugger(reason: String = "engine debugger detached", generat
 	_state = "stopped"
 	_fail_pending(reason)
 
+
 ## 由 transport 路径调用,显式切换活跃 transport 标识
 ##
 ## EngineDebugger hello 到达时切到 "engine_debugger",让上层能区分
@@ -206,6 +221,7 @@ func detach_engine_debugger(reason: String = "engine debugger detached", generat
 func _set_active_transport(_name: String) -> void:
 	# Compatibility hook; priority remains owned by the central selector.
 	_select_transport_sender()
+
 
 ## 记录 transport 连通性；generation 由后续 transport 协商使用，保留在
 ## broker 边界以免 transport 自行持有会话状态。
@@ -224,6 +240,7 @@ func set_transport_connected(name: String, connected: bool, generation: String =
 			_engine_connected = true
 			_select_transport_sender()
 
+
 ## 在 EngineDebugger、file、none 之间选择实际 sender。此方法是唯一的
 ## transport 优先级决策点，优先顺序固定为 EngineDebugger > file > none。
 func _select_transport_sender() -> void:
@@ -238,6 +255,7 @@ func _select_transport_sender() -> void:
 	_sender = Callable()
 	_active_transport = "none"
 
+
 func _accept_generation(incoming: String) -> bool:
 	if incoming.is_empty():
 		return _generation.is_empty()
@@ -245,6 +263,7 @@ func _accept_generation(incoming: String) -> bool:
 		_generation = incoming
 		_write_generation_marker()
 	return incoming == _generation
+
 
 func _clear_transports() -> void:
 	_session_id = -1
@@ -260,12 +279,14 @@ func _clear_transports() -> void:
 	_state = "stopped"
 	_last_attach_accepted = true
 
+
 ## 清理仅由 gdapi runtime 使用的 root；不会接受任意调用方路径。
 func cleanup_runtime_root() -> void:
 	var root := ProjectSettings.globalize_path("res://.godot/gdapi_runtime").simplify_path()
 	if not root.ends_with(".godot/gdapi_runtime"):
 		return
 	_remove_runtime_tree(root, root)
+
 
 func _remove_runtime_tree(path: String, root: String) -> void:
 	if path != root and not path.begins_with(root + "/") and not path.begins_with(root + "\\"):
@@ -279,6 +300,7 @@ func _remove_runtime_tree(path: String, root: String) -> void:
 		for dir_name in dir.get_directories():
 			_remove_runtime_tree(path.path_join(dir_name), root)
 	DirAccess.remove_absolute(path)
+
 
 func _write_generation_marker() -> void:
 	var root := ProjectSettings.globalize_path("res://.godot/gdapi_runtime").simplify_path()
@@ -303,9 +325,11 @@ func detach(reason: String = "runtime detached") -> void:
 	cleanup_runtime_root()
 	_notify_pending_failures(pending_snapshot, reason)
 
+
 func _fail_pending(reason: String) -> void:
 	var snapshot := _drain_pending()
 	_notify_pending_failures(snapshot, reason)
+
 
 ## Snapshot and erase every pending request without invoking user code.
 ## Session teardown must finish before callbacks can re-enter request().
@@ -315,6 +339,7 @@ func _drain_pending() -> Array:
 		snapshot.append([id, _pending[id].callback])
 	_pending.clear()
 	return snapshot
+
 
 func _notify_pending_failures(snapshot: Array, reason: String) -> void:
 	for entry in snapshot:
@@ -328,6 +353,7 @@ func _notify_pending_failures(snapshot: Array, reason: String) -> void:
 		}
 		if cb.is_valid():
 			cb.call(reply)
+
 
 ## 发送一个请求,返回一个整数 id
 ##
@@ -343,29 +369,37 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 	_next_id += 1
 	if _state == "stopped":
 		if on_complete.is_valid():
-			on_complete.call({
-				"ok": false,
-				"code": "conflict",
-				"error": "runtime is not connected",
-				"request_id": id,
-			})
+			(
+				on_complete
+				. call(
+					{
+						"ok": false,
+						"code": "conflict",
+						"error": "runtime is not connected",
+						"request_id": id,
+					}
+				)
+			)
 		return id
 	var safe_payload: Dictionary = payload
 	var message: Dictionary = Protocol.request(id, op, safe_payload, _generation)
 	var verdict: Dictionary = Protocol.validate_message(message)
 	if not bool(verdict.get("ok", false)):
 		if on_complete.is_valid():
-			on_complete.call({
-				"ok": false,
-				"code": verdict.get("code", "invalid_param"),
-				"error": verdict.get("error", "invalid runtime message"),
-				"request_id": id,
-			})
+			(
+				on_complete
+				. call(
+					{
+						"ok": false,
+						"code": verdict.get("code", "invalid_param"),
+						"error": verdict.get("error", "invalid runtime message"),
+						"request_id": id,
+					}
+				)
+			)
 		return id
 	var bounded_timeout := clampi(
-		timeout_ms if timeout_ms > 0 else DEFAULT_REQUEST_TIMEOUT_MS,
-		1,
-		MAX_REQUEST_TIMEOUT_MS
+		timeout_ms if timeout_ms > 0 else DEFAULT_REQUEST_TIMEOUT_MS, 1, MAX_REQUEST_TIMEOUT_MS
 	)
 	var deadline_msec: int = Time.get_ticks_msec() + bounded_timeout
 	_pending[id] = {
@@ -381,6 +415,7 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 		if not ok:
 			_complete_with_failure(id, "conflict", "runtime transport refused the message")
 	return id
+
 
 ## 处理一条来自 runtime 的回复（reply）或推送（event）
 ##
@@ -413,6 +448,7 @@ func receive(message: Variant) -> void:
 	if cb.is_valid():
 		cb.call(dict)
 
+
 ## A size-invalid reply still contains enough bounded envelope metadata to
 ## correlate it with one live request. Complete that request immediately so a
 ## transport boundary cannot turn an explicit bound violation into a timeout.
@@ -442,6 +478,7 @@ func _complete_oversized_reply(message: Variant, verdict: Dictionary) -> void:
 		String(verdict.get("error", "runtime reply exceeds protocol bounds"))
 	)
 
+
 ## 由 transport 周期性调用,清理已超时请求
 ##
 ## @param now_msec 当前毫秒时间戳
@@ -454,6 +491,7 @@ func tick(now_msec: int) -> void:
 	for id in expired:
 		_complete_with_failure(int(id), "timeout", "runtime request timed out")
 
+
 ## 把指定 id 的请求立即失败
 ##
 ## @param id 失败 id
@@ -465,12 +503,18 @@ func _complete_with_failure(id: int, code: String, error: String) -> void:
 		return
 	var cb: Callable = entry.callback
 	if cb.is_valid():
-		cb.call({
-			"ok": false,
-			"code": code,
-			"error": error,
-			"request_id": id,
-		})
+		(
+			cb
+			. call(
+				{
+					"ok": false,
+					"code": code,
+					"error": error,
+					"request_id": id,
+				}
+			)
+		)
+
 
 ## Remove ownership before invoking user code. Late replies, timeout ticks and
 ## disconnect cleanup all observe the id as completed, even during re-entrancy.
@@ -481,6 +525,7 @@ func _take_pending(id: int) -> Dictionary:
 	_pending.erase(id)
 	return entry
 
+
 ## attach 前先把旧 pending 清理干净,避免重复 callback
 func _prepare_new_session(reason: String) -> void:
 	if _state == "stopped" and _pending.is_empty():
@@ -488,6 +533,7 @@ func _prepare_new_session(reason: String) -> void:
 	var pending_snapshot := _drain_pending()
 	_clear_transports()
 	_notify_pending_failures(pending_snapshot, reason)
+
 
 ## 暴露测试用的"instance" static 方法供 plugin/route 通过 Engine meta 访问
 ##

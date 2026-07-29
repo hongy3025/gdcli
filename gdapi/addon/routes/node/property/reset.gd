@@ -7,6 +7,7 @@ const NodeEditor := preload("res://addons/gdapi/runtime/services/node_editor.gd"
 
 const ROUTE := "node/property/reset"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var node_path: String = req.get_body("node_path", "")
 	var property: String = req.get_body("property", "")
@@ -22,17 +23,23 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("重置属性为类默认值接 UndoRedo")
-		.desc("使用 ClassDB.class_get_property_default_value 获取默认值,通过 EditAction.commit_property 提交变更。")
-		.param("node_path", "String", true, "节点路径")
-		.param("property", "String", true, "属性名")
-		.example("{\"node_path\":\"/root/Main/Player\",\"property\":\"position\"}")
-		.returns("reset 结果", {
-			"ok": "bool",
-			"changed": "bool, 是否与之前的值不同",
-			"undoable": "bool, true",
-			"node_path": "String",
-			"property": "String",
-			"value": "Variant 编码后的默认值",
-		})
+		GdApiRouteDoc
+		. make("重置属性为类默认值接 UndoRedo")
+		. desc(
+			"使用 ClassDB.class_get_property_default_value 获取默认值,通过 EditAction.commit_property 提交变更。"
+		)
+		. param("node_path", "String", true, "节点路径")
+		. param("property", "String", true, "属性名")
+		. example('{"node_path":"/root/Main/Player","property":"position"}')
+		. returns(
+			"reset 结果",
+			{
+				"ok": "bool",
+				"changed": "bool, 是否与之前的值不同",
+				"undoable": "bool, true",
+				"node_path": "String",
+				"property": "String",
+				"value": "Variant 编码后的默认值",
+			}
+		)
 	)

@@ -9,6 +9,7 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 
 const RuntimeBroker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 
+
 ## 处理 status 请求
 ##
 ## 即使 broker 未注册也返回 ok:true 加默认 stopped state,
@@ -19,33 +20,43 @@ const RuntimeBroker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 	var broker: Variant = RuntimeBroker.instance()
 	if broker == null:
-		res.json({
-			"ok": true,
-			"state": "stopped",
-			"protocol_version": 1,
-			"session_id": -1,
-			"pending": 0,
-			"broker_registered": false,
-		})
+		(
+			res
+			. json(
+				{
+					"ok": true,
+					"state": "stopped",
+					"protocol_version": 1,
+					"session_id": -1,
+					"pending": 0,
+					"broker_registered": false,
+				}
+			)
+		)
 		return
 	var status: Dictionary = broker.status()
 	status["ok"] = true
 	status["broker_registered"] = true
 	res.json(status)
 
+
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("查询运行期 broker 状态")
-		.desc("返回 stopped|connecting|connected 三态,运行 protocol_version,以及当前等待中的回调数量。不需要任何 payload。")
-		.returns("状态结果", {
-			"ok": "bool",
-			"state": "String, stopped|connecting|connected",
-			"protocol_version": "int, 当前为 1",
-			"session_id": "int, 当前会话 id(debugger session 或 probe 文件名 hash)",
-			"pending": "int, 当前等待回复的请求数",
-			"broker_registered": "bool, broker 是否已注册到 Engine meta",
-			"session_started_at": "float, unix 时间戳",
-			"transport": "String, 当前活跃 transport: engine_debugger | file | none",
-		})
+		GdApiRouteDoc
+		. make("查询运行期 broker 状态")
+		. desc("返回 stopped|connecting|connected 三态,运行 protocol_version,以及当前等待中的回调数量。不需要任何 payload。")
+		. returns(
+			"状态结果",
+			{
+				"ok": "bool",
+				"state": "String, stopped|connecting|connected",
+				"protocol_version": "int, 当前为 1",
+				"session_id": "int, 当前会话 id(debugger session 或 probe 文件名 hash)",
+				"pending": "int, 当前等待回复的请求数",
+				"broker_registered": "bool, broker 是否已注册到 Engine meta",
+				"session_started_at": "float, unix 时间戳",
+				"transport": "String, 当前活跃 transport: engine_debugger | file | none",
+			}
+		)
 	)

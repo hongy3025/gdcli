@@ -7,7 +7,10 @@
 class_name GdApiGameRoute
 extends "res://addons/gdapi/runtime/runtime_route.gd"
 
-func dispatch_game(req: GdApiRequest, res: GdApiResponse, operation: String, mutation: bool = false) -> void:
+
+func dispatch_game(
+	req: GdApiRequest, res: GdApiResponse, operation: String, mutation: bool = false
+) -> void:
 	if not operation.begins_with("m4/") or operation.trim_prefix("m4/").is_empty():
 		res.error("invalid M4 internal operation", "invalid_param", 400)
 		return

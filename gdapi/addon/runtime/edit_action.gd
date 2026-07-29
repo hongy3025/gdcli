@@ -2,10 +2,12 @@
 class_name GdApiEditAction
 extends RefCounted
 
+
 static func plugin() -> Object:
 	if Engine.has_meta("gdapi_plugin"):
 		return Engine.get_meta("gdapi_plugin")
 	return null
+
 
 static func undo_redo() -> EditorUndoRedoManager:
 	var p := plugin()
@@ -15,8 +17,10 @@ static func undo_redo() -> EditorUndoRedoManager:
 			return manager
 	return null
 
+
 static func has_undo_redo() -> bool:
 	return undo_redo() != null
+
 
 ## 通过 EditorUndoRedoManager 提交属性变更
 ##
@@ -27,10 +31,7 @@ static func has_undo_redo() -> bool:
 ## @param action_name undo/redo 操作名称
 ## @return {ok:true, previous:Variant, history_id:int} 或 {ok:false, error:String}
 static func commit_property(
-	target: Object,
-	property: StringName,
-	value: Variant,
-	action_name: String
+	target: Object, property: StringName, value: Variant, action_name: String
 ) -> Dictionary:
 	if target == null or not is_instance_valid(target):
 		return {"ok": false, "error": "target is invalid"}

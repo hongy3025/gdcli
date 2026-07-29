@@ -14,8 +14,10 @@ func doc() -> GdApiRouteDoc:
 var passed := 0
 var failed := 0
 
+
 func _init() -> void:
 	_run.call_deferred()
+
 
 func _run() -> void:
 	_cleanup()
@@ -34,10 +36,12 @@ func _run() -> void:
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
+
 func _write_handler(summary: String) -> void:
 	var file := FileAccess.open(TEST_ROOT + "/sample.gd", FileAccess.WRITE)
 	file.store_string(HANDLER_TEMPLATE % summary)
 	file.close()
+
 
 func _cleanup() -> void:
 	var file_path := ProjectSettings.globalize_path(TEST_ROOT + "/sample.gd")
@@ -46,6 +50,7 @@ func _cleanup() -> void:
 	var dir_path := ProjectSettings.globalize_path(TEST_ROOT)
 	if DirAccess.dir_exists_absolute(dir_path):
 		DirAccess.remove_absolute(dir_path)
+
 
 func assert_eq(actual, expected, context: String) -> void:
 	if actual == expected:

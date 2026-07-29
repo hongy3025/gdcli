@@ -19,19 +19,31 @@ const RuntimeNodeReparentRoute := preload("res://addons/gdapi/routes/runtime/nod
 const RuntimeNodeCreateRoute := preload("res://addons/gdapi/routes/runtime/node/create.gd")
 const RuntimeNodeDuplicateRoute := preload("res://addons/gdapi/routes/runtime/node/duplicate.gd")
 const RuntimeNodeRenameRoute := preload("res://addons/gdapi/routes/runtime/node/rename.gd")
-const RuntimeScreenshotViewportRoute := preload("res://addons/gdapi/routes/runtime/screenshot/viewport.gd")
-const RuntimeScreenshotCameraRoute := preload("res://addons/gdapi/routes/runtime/screenshot/camera.gd")
-const RuntimeScreenshotFramesRoute := preload("res://addons/gdapi/routes/runtime/screenshot/frames.gd")
+const RuntimeScreenshotViewportRoute := preload(
+	"res://addons/gdapi/routes/runtime/screenshot/viewport.gd"
+)
+const RuntimeScreenshotCameraRoute := preload(
+	"res://addons/gdapi/routes/runtime/screenshot/camera.gd"
+)
+const RuntimeScreenshotFramesRoute := preload(
+	"res://addons/gdapi/routes/runtime/screenshot/frames.gd"
+)
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
-class FakeServer extends RefCounted:
+
+class FakeServer:
+	extends RefCounted
 	var responses: Array = []
 
 	func send_response(id: int, status: int, _headers: Dictionary, body: PackedByteArray) -> void:
-		responses.append({"id": id, "status": status, "body": JSON.parse_string(body.get_string_from_utf8())})
+		responses.append(
+			{"id": id, "status": status, "body": JSON.parse_string(body.get_string_from_utf8())}
+		)
 
-class FakeBroker extends RefCounted:
+
+class FakeBroker:
+	extends RefCounted
 	var calls: Array = []
 	var next_reply: Dictionary = {"ok": true, "result": {}}
 	var duplicate_callback: bool = false
@@ -43,14 +55,18 @@ class FakeBroker extends RefCounted:
 			callback.call(next_reply.duplicate(true))
 		return calls.size()
 
-class FakePlugin extends RefCounted:
+
+class FakePlugin:
+	extends RefCounted
 	var events: Array = []
 
 	func audit_event(event: Dictionary) -> void:
 		events.append(event.duplicate(true))
 
+
 var passed := 0
 var failed := 0
+
 
 func _init() -> void:
 	print("Running GdApiRuntimeRoute tests...\n")
@@ -79,6 +95,7 @@ func _init() -> void:
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
+
 func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void:
 	if actual == expected:
 		passed += 1
@@ -87,39 +104,56 @@ func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void
 		failed += 1
 		print("  FAIL: %s - expected '%s', got '%s'" % [context, expected, actual])
 
+
 func assert_true(value: bool, context: String = "") -> void:
 	assert_eq(value, true, context)
+
 
 func assert_false(value: bool, context: String = "") -> void:
 	assert_eq(value, false, context)
 
+
 func _request(payload: Dictionary = {}) -> Request:
 	return _request_at("/runtime/test", payload)
+
 
 func _request_at(path: String, payload: Dictionary = {}) -> Request:
 	return _request_raw(path, JSON.stringify(payload))
 
+
 func _request_raw(path: String, raw_body: String) -> Request:
-	return Request.new({
-		"method": "POST",
-		"path": path,
-		"body": raw_body.to_utf8_buffer(),
-	})
+	return (
+		Request
+		. new(
+			{
+				"method": "POST",
+				"path": path,
+				"body": raw_body.to_utf8_buffer(),
+			}
+		)
+	)
+
 
 func _response(server: FakeServer) -> Response:
 	return Response.new(server, 17)
 
+
 func _dispatch(payload: Dictionary, broker: FakeBroker, mutation: bool = false) -> FakeServer:
 	return _dispatch_request(_request(payload), broker, "runtime/test", mutation)
 
-func _dispatch_request(req: Request, broker: FakeBroker, op: String, mutation: bool = false) -> FakeServer:
+
+func _dispatch_request(
+	req: Request, broker: FakeBroker, op: String, mutation: bool = false
+) -> FakeServer:
 	Engine.set_meta("gdapi_runtime_broker", broker)
 	var server := FakeServer.new()
 	RuntimeRoute.new().dispatch(req, _response(server), op, mutation)
 	return server
 
+
 func _last_response(server: FakeServer) -> Dictionary:
 	return server.responses.back()
+
 
 func test_disconnected_broker_is_conflict() -> void:
 	Engine.remove_meta("gdapi_runtime_broker")
@@ -129,39 +163,62 @@ func test_disconnected_broker_is_conflict() -> void:
 	assert_eq(_last_response(server).status, 409, "disconnected broker maps to conflict")
 	assert_eq(_last_response(server).body.code, ErrorCodes.CONFLICT, "disconnected broker code")
 
+
 func test_dispatch_requires_exact_runtime_path_and_operation() -> void:
 	var broker := FakeBroker.new()
 	var mismatch := _dispatch_request(_request_at("/runtime/other"), broker, "runtime/test")
 	assert_eq(_last_response(mismatch).status, 400, "path/op mismatch is invalid_param")
 	assert_eq(broker.calls.size(), 0, "path/op mismatch does not reach broker")
-	var arbitrary := _dispatch_request(_request_at("/editor/scene/save"), broker, "editor/scene/save")
+	var arbitrary := _dispatch_request(
+		_request_at("/editor/scene/save"), broker, "editor/scene/save"
+	)
 	assert_eq(_last_response(arbitrary).status, 400, "arbitrary operation is rejected")
 	assert_eq(broker.calls.size(), 0, "arbitrary operation does not reach broker")
 	var empty_path := _dispatch_request(_request_at(""), broker, "runtime/test")
 	assert_eq(_last_response(empty_path).status, 400, "empty request path is rejected")
 
+
 func test_runtime_node_get_dispatches_through_broker() -> void:
 	var broker := FakeBroker.new()
 	Engine.set_meta("gdapi_runtime_broker", broker)
 	var server := FakeServer.new()
-	RuntimeNodeGetRoute.new().handle(
-		_request_at("/runtime/node/get", {
-			"node_path": "/root/RuntimeMain/ProbeTarget",
-			"property": "spawn_position",
-		}),
-		_response(server),
+	(
+		RuntimeNodeGetRoute
+		. new()
+		. handle(
+			_request_at(
+				"/runtime/node/get",
+				{
+					"node_path": "/root/RuntimeMain/ProbeTarget",
+					"property": "spawn_position",
+				}
+			),
+			_response(server),
+		)
 	)
 	assert_eq(broker.calls.size(), 1, "runtime/node/get dispatches through broker")
 	if broker.calls.size() == 1:
-		assert_eq(broker.calls[0].op, "runtime/node/get", "runtime/node/get uses exact broker operation")
-		assert_eq(broker.calls[0].payload, {
-			"node_path": "/root/RuntimeMain/ProbeTarget",
-			"property": "spawn_position",
-			"timeout_ms": 5000,
-		}, "runtime/node/get forwards exact read-only payload")
+		assert_eq(
+			broker.calls[0].op, "runtime/node/get", "runtime/node/get uses exact broker operation"
+		)
+		assert_eq(
+			broker.calls[0].payload,
+			{
+				"node_path": "/root/RuntimeMain/ProbeTarget",
+				"property": "spawn_position",
+				"timeout_ms": 5000,
+			},
+			"runtime/node/get forwards exact read-only payload"
+		)
 	assert_false(_last_response(server).body.has("changed"), "runtime/node/get is not a mutation")
-	assert_false(_last_response(server).body.has("undoable"), "runtime/node/get has no undo contract")
-	assert_false(_last_response(server).body.has("operation"), "runtime/node/get has no mutation operation summary")
+	assert_false(
+		_last_response(server).body.has("undoable"), "runtime/node/get has no undo contract"
+	)
+	assert_false(
+		_last_response(server).body.has("operation"),
+		"runtime/node/get has no mutation operation summary"
+	)
+
 
 func test_scene_node_routes_dispatch_through_broker() -> void:
 	var cases := [
@@ -189,6 +246,7 @@ func test_scene_node_routes_dispatch_through_broker() -> void:
 		if item.mutation:
 			assert_eq(_last_response(server).body.undoable, false, item.route + " is not undoable")
 
+
 func test_capture_routes_dispatch_through_broker_as_read_only() -> void:
 	var cases := [
 		{"route": "runtime/screenshot/viewport", "script": RuntimeScreenshotViewportRoute},
@@ -205,7 +263,10 @@ func test_capture_routes_dispatch_through_broker_as_read_only() -> void:
 		if broker.calls.size() == 1:
 			assert_eq(broker.calls[0].op, item.route, item.route + " uses exact broker operation")
 		assert_false(_last_response(server).body.has("changed"), item.route + " is read-only")
-		assert_false(_last_response(server).body.has("undoable"), item.route + " has no mutation fields")
+		assert_false(
+			_last_response(server).body.has("undoable"), item.route + " has no mutation fields"
+		)
+
 
 func test_dispatch_rejects_unknown_path_params_before_broker() -> void:
 	var broker := FakeBroker.new()
@@ -215,33 +276,51 @@ func test_dispatch_rejects_unknown_path_params_before_broker() -> void:
 	assert_eq(_last_response(server).status, 400, "unknown static-route params are rejected")
 	assert_eq(broker.calls.size(), 0, "malformed params do not reach broker")
 
+
 func test_mutation_boundary_failures_are_audited() -> void:
-	_assert_mutation_boundary_audited(_request_at("/runtime/other"), "runtime/test", "path mismatch")
-	_assert_mutation_boundary_audited(_request_at("/runtime/"), "runtime/", "empty operation suffix")
+	_assert_mutation_boundary_audited(
+		_request_at("/runtime/other"), "runtime/test", "path mismatch"
+	)
+	_assert_mutation_boundary_audited(
+		_request_at("/runtime/"), "runtime/", "empty operation suffix"
+	)
 	var params_request := _request()
 	params_request.params = {"unexpected": "value"}
 	_assert_mutation_boundary_audited(params_request, "runtime/test", "unknown params")
-	_assert_mutation_boundary_audited(_request_raw("/runtime/test", "[]"), "runtime/test", "invalid body")
-	_assert_mutation_boundary_audited(_request({"timeout_ms": "slow"}), "runtime/test", "invalid timeout")
+	_assert_mutation_boundary_audited(
+		_request_raw("/runtime/test", "[]"), "runtime/test", "invalid body"
+	)
+	_assert_mutation_boundary_audited(
+		_request({"timeout_ms": "slow"}), "runtime/test", "invalid timeout"
+	)
+
 
 func test_oversized_request_is_rejected_before_broker_and_audited() -> void:
 	var plugin := FakePlugin.new()
 	Engine.set_meta("gdapi_plugin", plugin)
 	var broker := FakeBroker.new()
 	var secret := "task16-route-secret"
-	var request := _request({
-		"authorization": secret,
-		"blob": "x".repeat(Protocol.MAX_MESSAGE_BYTES),
-	})
+	var request := _request(
+		{
+			"authorization": secret,
+			"blob": "x".repeat(Protocol.MAX_MESSAGE_BYTES),
+		}
+	)
 	var server := _dispatch_request(request, broker, "runtime/test", true)
 	assert_eq(_last_response(server).status, 400, "oversized route request is invalid_param")
-	assert_eq(_last_response(server).body.get("code", ""), ErrorCodes.INVALID_PARAM,
-		"oversized route request preserves stable code")
+	assert_eq(
+		_last_response(server).body.get("code", ""),
+		ErrorCodes.INVALID_PARAM,
+		"oversized route request preserves stable code"
+	)
 	assert_eq(broker.calls.size(), 0, "oversized route request never reaches broker")
 	assert_eq(plugin.events.size(), 1, "oversized mutation request is audited once")
 	if plugin.events.size() == 1:
-		assert_false(JSON.stringify(plugin.events[0]).contains(secret),
-			"oversized mutation audit does not contain the secret value")
+		assert_false(
+			JSON.stringify(plugin.events[0]).contains(secret),
+			"oversized mutation audit does not contain the secret value"
+		)
+
 
 func _assert_mutation_boundary_audited(req: Request, op: String, context: String) -> void:
 	var plugin := FakePlugin.new()
@@ -255,32 +334,50 @@ func _assert_mutation_boundary_audited(req: Request, op: String, context: String
 		assert_eq(plugin.events[0].code, ErrorCodes.INVALID_PARAM, context + " audit code")
 	assert_eq(broker.calls.size(), 0, context + " does not reach broker")
 
+
 func test_timeout_defaults_caps_and_rejects_invalid_values() -> void:
 	var adapter := RuntimeRoute.new()
 	assert_eq(adapter.operation_timeout(_request()), 5000, "missing timeout uses default")
-	assert_eq(adapter.operation_timeout(_request({"timeout_ms": 5000.0})), 5000,
-		"exact integral float timeout is accepted")
-	assert_eq(adapter.operation_timeout(_request({"timeout_ms": 25000})), 25000,
-		"maximum operation timeout is accepted")
-	assert_eq(adapter.operation_timeout(_request({"timeout_ms": 99999})), 25000, "timeout is capped")
+	assert_eq(
+		adapter.operation_timeout(_request({"timeout_ms": 5000.0})),
+		5000,
+		"exact integral float timeout is accepted"
+	)
+	assert_eq(
+		adapter.operation_timeout(_request({"timeout_ms": 25000})),
+		25000,
+		"maximum operation timeout is accepted"
+	)
+	assert_eq(
+		adapter.operation_timeout(_request({"timeout_ms": 99999})), 25000, "timeout is capped"
+	)
 	var broker := FakeBroker.new()
 	broker.next_reply = {"ok": true, "result": {"ready": true}}
 	_dispatch({}, broker)
 	assert_eq(broker.calls[0].payload.timeout_ms, 5000, "default timeout reaches runtime payload")
 	var capped := _dispatch({"timeout_ms": 99999}, broker)
 	assert_eq(broker.calls[1].timeout_ms, 26000, "broker receives operation timeout plus grace")
-	assert_eq(broker.calls[1].payload.timeout_ms, 25000, "runtime receives capped operation timeout")
+	assert_eq(
+		broker.calls[1].payload.timeout_ms, 25000, "runtime receives capped operation timeout"
+	)
 	for invalid in [5000.0000001, -0.0000001]:
-		assert_eq(adapter.operation_timeout(_request({"timeout_ms": invalid})), -1,
-			"unsafe timeout %s is rejected" % invalid)
+		assert_eq(
+			adapter.operation_timeout(_request({"timeout_ms": invalid})),
+			-1,
+			"unsafe timeout %s is rejected" % invalid
+		)
 	for invalid in [NAN, INF, -INF]:
 		var direct_request := _request()
 		direct_request.body = {"timeout_ms": invalid}
-		assert_eq(adapter.operation_timeout(direct_request), -1,
-			"non-finite timeout %s is rejected" % invalid)
+		assert_eq(
+			adapter.operation_timeout(direct_request),
+			-1,
+			"non-finite timeout %s is rejected" % invalid
+		)
 	var invalid_server := _dispatch({"timeout_ms": "slow"}, broker)
 	assert_eq(_last_response(invalid_server).status, 400, "invalid timeout is invalid_param")
 	assert_eq(broker.calls.size(), 2, "invalid timeout never reaches broker")
+
 
 func test_error_codes_map_to_stable_http_statuses() -> void:
 	var expected := {
@@ -301,6 +398,7 @@ func test_error_codes_map_to_stable_http_statuses() -> void:
 		var server := _dispatch({}, broker)
 		assert_eq(_last_response(server).status, expected[code], code + " status")
 
+
 func test_success_flattens_runtime_result_into_ok_envelope() -> void:
 	var broker := FakeBroker.new()
 	broker.next_reply = {"ok": true, "result": {"value": 7, "node_path": "/root/RuntimeMain"}}
@@ -309,6 +407,7 @@ func test_success_flattens_runtime_result_into_ok_envelope() -> void:
 	assert_eq(_last_response(server).body.ok, true, "success envelope ok")
 	assert_eq(_last_response(server).body.value, 7.0, "success envelope result")
 	assert_eq(_last_response(server).body.node_path, "/root/RuntimeMain", "success envelope path")
+
 
 func test_mutation_success_adds_contract_fields_and_audits() -> void:
 	var plugin := FakePlugin.new()
@@ -323,12 +422,15 @@ func test_mutation_success_adds_contract_fields_and_audits() -> void:
 	assert_eq(plugin.events.size(), 1, "mutation success is audited")
 	assert_eq(plugin.events[0].ok, true, "successful audit result")
 
+
 func test_mutation_rejection_is_audited_with_redacted_payload() -> void:
 	var plugin := FakePlugin.new()
 	Engine.set_meta("gdapi_plugin", plugin)
 	var broker := FakeBroker.new()
 	broker.next_reply = {"ok": false, "code": "permission_denied", "error": "denied"}
-	var server := _dispatch({"token": "do-not-log", "nested": {"password": "also-secret"}}, broker, true)
+	var server := _dispatch(
+		{"token": "do-not-log", "nested": {"password": "also-secret"}}, broker, true
+	)
 	assert_eq(_last_response(server).status, 403, "mutation rejection status")
 	assert_eq(plugin.events.size(), 1, "mutation rejection is audited")
 	var summary: Dictionary = plugin.events[0].summary
@@ -336,44 +438,63 @@ func test_mutation_rejection_is_audited_with_redacted_payload() -> void:
 	assert_eq(summary.payload.nested.password, "[REDACTED]", "nested secret is redacted")
 	assert_eq(summary.result.code, "permission_denied", "rejection result is included")
 
+
 func test_redact_recurses_through_nested_values() -> void:
 	var value := {"headers": [{"Authorization": "Bearer secret"}], "data": {"cookie": "private"}}
 	var redacted: Variant = RuntimeRoute.new().redact(value)
 	assert_eq(redacted.headers[0].Authorization, "[REDACTED]", "redacts secrets in arrays")
 	assert_eq(redacted.data.cookie, "[REDACTED]", "redacts secrets in dictionaries")
 
+
 func test_redact_covers_auth_key_variants_and_short_values() -> void:
 	var bearer := "Bearer task16-auth-secret"
 	var short_secret := "Q7"
-	var redacted: Dictionary = RuntimeRoute.new().redact({
-		"auth": bearer,
-		"nested": [
-			{"AUTH_HEADER": short_secret},
-			{"Auth-Header": bearer},
-			{"auth.header": short_secret},
-			{"AuthHeader": bearer},
-		],
-	})
+	var redacted: Dictionary = (
+		RuntimeRoute
+		. new()
+		. redact(
+			{
+				"auth": bearer,
+				"nested":
+				[
+					{"AUTH_HEADER": short_secret},
+					{"Auth-Header": bearer},
+					{"auth.header": short_secret},
+					{"AuthHeader": bearer},
+				],
+			}
+		)
+	)
 	assert_eq(redacted.auth, "[REDACTED]", "auth is redacted")
 	for entry in redacted.nested:
 		assert_eq(entry.values()[0], "[REDACTED]", "auth header spelling is redacted")
 	var serialized := JSON.stringify(redacted)
 	assert_false(serialized.contains(bearer), "Bearer value does not appear in audit summary")
-	assert_false(serialized.contains(short_secret), "short auth value does not appear in audit summary")
+	assert_false(
+		serialized.contains(short_secret), "short auth value does not appear in audit summary"
+	)
+
 
 func test_redact_summarizes_base64_and_large_arrays() -> void:
 	var items: Array = []
 	for i in range(40):
 		items.append(i)
-	var redacted: Dictionary = RuntimeRoute.new().redact({
-		"data_base64": "a".repeat(128),
-		"frames": items,
-	})
+	var redacted: Dictionary = (
+		RuntimeRoute
+		. new()
+		. redact(
+			{
+				"data_base64": "a".repeat(128),
+				"frames": items,
+			}
+		)
+	)
 	assert_eq(redacted.data_base64.type, "base64", "base64 type summary")
 	assert_eq(redacted.data_base64.size, 128, "base64 size summary")
 	assert_eq(redacted.frames.type, "array", "large array type summary")
 	assert_eq(redacted.frames.size, 40, "large array size summary")
 	assert_false(redacted.frames is Array, "large array is not copied into audit")
+
 
 func test_audit_summary_redacts_aliases_and_bounds_unclassified_values() -> void:
 	var plugin := FakePlugin.new()
@@ -385,13 +506,17 @@ func test_audit_summary_redacts_aliases_and_bounds_unclassified_values() -> void
 	blob.resize(64)
 	var broker := FakeBroker.new()
 	broker.next_reply = {"ok": true, "result": {"changed": true}}
-	_dispatch({
-		"api_token": "do-not-log",
-		"nested": {"client_secret": "also-secret"},
-		"large_string": "x".repeat(512),
-		"large_dict": large_dict,
-		"blob": blob,
-	}, broker, true)
+	_dispatch(
+		{
+			"api_token": "do-not-log",
+			"nested": {"client_secret": "also-secret"},
+			"large_string": "x".repeat(512),
+			"large_dict": large_dict,
+			"blob": blob,
+		},
+		broker,
+		true
+	)
 	var payload: Dictionary = plugin.events[0].summary.payload
 	assert_eq(payload.api_token, "[REDACTED]", "api_token alias is redacted")
 	assert_eq(payload.nested.client_secret, "[REDACTED]", "client_secret alias is redacted")
@@ -403,7 +528,9 @@ func test_audit_summary_redacts_aliases_and_bounds_unclassified_values() -> void
 	var large_dict_summary: Variant = payload.get("large_dict", null)
 	assert_eq(typeof(large_dict_summary), TYPE_DICTIONARY, "large dictionary has bounded summary")
 	if typeof(large_dict_summary) == TYPE_DICTIONARY and large_dict_summary.has("type"):
-		assert_eq(large_dict_summary.type, "dictionary", "large dictionary has bounded type summary")
+		assert_eq(
+			large_dict_summary.type, "dictionary", "large dictionary has bounded type summary"
+		)
 		assert_eq(large_dict_summary.size, 40, "large dictionary has bounded size summary")
 		assert_true(large_dict_summary.keys.size() <= 16, "large dictionary keys are bounded")
 	var blob_summary: Variant = RuntimeRoute.new().redact(blob)
@@ -411,6 +538,7 @@ func test_audit_summary_redacts_aliases_and_bounds_unclassified_values() -> void
 	if typeof(blob_summary) == TYPE_DICTIONARY and blob_summary.has("type"):
 		assert_eq(blob_summary.type, "bytes", "packed bytes have type summary")
 		assert_eq(blob_summary.size, 64, "packed bytes have size summary")
+
 
 func test_redact_bounds_keys_and_unclassified_variants() -> void:
 	var long_key := "key_" + "x".repeat(100)
@@ -420,12 +548,20 @@ func test_redact_bounds_keys_and_unclassified_variants() -> void:
 	assert_eq(key_summary[bounded_key], "value", "bounded key keeps scalar value")
 	var packed_vectors := PackedVector2Array()
 	packed_vectors.append(Vector2(1, 2))
-	var unclassified := [Vector2(1, 2), StringName("name"), NodePath("/root"), RefCounted.new(), Callable(), packed_vectors]
+	var unclassified := [
+		Vector2(1, 2),
+		StringName("name"),
+		NodePath("/root"),
+		RefCounted.new(),
+		Callable(),
+		packed_vectors
+	]
 	for value in unclassified:
 		var summary: Variant = RuntimeRoute.new().redact(value)
 		assert_eq(typeof(summary), TYPE_DICTIONARY, "unclassified variant is summarized")
 		if typeof(summary) == TYPE_DICTIONARY:
 			assert_true(summary.has("type"), "unclassified variant has type")
+
 
 func test_response_is_sent_exactly_once() -> void:
 	var broker := FakeBroker.new()

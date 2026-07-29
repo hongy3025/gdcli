@@ -10,9 +10,11 @@ const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.g
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 
 const EDITABLE_PROPERTIES := {
-	"CanvasItemMaterial": {"blend_mode": TYPE_INT, "light_mode": TYPE_INT, "particles_animation": TYPE_BOOL},
+	"CanvasItemMaterial":
+	{"blend_mode": TYPE_INT, "light_mode": TYPE_INT, "particles_animation": TYPE_BOOL},
 	"StandardMaterial2D": {"albedo_color": TYPE_COLOR, "shading_mode": TYPE_INT},
 }
+
 
 static func create(node_path: Variant, type: Variant) -> Dictionary:
 	var target := _node(node_path)
@@ -24,6 +26,7 @@ static func create(node_path: Variant, type: Variant) -> Dictionary:
 	if material == null:
 		return _error(ErrorCodes.GODOT_ERROR, "failed to instantiate material")
 	return _commit_property(target.node, &"material", material, "gdcli: create material")
+
 
 static func info(node_path: Variant) -> Dictionary:
 	var material := _material(node_path)
@@ -41,6 +44,7 @@ static func info(node_path: Variant) -> Dictionary:
 		"undoable": false,
 	}
 
+
 static func set_property(node_path: Variant, property: Variant, value: Variant) -> Dictionary:
 	var material := _material(node_path)
 	if not material.ok:
@@ -49,13 +53,18 @@ static func set_property(node_path: Variant, property: Variant, value: Variant) 
 		return _error(ErrorCodes.INVALID_PARAM, "property must be a string")
 	var allowed: Dictionary = EDITABLE_PROPERTIES[material.material.get_class()]
 	if not allowed.has(property):
-		return _error(ErrorCodes.NOT_FOUND, "material property is not editable: " + String(property))
+		return _error(
+			ErrorCodes.NOT_FOUND, "material property is not editable: " + String(property)
+		)
 	var decoded := VariantCodec.decode(value)
 	if not decoded.ok or not _matches_type(decoded.value, int(allowed[property])):
 		return _error(ErrorCodes.INVALID_PARAM, "invalid value type for material property")
 	if int(allowed[property]) == TYPE_INT and typeof(decoded.value) == TYPE_FLOAT:
 		decoded.value = int(decoded.value)
-	return _commit_property(material.material, StringName(property), decoded.value, "gdcli: set material property")
+	return _commit_property(
+		material.material, StringName(property), decoded.value, "gdcli: set material property"
+	)
+
 
 static func assign(node_path: Variant, path: Variant) -> Dictionary:
 	var target := _node(node_path)
@@ -74,13 +83,19 @@ static func assign(node_path: Variant, path: Variant) -> Dictionary:
 		result["path"] = checked.path
 	return result
 
-static func save(node_path: Variant, path: Variant, force: Variant, route: String = "material/save") -> Dictionary:
+
+static func save(
+	node_path: Variant, path: Variant, force: Variant, route: String = "material/save"
+) -> Dictionary:
 	var material := _material(node_path)
 	if not material.ok:
 		return material
 	return _save_resource(material.material, path, force, route)
 
-static func duplicate_material(node_path: Variant, path: Variant, force: Variant = false) -> Dictionary:
+
+static func duplicate_material(
+	node_path: Variant, path: Variant, force: Variant = false
+) -> Dictionary:
 	var material := _material(node_path)
 	if not material.ok:
 		return material
@@ -88,6 +103,7 @@ static func duplicate_material(node_path: Variant, path: Variant, force: Variant
 	if not copy is Material:
 		return _error(ErrorCodes.GODOT_ERROR, "material duplication failed")
 	return _save_resource(copy, path, force, "material/duplicate")
+
 
 static func _node(node_path: Variant) -> Dictionary:
 	if typeof(node_path) != TYPE_STRING or String(node_path).strip_edges().is_empty():
@@ -100,6 +116,7 @@ static func _node(node_path: Variant) -> Dictionary:
 		return _error(ErrorCodes.NOT_FOUND, "node with material property not found")
 	return {"ok": true, "node": node, "node_path": String(node_path)}
 
+
 static func _material(node_path: Variant) -> Dictionary:
 	var target := _node(node_path)
 	if not target.ok:
@@ -108,10 +125,15 @@ static func _material(node_path: Variant) -> Dictionary:
 	if not material is Material:
 		return _error(ErrorCodes.NOT_FOUND, "node has no material")
 	if not EDITABLE_PROPERTIES.has(material.get_class()):
-		return _error(ErrorCodes.NOT_SUPPORTED, "material type is not supported: " + material.get_class())
+		return _error(
+			ErrorCodes.NOT_SUPPORTED, "material type is not supported: " + material.get_class()
+		)
 	return {"ok": true, "node": target.node, "node_path": target.node_path, "material": material}
 
-static func _commit_property(target: Object, property: StringName, value: Variant, action: String) -> Dictionary:
+
+static func _commit_property(
+	target: Object, property: StringName, value: Variant, action: String
+) -> Dictionary:
 	var manager := EditAction.undo_redo()
 	if manager == null:
 		return _error(ErrorCodes.NOT_SUPPORTED, "EditorUndoRedoManager unavailable")
@@ -122,12 +144,16 @@ static func _commit_property(target: Object, property: StringName, value: Varian
 	manager.commit_action()
 	return {"ok": true, "changed": true, "undoable": true}
 
+
 static func _matches_type(value: Variant, expected: int) -> bool:
 	if expected == TYPE_INT and (typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT):
 		return true
 	return typeof(value) == expected
 
-static func _save_resource(resource: Material, path: Variant, force: Variant, route: String) -> Dictionary:
+
+static func _save_resource(
+	resource: Material, path: Variant, force: Variant, route: String
+) -> Dictionary:
 	var checked := _project_path(path, "write")
 	if not checked.ok:
 		AuditLog.record(route, "file", {"path": path}, false, checked.code)
@@ -136,15 +162,26 @@ static func _save_resource(resource: Material, path: Variant, force: Variant, ro
 		AuditLog.record(route, "file", {"path": checked.path}, false, ErrorCodes.INVALID_PARAM)
 		return _error(ErrorCodes.INVALID_PARAM, "force must be a bool")
 	if FileAccess.file_exists(ProjectSettings.globalize_path(checked.path)) and not force:
-		AuditLog.record(route, "file", {"path": checked.path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
-		return _error(ErrorCodes.UNSAFE_OPERATION, route + " requires force:true for an existing target")
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(checked.path).get_base_dir())
+		AuditLog.record(
+			route,
+			"file",
+			{"path": checked.path, "force": false},
+			false,
+			ErrorCodes.UNSAFE_OPERATION
+		)
+		return _error(
+			ErrorCodes.UNSAFE_OPERATION, route + " requires force:true for an existing target"
+		)
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(checked.path).get_base_dir()
+	)
 	var save_error := ResourceSaver.save(resource, checked.path)
 	if save_error != OK:
 		AuditLog.record(route, "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR)
 		return _error(ErrorCodes.GODOT_ERROR, "ResourceSaver.save failed: " + str(save_error))
 	AuditLog.record(route, "file", {"path": checked.path, "force": force}, true)
 	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": checked.path}
+
 
 static func _project_path(path: Variant, mode: String) -> Dictionary:
 	if typeof(path) != TYPE_STRING:
@@ -157,6 +194,7 @@ static func _project_path(path: Variant, mode: String) -> Dictionary:
 	if not (String(checked.path).ends_with(".tres") or String(checked.path).ends_with(".res")):
 		return _error(ErrorCodes.INVALID_PATH, "material path must end in .tres or .res")
 	return {"ok": true, "path": checked.path}
+
 
 static func _error(code: String, message: String) -> Dictionary:
 	return {"ok": false, "code": code, "error": message}

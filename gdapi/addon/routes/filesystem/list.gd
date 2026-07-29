@@ -10,6 +10,7 @@ const ROUTE := "filesystem/list"
 
 const MAX_ITEMS := 5000
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var path: String = req.get_body("path", "res://")
 	var offset: int = int(req.get_body("offset", 0))
@@ -30,15 +31,20 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	all_items.sort_custom(func(a, b): return a.path < b.path)
 	var total := all_items.size()
 	var slice := all_items.slice(offset, offset + limit)
-	res.json({
-		"ok": true,
-		"path": checked.path,
-		"items": slice,
-		"total": total,
-		"offset": offset,
-		"limit": limit,
-		"undoable": false,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"path": checked.path,
+				"items": slice,
+				"total": total,
+				"offset": offset,
+				"limit": limit,
+				"undoable": false,
+			}
+		)
+	)
 
 
 func _collect(res_path: String, abs_path: String, out: Array) -> void:
@@ -56,31 +62,40 @@ func _collect(res_path: String, abs_path: String, out: Array) -> void:
 		if dir.current_is_dir():
 			_collect(sub_res, sub_abs, out)
 		else:
-			out.append({
-				"path": sub_res,
-				"name": name,
-				"is_dir": false,
-				"size": FileAccess.get_file_as_bytes(sub_abs).size(),
-			})
+			(
+				out
+				. append(
+					{
+						"path": sub_res,
+						"name": name,
+						"is_dir": false,
+						"size": FileAccess.get_file_as_bytes(sub_abs).size(),
+					}
+				)
+			)
 		name = dir.get_next()
 	dir.list_dir_end()
 
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("列出项目目录")
-		.desc("分页排序,path 默认 res://。limit 不超过 5000。")
-		.param("path", "String", false, "起始目录 res:// 路径", "res://")
-		.param("offset", "int", false, "起始偏移", "0")
-		.param("limit", "int", false, "限制项数 1-5000", "500")
-		.example("{\"path\":\"res://scripts\",\"limit\":100}")
-		.returns("分页", {
-			"ok": "bool",
-			"path": "String",
-			"items": "Array<{path,name,is_dir,size}>",
-			"total": "int",
-			"offset": "int",
-			"limit": "int",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("列出项目目录")
+		. desc("分页排序,path 默认 res://。limit 不超过 5000。")
+		. param("path", "String", false, "起始目录 res:// 路径", "res://")
+		. param("offset", "int", false, "起始偏移", "0")
+		. param("limit", "int", false, "限制项数 1-5000", "500")
+		. example('{"path":"res://scripts","limit":100}')
+		. returns(
+			"分页",
+			{
+				"ok": "bool",
+				"path": "String",
+				"items": "Array<{path,name,is_dir,size}>",
+				"total": "int",
+				"offset": "int",
+				"limit": "int",
+				"undoable": "bool, false",
+			}
+		)
 	)

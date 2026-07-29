@@ -13,6 +13,7 @@ extends RefCounted
 const COMPARISON_OPS := ["eq", "ne", "lt", "lte", "gt", "gte", "contains"]
 const LOGICAL_OPS := ["and", "or", "not"]
 
+
 ## 评估一个条件节点
 ##
 ## @param node 字典:{"op":"and|or|not|...", "args"|"left"/"right":...}
@@ -29,6 +30,7 @@ static func evaluate(node: Variant) -> Dictionary:
 	if op in COMPARISON_OPS:
 		return _eval_compare(dict, op)
 	return {"ok": false, "code": "not_supported", "error": "condition.op not supported: %s" % op}
+
 
 ## 评估布尔逻辑 op
 static func _eval_logical(dict: Dictionary, op: String) -> Dictionary:
@@ -65,6 +67,7 @@ static func _eval_logical(dict: Dictionary, op: String) -> Dictionary:
 			return {"ok": true, "value": not bool(r.get("value", false))}
 	return {"ok": false, "code": "invalid_param", "error": "unsupported logical op: %s" % op}
 
+
 ## 评估比较 op,左右可以是 literal 或 {node_path, property}
 static func _eval_compare(dict: Dictionary, op: String) -> Dictionary:
 	if not dict.has("left") or not dict.has("right"):
@@ -96,6 +99,7 @@ static func _eval_compare(dict: Dictionary, op: String) -> Dictionary:
 			return {"ok": true, "value": _contains(rv, lv)}
 	return {"ok": false, "code": "invalid_param", "error": "unsupported compare op: %s" % op}
 
+
 ## 把 literal 或 {node_path, property} 解析为 Variant
 static func _resolve_value(value: Variant) -> Dictionary:
 	if typeof(value) == TYPE_DICTIONARY:
@@ -110,15 +114,21 @@ static func _resolve_value(value: Variant) -> Dictionary:
 			if node == null:
 				return {"ok": false, "code": "not_found", "error": "node not found: %s" % node_path}
 			if property.is_empty() or not _has_property(node, property):
-				return {"ok": false, "code": "not_found", "error": "property does not exist: %s" % property}
+				return {
+					"ok": false,
+					"code": "not_found",
+					"error": "property does not exist: %s" % property
+				}
 			return {"ok": true, "value": node.get(property)}
 	return {"ok": true, "value": value}
+
 
 static func _has_property(node: Node, property: String) -> bool:
 	for info in node.get_property_list():
 		if String(info.name) == property:
 			return true
 	return false
+
 
 static func _variants_equal(a: Variant, b: Variant) -> bool:
 	if _is_numeric(a) and _is_numeric(b):
@@ -131,6 +141,7 @@ static func _variants_equal(a: Variant, b: Variant) -> bool:
 		return (a - b).length() < 0.001
 	return a == b
 
+
 static func _variants_less(a: Variant, b: Variant) -> bool:
 	if _is_numeric(a) and _is_numeric(b):
 		return float(a) < float(b) and not is_equal_approx(float(a), float(b))
@@ -141,6 +152,7 @@ static func _variants_less(a: Variant, b: Variant) -> bool:
 	if a is Vector3 and b is Vector3:
 		return a.length() < b.length()
 	return a < b
+
 
 static func _contains(container: Variant, target: Variant) -> bool:
 	if container is Array:
@@ -154,6 +166,7 @@ static func _contains(container: Variant, target: Variant) -> bool:
 	if container is Dictionary:
 		return container.has(target)
 	return false
+
 
 static func _is_numeric(value: Variant) -> bool:
 	return typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT

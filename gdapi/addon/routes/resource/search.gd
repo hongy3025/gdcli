@@ -7,6 +7,7 @@ const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_ed
 
 const ROUTE := "resource/search"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var filter_text: String = req.get_body("filter", "")
 	var offset: int = int(req.get_body("offset", 0))
@@ -20,18 +21,22 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("通过 EditorFileSystem 搜索资源")
-		.desc("filter 按路径子串匹配(大小写不敏感),limit 1-1000。")
-		.param("filter", "String", false, "路径子串", "")
-		.param("offset", "int", false, "分页偏移", "0")
-		.param("limit", "int", false, "1-1000", "100")
-		.example("{\"filter\":\"player\",\"offset\":0,\"limit\":100}")
-		.returns("分页", {
-			"ok": "bool",
-			"items": "Array<String>, res:// 路径",
-			"total": "int",
-			"offset": "int",
-			"limit": "int",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("通过 EditorFileSystem 搜索资源")
+		. desc("filter 按路径子串匹配(大小写不敏感),limit 1-1000。")
+		. param("filter", "String", false, "路径子串", "")
+		. param("offset", "int", false, "分页偏移", "0")
+		. param("limit", "int", false, "1-1000", "100")
+		. example('{"filter":"player","offset":0,"limit":100}')
+		. returns(
+			"分页",
+			{
+				"ok": "bool",
+				"items": "Array<String>, res:// 路径",
+				"total": "int",
+				"offset": "int",
+				"limit": "int",
+				"undoable": "bool, false",
+			}
+		)
 	)

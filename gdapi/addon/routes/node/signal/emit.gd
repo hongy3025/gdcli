@@ -8,6 +8,7 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 const ROUTE := "node/signal/emit"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var source_path: String = req.get_body("source_path", "")
 	var signal_name: String = req.get_body("signal", "")
@@ -29,28 +30,37 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 	var callable := Callable(source, "emit_signal")
 	var result: Variant = source.emit_signal(signal_name)
-	res.json({
-		"ok": true,
-		"changed": false,
-		"undoable": false,
-		"source_path": source_lookup.node_path,
-		"signal": signal_name,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"changed": false,
+				"undoable": false,
+				"source_path": source_lookup.node_path,
+				"signal": signal_name,
+			}
+		)
+	)
 
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("在编辑器中触发节点信号 (不可撤销)")
-		.desc("通过 source.emit_signal 同步派发,仅对无参信号有意义;参数信号请通过编辑器 inspector 编辑。")
-		.param("source_path", "String", true, "源节点路径")
-		.param("signal", "String", true, "信号名")
-		.param("arguments", "Array", false, "参数(M2 不序列化)", "[]")
-		.returns("emit", {
-			"ok": "bool",
-			"changed": "bool, false",
-			"undoable": "bool, false",
-			"source_path": "String",
-			"signal": "String",
-		})
-		.example("{\"source_path\":\"/root/Main/Player\",\"signal\":\"tree_exiting\",\"arguments\":[]}")
+		GdApiRouteDoc
+		. make("在编辑器中触发节点信号 (不可撤销)")
+		. desc("通过 source.emit_signal 同步派发,仅对无参信号有意义;参数信号请通过编辑器 inspector 编辑。")
+		. param("source_path", "String", true, "源节点路径")
+		. param("signal", "String", true, "信号名")
+		. param("arguments", "Array", false, "参数(M2 不序列化)", "[]")
+		. returns(
+			"emit",
+			{
+				"ok": "bool",
+				"changed": "bool, false",
+				"undoable": "bool, false",
+				"source_path": "String",
+				"signal": "String",
+			}
+		)
+		. example('{"source_path":"/root/Main/Player","signal":"tree_exiting","arguments":[]}')
 	)

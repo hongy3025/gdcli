@@ -8,6 +8,7 @@ const BLOCKED_WRITE_PREFIXES := [
 	"res://.godot/",
 ]
 
+
 static func validate(path: String, mode: String = "read") -> Dictionary:
 	if mode not in ["read", "write", "delete"]:
 		return _err("invalid path mode: " + mode, ErrorCodes.INVALID_PARAM)
@@ -27,6 +28,7 @@ static func validate(path: String, mode: String = "read") -> Dictionary:
 				return _err("path is protected: " + normalized, ErrorCodes.PERMISSION_DENIED, 403)
 	return {"ok": true, "path": normalized}
 
+
 static func normalize(path: String) -> String:
 	var p := path.strip_edges().replace("\\", "/")
 	if p.begins_with("res://") or p.begins_with("user://"):
@@ -34,6 +36,7 @@ static func normalize(path: String) -> String:
 	if p.begins_with("/") or (p.length() >= 2 and p[1] == ":"):
 		return p
 	return "res://" + p.trim_prefix("/")
+
 
 static func _err(message: String, code: String, status: int = 400) -> Dictionary:
 	return {"ok": false, "error": message, "code": code, "status": status}

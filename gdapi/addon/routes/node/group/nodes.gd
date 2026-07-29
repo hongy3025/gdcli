@@ -7,6 +7,7 @@ const NodeEditor := preload("res://addons/gdapi/runtime/services/node_editor.gd"
 
 const ROUTE := "node/group/nodes"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var group: String = req.get_body("group", "")
 	if group == "":
@@ -22,12 +23,17 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var paths: Array = []
 	_collect(edited, group, paths)
 	paths.sort()
-	res.json({
-		"ok": true,
-		"group": group,
-		"node_paths": paths,
-		"undoable": false,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"group": group,
+				"node_paths": paths,
+				"undoable": false,
+			}
+		)
+	)
 
 
 func _collect(node: Node, group: String, out: Array) -> void:
@@ -39,14 +45,18 @@ func _collect(node: Node, group: String, out: Array) -> void:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("列出属于给定 group 的当前编辑场景节点")
-		.desc("在当前编辑场景递归 is_in_group。返回 /root/<edited>/... 用户路径。")
-		.param("group", "String", true, "组名")
-		.example("{\"group\":\"actors\"}")
-		.returns("group/nodes", {
-			"ok": "bool",
-			"group": "String",
-			"node_paths": "Array<String>",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("列出属于给定 group 的当前编辑场景节点")
+		. desc("在当前编辑场景递归 is_in_group。返回 /root/<edited>/... 用户路径。")
+		. param("group", "String", true, "组名")
+		. example('{"group":"actors"}')
+		. returns(
+			"group/nodes",
+			{
+				"ok": "bool",
+				"group": "String",
+				"node_paths": "Array<String>",
+				"undoable": "bool, false",
+			}
+		)
 	)

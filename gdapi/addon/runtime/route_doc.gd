@@ -22,6 +22,7 @@ var returns_fields: Dictionary = {}
 ## 调用示例（JSON 请求体字符串数组）
 var examples: Array[String] = []
 
+
 ## 静态工厂：创建一个带 summary 的 RouteDoc
 ##
 ## @param summary_ 一句话功能描述
@@ -31,6 +32,7 @@ static func make(summary_: String) -> GdApiRouteDoc:
 	d.summary = summary_
 	return d
 
+
 ## 设置详细描述（fluent）
 ##
 ## @param text 多行说明
@@ -38,6 +40,7 @@ static func make(summary_: String) -> GdApiRouteDoc:
 func desc(text: String) -> GdApiRouteDoc:
 	description = text
 	return self
+
 
 ## 添加一个参数（fluent）
 ##
@@ -47,7 +50,9 @@ func desc(text: String) -> GdApiRouteDoc:
 ## @param description_ 参数说明
 ## @param default_ 默认值（null 表示无默认值）
 ## @return self 以便链式调用
-func param(name_: String, type_: String, required_: bool, description_: String, default_ = null) -> GdApiRouteDoc:
+func param(
+	name_: String, type_: String, required_: bool, description_: String, default_ = null
+) -> GdApiRouteDoc:
 	var p := ParamDoc.new()
 	p.name = name_
 	p.type = type_
@@ -56,6 +61,7 @@ func param(name_: String, type_: String, required_: bool, description_: String, 
 	p.default = default_
 	params.append(p)
 	return self
+
 
 ## 设置返回值描述与字段（fluent）
 ##
@@ -67,6 +73,7 @@ func returns(desc_: String, fields_: Dictionary = {}) -> GdApiRouteDoc:
 	returns_fields = fields_
 	return self
 
+
 ## 添加一个 JSON 请求示例（fluent）
 ##
 ## @param json JSON 字符串形式的请求体示例
@@ -74,6 +81,7 @@ func returns(desc_: String, fields_: Dictionary = {}) -> GdApiRouteDoc:
 func example(json: String) -> GdApiRouteDoc:
 	examples.append(json)
 	return self
+
 
 ## 完整序列化（详情视图）
 ##
@@ -86,12 +94,14 @@ func to_dict() -> Dictionary:
 		"summary": summary,
 		"description": description,
 		"params": param_dicts,
-		"returns": {
+		"returns":
+		{
 			"description": returns_desc,
 			"fields": returns_fields,
 		},
 		"examples": examples,
 	}
+
 
 ## 简要序列化（列表视图）
 ##

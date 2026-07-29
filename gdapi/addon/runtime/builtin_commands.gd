@@ -10,11 +10,13 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 ## 完整路由表：{ path: handler_script }，由 router 注入
 var _routes: Dictionary = {}
 
+
 ## 由 router 在扫描完成后调用，传入完整路由表
 ##
 ## @param routes 路由表字典
 func set_routes(routes: Dictionary) -> void:
 	_routes = routes
+
 
 ## 处理 `command/list` 请求
 ##
@@ -24,6 +26,7 @@ func set_routes(routes: Dictionary) -> void:
 ## @param res 响应对象
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	res.json({"ok": true, "commands": _build_list()})
+
 
 ## 构建命令详细列表
 ##
@@ -42,15 +45,20 @@ func _build_list() -> Array:
 		result.append(summary)
 	return result
 
+
 ## 自身的帮助文档
 ##
 ## @return GdApiRouteDoc 描述 `command/list` 路由的语义
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("列出所有可用命令的详细信息")
-		.desc("返回当前 gdapi 运行时所有可调用命令的详细列表，包含参数信息")
-		.returns("命令信息数组", {
-			"ok": "bool, 是否成功",
-			"commands": "Array, 按字母序排列的命令信息",
-		})
+		GdApiRouteDoc
+		. make("列出所有可用命令的详细信息")
+		. desc("返回当前 gdapi 运行时所有可调用命令的详细列表，包含参数信息")
+		. returns(
+			"命令信息数组",
+			{
+				"ok": "bool, 是否成功",
+				"commands": "Array, 按字母序排列的命令信息",
+			}
+		)
 	)

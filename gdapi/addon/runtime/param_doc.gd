@@ -18,6 +18,7 @@ var description: String = ""
 ## 默认值；null 表示无默认值（必填参数也为 null）
 var default = null
 
+
 ## 序列化为字典，供 JSON 响应使用
 ##
 ## @return 包含 name/type/required/description/default 五个字段的字典

@@ -8,13 +8,16 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 const ROUTE := "node/signal/connect"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var source_path: String = req.get_body("source_path", "")
 	var signal_name: String = req.get_body("signal", "")
 	var target_path: String = req.get_body("target_path", "")
 	var method: String = req.get_body("method", "")
 	if source_path == "" or signal_name == "" or target_path == "" or method == "":
-		res.error("source_path, signal, target_path and method are required", ErrorCodes.MISSING_PARAM)
+		res.error(
+			"source_path, signal, target_path and method are required", ErrorCodes.MISSING_PARAM
+		)
 		return
 	var source_lookup := NodeEditor.find(source_path)
 	if not source_lookup.ok:
@@ -39,34 +42,45 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 			return
 	var flags: int = int(req.get_body("flags", Object.CONNECT_PERSIST))
 	source.connect(signal_name, Callable(target, method), flags)
-	res.json({
-		"ok": true,
-		"changed": true,
-		"undoable": false,
-		"source_path": source_lookup.node_path,
-		"signal": signal_name,
-		"target_path": target_lookup.node_path,
-		"method": method,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"changed": true,
+				"undoable": false,
+				"source_path": source_lookup.node_path,
+				"signal": signal_name,
+				"target_path": target_lookup.node_path,
+				"method": method,
+			}
+		)
+	)
 
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("连接节点信号到目标方法")
-		.desc("默认 flags=CONNECT_PERSIST。重复连接到同一 callable 返回 conflict。")
-		.param("source_path", "String", true, "源节点路径")
-		.param("signal", "String", true, "信号名")
-		.param("target_path", "String", true, "目标节点路径")
-		.param("method", "String", true, "目标方法名")
-		.param("flags", "int", false, "ConnectFlags,默认 CONNECT_PERSIST")
-		.example("{\"source_path\":\"/root/Main/Player\",\"signal\":\"health_changed\",\"target_path\":\"/root/Main/Target\",\"method\":\"_on_health_changed\"}")
-		.returns("connect", {
-			"ok": "bool",
-			"changed": "bool",
-			"undoable": "bool, false",
-			"source_path": "String",
-			"signal": "String",
-			"target_path": "String",
-			"method": "String",
-		})
+		GdApiRouteDoc
+		. make("连接节点信号到目标方法")
+		. desc("默认 flags=CONNECT_PERSIST。重复连接到同一 callable 返回 conflict。")
+		. param("source_path", "String", true, "源节点路径")
+		. param("signal", "String", true, "信号名")
+		. param("target_path", "String", true, "目标节点路径")
+		. param("method", "String", true, "目标方法名")
+		. param("flags", "int", false, "ConnectFlags,默认 CONNECT_PERSIST")
+		. example(
+			'{"source_path":"/root/Main/Player","signal":"health_changed","target_path":"/root/Main/Target","method":"_on_health_changed"}'
+		)
+		. returns(
+			"connect",
+			{
+				"ok": "bool",
+				"changed": "bool",
+				"undoable": "bool, false",
+				"source_path": "String",
+				"signal": "String",
+				"target_path": "String",
+				"method": "String",
+			}
+		)
 	)

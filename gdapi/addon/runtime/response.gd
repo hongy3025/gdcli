@@ -19,6 +19,7 @@ var _request_id: int
 ## 响应是否已发送标记，防止重复发送
 var _sent: bool = false
 
+
 ## 初始化响应对象
 ##
 ## 设置服务器引用和请求 ID，并配置默认的 JSON 响应头。
@@ -29,6 +30,7 @@ func _init(server, request_id: int) -> void:
 	_request_id = request_id
 	_headers["Content-Type"] = "application/json; charset=utf-8"
 
+
 ## 设置 HTTP 状态码
 ##
 ## @param code HTTP 状态码（如 200, 404, 500）
@@ -36,6 +38,7 @@ func _init(server, request_id: int) -> void:
 func status(code: int) -> GdApiResponse:
 	_status = code
 	return self
+
 
 ## 设置响应头
 ##
@@ -46,6 +49,7 @@ func set_header(key: String, value: String) -> GdApiResponse:
 	_headers[key] = value
 	return self
 
+
 ## 设置 Content-Type 头部
 ##
 ## @param content_type MIME 类型字符串
@@ -54,12 +58,14 @@ func type(content_type: String) -> GdApiResponse:
 	_headers["Content-Type"] = content_type
 	return self
 
+
 ## 发送 JSON 响应
 ##
 ## 将字典数据序列化为 JSON 并发送。自动设置 Content-Type 为 application/json。
 ## @param data 要序列化的字典数据
 func json(data: Dictionary) -> void:
 	_send(JSON.stringify(data).to_utf8_buffer())
+
 
 ## 发送纯文本响应
 ##
@@ -69,6 +75,7 @@ func send(content: String) -> void:
 	if not _headers.has("Content-Type"):
 		_headers["Content-Type"] = "text/plain; charset=utf-8"
 	_send(content.to_utf8_buffer())
+
 
 ## 发送文件响应
 ##
@@ -80,19 +87,20 @@ func file(path: String) -> void:
 	if not FileAccess.file_exists(abs_path):
 		error("file not found: " + path, "not_found", 404)
 		return
-	
+
 	var f := FileAccess.open(abs_path, FileAccess.READ)
 	if f == null:
 		error("cannot read file: " + path, "read_error", 500)
 		return
-	
+
 	var buffer := f.get_buffer(f.get_length())
 	f.close()
-	
+
 	var ext := path.get_extension().to_lower()
 	var mime := _get_mime_type(ext)
 	_headers["Content-Type"] = mime
 	_send(buffer)
+
 
 ## 发送错误响应
 ##
@@ -101,18 +109,22 @@ func file(path: String) -> void:
 ## @param code 错误代码标识符（如 "not_found", "validation_error"）
 ## @param status HTTP 状态码
 ## @param details 额外的错误详情字典（可选）
-func error(msg: String, code: String = "error", status: int = 400, details: Dictionary = {}) -> void:
+func error(
+	msg: String, code: String = "error", status: int = 400, details: Dictionary = {}
+) -> void:
 	_status = status
 	var body := {"error": msg, "code": code}
 	if not details.is_empty():
 		body["details"] = details
 	json(body)
 
+
 ## 查询响应是否已经发送。
 ##
 ## 异步 route adapter 使用该查询和本地 completion 标志共同防止迟到回调重复回复。
 func is_sent() -> bool:
 	return _sent
+
 
 ## 内部发送方法
 ##
@@ -123,12 +135,13 @@ func _send(body: PackedByteArray) -> void:
 		push_warning("GdApiResponse: already sent")
 		return
 	_sent = true
-	
+
 	var headers_dict: Dictionary[String, Variant] = {}
 	for key in _headers:
 		headers_dict[key] = _headers[key]
-	
+
 	_server.send_response(_request_id, _status, headers_dict, body)
+
 
 ## 根据文件扩展名获取 MIME 类型
 ##
@@ -136,15 +149,27 @@ func _send(body: PackedByteArray) -> void:
 ## @return 对应的 MIME 类型字符串
 func _get_mime_type(ext: String) -> String:
 	match ext:
-		"png": return "image/png"
-		"jpg", "jpeg": return "image/jpeg"
-		"gif": return "image/gif"
-		"svg": return "image/svg+xml"
-		"json": return "application/json"
-		"txt": return "text/plain"
-		"html": return "text/html"
-		"css": return "text/css"
-		"js": return "application/javascript"
-		"gdshader", "shader": return "text/plain"
-		"tscn", "tres", "gd": return "text/plain"
-		_: return "application/octet-stream"
+		"png":
+			return "image/png"
+		"jpg", "jpeg":
+			return "image/jpeg"
+		"gif":
+			return "image/gif"
+		"svg":
+			return "image/svg+xml"
+		"json":
+			return "application/json"
+		"txt":
+			return "text/plain"
+		"html":
+			return "text/html"
+		"css":
+			return "text/css"
+		"js":
+			return "application/javascript"
+		"gdshader", "shader":
+			return "text/plain"
+		"tscn", "tres", "gd":
+			return "text/plain"
+		_:
+			return "application/octet-stream"

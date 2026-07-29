@@ -7,6 +7,7 @@ const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_ed
 
 const ROUTE := "resource/info"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var path: String = req.get_body("path", "")
 	if path == "":
@@ -21,18 +22,22 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("读取资源元数据")
-		.desc("返回 uid、class、local_to_scene 与可序列化属性。")
-		.param("path", "String", true, "res:// 资源路径")
-		.example("{\"path\":\"res://resources/player_data.tres\"}")
-		.returns("info", {
-			"ok": "bool",
-			"path": "String",
-			"uid": "String",
-			"class": "String",
-			"script": "String",
-			"local_to_scene": "bool",
-			"properties": "Dictionary<String, Variant>",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("读取资源元数据")
+		. desc("返回 uid、class、local_to_scene 与可序列化属性。")
+		. param("path", "String", true, "res:// 资源路径")
+		. example('{"path":"res://resources/player_data.tres"}')
+		. returns(
+			"info",
+			{
+				"ok": "bool",
+				"path": "String",
+				"uid": "String",
+				"class": "String",
+				"script": "String",
+				"local_to_scene": "bool",
+				"properties": "Dictionary<String, Variant>",
+				"undoable": "bool, false",
+			}
+		)
 	)

@@ -10,6 +10,7 @@ const ROUTE := "filesystem/search"
 
 const MAX_ITEMS := 1000
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var root: String = req.get_body("root", "res://")
 	var pattern: String = req.get_body("glob", "*")
@@ -30,16 +31,21 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	_collect(checked.path, abs_dir, pattern, items)
 	items.sort()
 	var total := items.size()
-	res.json({
-		"ok": true,
-		"root": checked.path,
-		"glob": pattern,
-		"items": items.slice(offset, offset + limit),
-		"total": total,
-		"offset": offset,
-		"limit": limit,
-		"undoable": false,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"root": checked.path,
+				"glob": pattern,
+				"items": items.slice(offset, offset + limit),
+				"total": total,
+				"offset": offset,
+				"limit": limit,
+				"undoable": false,
+			}
+		)
+	)
 
 
 func _collect(res_path: String, abs_path: String, pattern: String, out: Array) -> void:
@@ -73,9 +79,12 @@ static func _glob_to_regex(glob: String) -> String:
 	var out := ""
 	for c in glob:
 		match c:
-			"*": out += "[^/]*"
-			"?": out += "[^/]"
-			".": out += "\\."
+			"*":
+				out += "[^/]*"
+			"?":
+				out += "[^/]"
+			".":
+				out += "\\."
 			_:
 				if c in "+()[]{}\\^$|":
 					out += "\\" + c
@@ -86,21 +95,25 @@ static func _glob_to_regex(glob: String) -> String:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("按 glob 模式查找项目文件")
-		.desc("递归扫描 root + glob,默认 root=res://,glob=*。")
-		.param("root", "String", false, "起始目录", "res://")
-		.param("glob", "String", false, "文件名 glob 模式,支持 * ?", "*")
-		.param("offset", "int", false, "分页偏移", "0")
-		.param("limit", "int", false, "1-1000", "200")
-		.example("{\"root\":\"res://scripts\",\"glob\":\"*.gd\",\"limit\":50}")
-		.returns("分页", {
-			"ok": "bool",
-			"root": "String",
-			"glob": "String",
-			"items": "Array<String>, 文件路径",
-			"total": "int",
-			"offset": "int",
-			"limit": "int",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("按 glob 模式查找项目文件")
+		. desc("递归扫描 root + glob,默认 root=res://,glob=*。")
+		. param("root", "String", false, "起始目录", "res://")
+		. param("glob", "String", false, "文件名 glob 模式,支持 * ?", "*")
+		. param("offset", "int", false, "分页偏移", "0")
+		. param("limit", "int", false, "1-1000", "200")
+		. example('{"root":"res://scripts","glob":"*.gd","limit":50}')
+		. returns(
+			"分页",
+			{
+				"ok": "bool",
+				"root": "String",
+				"glob": "String",
+				"items": "Array<String>, 文件路径",
+				"total": "int",
+				"offset": "int",
+				"limit": "int",
+				"undoable": "bool, false",
+			}
+		)
 	)

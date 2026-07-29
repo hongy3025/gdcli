@@ -28,13 +28,16 @@ const DENIED_OPS := {
 	"network/http_request": true,
 }
 
+
 ## 构造一个 protocol v1 request 消息
 ##
 ## @param id 由调用方分配的正整数；客户端必须保证唯一性
 ## @param op 路由名，如 "runtime/status"、"runtime/node/get"
 ## @param payload 业务字段字典；缺省或 null 都会被规范化为空字典
 ## @return 完整消息字典，可直接 JSON.stringify
-static func request(id: int, op: String, payload: Variant = null, generation: String = "") -> Dictionary:
+static func request(
+	id: int, op: String, payload: Variant = null, generation: String = ""
+) -> Dictionary:
 	var normalized: Dictionary = {}
 	if typeof(payload) == TYPE_DICTIONARY:
 		normalized = payload
@@ -49,6 +52,7 @@ static func request(id: int, op: String, payload: Variant = null, generation: St
 		message["generation"] = generation
 	return message
 
+
 ## 构造一个 protocol v1 reply 消息
 ##
 ## @param id 与对应 request 的 id 相同
@@ -57,7 +61,14 @@ static func request(id: int, op: String, payload: Variant = null, generation: St
 ## @param error 失败时携带的错误消息字符串（可选）
 ## @param code 失败时的稳定错误码（可选）
 ## @return 完整消息字典
-static func reply(id: int, ok: bool, result: Variant = null, error: String = "", code: String = "", generation: String = "") -> Dictionary:
+static func reply(
+	id: int,
+	ok: bool,
+	result: Variant = null,
+	error: String = "",
+	code: String = "",
+	generation: String = ""
+) -> Dictionary:
 	var message: Dictionary = {
 		"version": VERSION,
 		"id": int(id),
@@ -75,6 +86,7 @@ static func reply(id: int, ok: bool, result: Variant = null, error: String = "",
 		message["generation"] = generation
 	return message
 
+
 ## 构造一个 protocol v1 event 消息（服务端主动推送，无需应答）
 ##
 ## @param id 用于追溯来源；可以为空字符串但推荐填一个正整数
@@ -89,6 +101,7 @@ static func event(id: int, event: String, result: Dictionary) -> Dictionary:
 		"event": event,
 		"result": result,
 	}
+
 
 ## 校验任意消息是否满足 protocol v1 schema
 ##
@@ -140,17 +153,21 @@ static func validate_message(value: Variant) -> Dictionary:
 
 	return {"ok": true}
 
+
 ## Return the exact UTF-8 wire size used by the protocol bound.
 static func message_size_bytes(value: Variant) -> int:
 	return JSON.stringify(value).to_utf8_buffer().size()
+
 
 ## Return true only when the serialized value exceeds the protocol limit.
 static func message_exceeds_limit(value: Variant) -> bool:
 	return message_size_bytes(value) > MAX_MESSAGE_BYTES
 
+
 ## Route-side request validation uses the same protocol envelope as broker/probe.
 static func validate_request(op: String, payload: Dictionary) -> Dictionary:
 	return validate_message(request(1, op, payload))
+
 
 ## 判断一个 op 是否被当前协议拒绝（仅在 validate_message 内部使用，
 ## 但暴露给 runtime_probe 等需要主动跳过的场景）
@@ -159,6 +176,7 @@ static func validate_request(op: String, payload: Dictionary) -> Dictionary:
 ## @return true 表示 op 在协议 v1 中不可用
 static func is_denied_op(op: String) -> bool:
 	return DENIED_OPS.has(op)
+
 
 ## 内部用错误构造器
 static func _error(code: String, message: String) -> Dictionary:

@@ -26,8 +26,10 @@ const HTTP_STATUS := {
 	GODOT_ERROR: 500,
 }
 
+
 static func http_status(code: String) -> int:
 	return int(HTTP_STATUS.get(code, 500))
+
 
 static func require_force(res: GdApiResponse, force: bool, operation: String) -> bool:
 	if force:

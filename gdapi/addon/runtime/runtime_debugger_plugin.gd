@@ -20,17 +20,19 @@ var _broker: RefCounted = null
 ## 可在 headless Godot 中单测的 capture/setup/clear 行为桥接。
 var _bridge: RefCounted = null
 
+
 func _init() -> void:
 	_bridge = DebuggerBridge.new()
+
 
 ## 配置 broker
 ##
 ## @param broker 已经 setup 完毕的 GdApiRuntimeBroker 实例
 func setup(broker: RefCounted) -> void:
 	_broker = broker
-	var lookup := func(session_id: int) -> Variant:
-		return _lookup_session(session_id)
+	var lookup := func(session_id: int) -> Variant: return _lookup_session(session_id)
 	_bridge.setup(broker, lookup)
+
 
 ## 是否希望接收以 "gdapi:" 为前缀的 capture
 ##
@@ -38,6 +40,7 @@ func setup(broker: RefCounted) -> void:
 ## @param name 通道名
 func _has_capture(name: String) -> bool:
 	return name == "gdapi"
+
 
 ## EditorDebuggerSession 启动时由编辑器调用
 ##
@@ -48,6 +51,7 @@ func _has_capture(name: String) -> bool:
 ## @param session_id 编辑器为新调试会话分配的 id
 func _setup_session(session_id: int) -> void:
 	_bridge.setup_session(session_id)
+
 
 ## 接收 runtime probe 推过来的 reply / event / hello
 ##
@@ -63,11 +67,13 @@ func _setup_session(session_id: int) -> void:
 func _capture(message: String, data: Array, session_id: int) -> bool:
 	return _bridge.capture(message, data, session_id)
 
+
 ## EditorDebuggerSession 断开时回调
 ##
 ## @param session_id 已断开的 session
 func _clear(session_id: int) -> void:
 	_bridge.clear(session_id)
+
 
 ## 把协议字典通过当前 session 推送给 runtime probe
 ##

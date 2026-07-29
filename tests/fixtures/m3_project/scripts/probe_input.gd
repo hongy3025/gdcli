@@ -8,14 +8,17 @@ extends Node
 
 var _target: Node = null
 
+
 func _ready() -> void:
 	_ready_target.call_deferred()
+
 
 func _ready_target() -> void:
 	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")
 	if _target == null:
 		# 退出/重启时已经清理
 		return
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _target == null:
@@ -28,6 +31,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_target.call("add_gamepad")
 	elif event is InputEventScreenTouch:
 		_target.call("add_touch")
+
 
 func reset_fixture() -> void:
 	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")

@@ -2,6 +2,7 @@ extends Node2D
 
 const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
 
+
 class CaptureBoundaryTexture:
 	extends RefCounted
 
@@ -27,6 +28,7 @@ class CaptureBoundaryTexture:
 		readback_count += 1
 		return Image.create(width, height, false, Image.FORMAT_RGBA8)
 
+
 ## RuntimeMain — M3 fixture 根节点
 ##
 ## 包含可观测子节点 ProbeTarget 与若干 Input 中继节点。
@@ -37,10 +39,12 @@ class CaptureBoundaryTexture:
 @onready var probe_input_action: Node = $ProbeInputAction
 @onready var probe_finished_signal: Node = $ProbeFinishedSignal
 
+
 func reset_fixture() -> Dictionary:
 	_remove_runtime_children(self)
 	probe_target.reset_fixture()
 	return {"changed": true, "undoable": false}
+
 
 func emit_known_logs() -> Dictionary:
 	var runtime_probe := get_tree().root.get_node_or_null("GdApiRuntimeProbe")
@@ -49,6 +53,7 @@ func emit_known_logs() -> Dictionary:
 	runtime_probe.call("record_log", "info", "known-info", {"source": "runtime-fixture"})
 	runtime_probe.call("record_log", "error", "known-error", {"source": "runtime-fixture"})
 	return {"ok": true}
+
 
 func prepare_capture_fixture(mode: String) -> Dictionary:
 	if not mode in ["camera", "high_entropy", "oversized"]:
@@ -90,6 +95,7 @@ func prepare_capture_fixture(mode: String) -> Dictionary:
 		"camera_path": "/root/RuntimeMain/CaptureFixtureViewport/CaptureFixtureCamera",
 	}
 
+
 func probe_capture_boundary(mode: String) -> Dictionary:
 	if not mode in ["oversized", "expired"]:
 		return {"ok": false, "error": "unknown fixed capture boundary mode"}
@@ -108,6 +114,7 @@ func probe_capture_boundary(mode: String) -> Dictionary:
 		"readbacks": texture.readback_count,
 	}
 
+
 func _make_high_entropy_image() -> Image:
 	const WIDTH := 1024
 	const HEIGHT := 600
@@ -122,9 +129,15 @@ func _make_high_entropy_image() -> Image:
 		bytes[i] = state & 0xff
 	return Image.create_from_data(WIDTH, HEIGHT, false, Image.FORMAT_RGB8, bytes)
 
+
 func _remove_runtime_children(parent: Node) -> void:
 	for child in parent.get_children():
-		if child == probe_target or child == probe_input or child == probe_input_action or child == probe_finished_signal:
+		if (
+			child == probe_target
+			or child == probe_input
+			or child == probe_input_action
+			or child == probe_finished_signal
+		):
 			_remove_runtime_children(child)
 		else:
 			child.free()

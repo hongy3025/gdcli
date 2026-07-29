@@ -10,6 +10,7 @@ const ROUTE := "filesystem/grep"
 
 const MAX_ITEMS := 10000
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var root: String = req.get_body("root", "res://")
 	var pattern: String = req.get_body("pattern", "")
@@ -33,17 +34,29 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 	var items: Array = []
 	_grep(checked.path, abs_dir, glob, pattern, case_sensitive, items)
-	res.json({
-		"ok": true,
-		"items": items.slice(offset, offset + limit),
-		"total": items.size(),
-		"offset": offset,
-		"limit": limit,
-		"undoable": false,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"items": items.slice(offset, offset + limit),
+				"total": items.size(),
+				"offset": offset,
+				"limit": limit,
+				"undoable": false,
+			}
+		)
+	)
 
 
-func _grep(res_path: String, abs_path: String, glob: String, pattern: String, case_sensitive: bool, out: Array) -> void:
+func _grep(
+	res_path: String,
+	abs_path: String,
+	glob: String,
+	pattern: String,
+	case_sensitive: bool,
+	out: Array
+) -> void:
 	if out.size() >= MAX_ITEMS * 2:
 		return
 	var dir := DirAccess.open(abs_path)
@@ -66,7 +79,9 @@ func _grep(res_path: String, abs_path: String, glob: String, pattern: String, ca
 	dir.list_dir_end()
 
 
-func _search_in_file(res_path: String, abs_path: String, pattern: String, case_sensitive: bool, out: Array) -> void:
+func _search_in_file(
+	res_path: String, abs_path: String, pattern: String, case_sensitive: bool, out: Array
+) -> void:
 	var text := FileAccess.get_file_as_string(abs_path)
 	if text.is_empty():
 		return
@@ -82,12 +97,17 @@ func _search_in_file(res_path: String, abs_path: String, pattern: String, case_s
 			i += 1
 			continue
 		if haystack.substr(i, search_text.length()) == search_text:
-			out.append({
-				"path": res_path,
-				"line": line,
-				"column": col,
-				"snippet": text.substr(i, min(80, text.length() - i)),
-			})
+			(
+				out
+				. append(
+					{
+						"path": res_path,
+						"line": line,
+						"column": col,
+						"snippet": text.substr(i, min(80, text.length() - i)),
+					}
+				)
+			)
 			if out.size() >= MAX_ITEMS:
 				return
 			i += search_text.length()
@@ -106,9 +126,12 @@ static func _glob_to_regex(glob: String) -> String:
 	var out := ""
 	for c in glob:
 		match c:
-			"*": out += "[^/]*"
-			"?": out += "[^/]"
-			".": out += "\\."
+			"*":
+				out += "[^/]*"
+			"?":
+				out += "[^/]"
+			".":
+				out += "\\."
 			_:
 				if c in "+()[]{}\\^$|":
 					out += "\\" + c
@@ -119,21 +142,25 @@ static func _glob_to_regex(glob: String) -> String:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("在 root + glob 范围内搜索 pattern")
-		.desc("递归扫描项目文件,返回 1-based 行/列匹配。文件大小限制 4 MiB;最多 10000 个匹配。")
-		.param("root", "String", false, "起始目录", "res://")
-		.param("pattern", "String", true, "字面搜索字符串")
-		.param("glob", "String", false, "文件名 glob", "*")
-		.param("case_sensitive", "bool", false, "是否区分大小写", "true")
-		.param("offset", "int", false, "分页偏移", "0")
-		.param("limit", "int", false, "1-10000", "500")
-		.example("{\"root\":\"res://scripts\",\"pattern\":\"speed\",\"glob\":\"*.gd\"}")
-		.returns("分页", {
-			"ok": "bool",
-			"items": "Array<{path,line,column,snippet}>",
-			"total": "int",
-			"offset": "int",
-			"limit": "int",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("在 root + glob 范围内搜索 pattern")
+		. desc("递归扫描项目文件,返回 1-based 行/列匹配。文件大小限制 4 MiB;最多 10000 个匹配。")
+		. param("root", "String", false, "起始目录", "res://")
+		. param("pattern", "String", true, "字面搜索字符串")
+		. param("glob", "String", false, "文件名 glob", "*")
+		. param("case_sensitive", "bool", false, "是否区分大小写", "true")
+		. param("offset", "int", false, "分页偏移", "0")
+		. param("limit", "int", false, "1-10000", "500")
+		. example('{"root":"res://scripts","pattern":"speed","glob":"*.gd"}')
+		. returns(
+			"分页",
+			{
+				"ok": "bool",
+				"items": "Array<{path,line,column,snippet}>",
+				"total": "int",
+				"offset": "int",
+				"limit": "int",
+				"undoable": "bool, false",
+			}
+		)
 	)

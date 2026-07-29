@@ -53,14 +53,21 @@ var _ring: RefCounted = RingBuffer.new(2000)
 var _file_transport: RefCounted = null
 var file_transport_last_disconnect_abandoned: int:
 	get:
-		if _file_transport == null or not _file_transport.has_method("last_disconnect_abandoned_count"):
+		if (
+			_file_transport == null
+			or not _file_transport.has_method("last_disconnect_abandoned_count")
+		):
 			return 0
 		return int(_file_transport.last_disconnect_abandoned_count())
 var file_transport_last_disconnect_remaining: int:
 	get:
-		if _file_transport == null or not _file_transport.has_method("last_disconnect_remaining_count"):
+		if (
+			_file_transport == null
+			or not _file_transport.has_method("last_disconnect_remaining_count")
+		):
 			return 0
 		return int(_file_transport.last_disconnect_remaining_count())
+
 
 ## 容器,根据 _ready 时机,允许 hello 阶段被推迟
 func _ready() -> void:
@@ -71,8 +78,9 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		# Editor 进程不运行游戏,probe 仅在游戏进程里注册 capture
 		return
-	var force_file_transport := bool(ProjectSettings.get_setting(
-		"gdapi/runtime_force_file_transport", false))
+	var force_file_transport := bool(
+		ProjectSettings.get_setting("gdapi/runtime_force_file_transport", false)
+	)
 	if not force_file_transport:
 		EngineDebugger.register_message_capture(DEBUGGER_CHANNEL_PREFIX, _on_runtime_capture)
 		_engine_debugger_registered = true
@@ -87,10 +95,12 @@ func _ready() -> void:
 		var t := get_tree().create_timer(_hello_delay_ms / 1000.0)
 		t.timeout.connect(_on_hello_timer_timeout)
 
+
 ## 每帧推动 file transport(扫描 inbox、写 outbox、超时处理)
 func _process(_dt: float) -> void:
 	if _file_transport != null:
 		_file_transport.tick(Time.get_ticks_msec())
+
 
 ## probe 退出时清理 file transport(删除自己的子目录)
 func _exit_tree() -> void:
@@ -99,6 +109,7 @@ func _exit_tree() -> void:
 		_engine_debugger_registered = false
 	if _file_transport != null:
 		_file_transport.stop()
+
 
 ## file transport 收到 request 时调用;与 EngineDebugger capture 复用同一 _dispatch_async
 ##
@@ -114,9 +125,11 @@ func _handle_file_transport_request(req: Dictionary) -> Variant:
 	var payload: Dictionary = req.get("payload", {})
 	return await _dispatch_async(op, payload)
 
+
 ## 推迟到了 timer 触发时间后调用此函数
 func _on_hello_timer_timeout() -> void:
 	_send_hello()
+
 
 ## 注册 capture 后，runtime 接收的所有"编辑器->runtime"消息都先到达此函数
 ##
@@ -145,6 +158,7 @@ func _on_runtime_capture(channel: String, args: Array) -> bool:
 	_dispatch(request_msg)
 	return true
 
+
 ## 按 op 字段把消息分发给对应实现
 ##
 ## 协程 op(screenshot/assert/signal/sequence)用 await 等待完成,再发 reply。
@@ -156,7 +170,14 @@ func _dispatch(request_msg: Dictionary) -> void:
 	var payload: Dictionary = request_msg.get("payload", {})
 	var reply: Dictionary = await _dispatch_async(op, payload)
 	var ok: bool = bool(reply.get("ok", false))
-	var message: Dictionary = Protocol.reply(id, ok, reply.get("result", {}), String(reply.get("error", "")), String(reply.get("code", "")), String(request_msg.get("generation", "")))
+	var message: Dictionary = Protocol.reply(
+		id,
+		ok,
+		reply.get("result", {}),
+		String(reply.get("error", "")),
+		String(reply.get("code", "")),
+		String(request_msg.get("generation", ""))
+	)
 	var verdict := Protocol.validate_message(message)
 	if not bool(verdict.get("ok", false)):
 		message = Protocol.reply(
@@ -168,6 +189,7 @@ func _dispatch(request_msg: Dictionary) -> void:
 			String(request_msg.get("generation", ""))
 		)
 	_send_message(message)
+
 
 func _validate_request_boundary(request_msg: Dictionary) -> Dictionary:
 	if not _generation_matches(request_msg):
@@ -187,11 +209,16 @@ func _validate_request_boundary(request_msg: Dictionary) -> Dictionary:
 		}
 	return {"ok": true}
 
+
 func _generation_matches(request_msg: Dictionary) -> bool:
 	if _file_transport == null:
 		return true
 	var active_generation := String(_file_transport.generation())
-	return active_generation.is_empty() or String(request_msg.get("generation", "")) == active_generation
+	return (
+		active_generation.is_empty()
+		or String(request_msg.get("generation", "")) == active_generation
+	)
+
 
 func _send_request_rejection(request_msg: Dictionary, verdict: Dictionary) -> bool:
 	if int(request_msg.get("version", -1)) != Protocol.VERSION:
@@ -210,6 +237,7 @@ func _send_request_rejection(request_msg: Dictionary, verdict: Dictionary) -> bo
 		String(request_msg.get("generation", ""))
 	)
 	return _send_message(rejection)
+
 
 ## 把 op 转成对应 reply
 func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
@@ -299,6 +327,7 @@ func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 				"error": "unknown runtime op: %s" % op,
 			}
 
+
 func _m4_vector2(payload: Dictionary, key: String) -> Variant:
 	var raw: Variant = payload.get(key, null)
 	if typeof(raw) != TYPE_DICTIONARY:
@@ -306,15 +335,21 @@ func _m4_vector2(payload: Dictionary, key: String) -> Variant:
 	var value: Dictionary = raw
 	var x: Variant = value.get("x", null)
 	var y: Variant = value.get("y", null)
-	if (typeof(x) != TYPE_INT and typeof(x) != TYPE_FLOAT) or (typeof(y) != TYPE_INT and typeof(y) != TYPE_FLOAT):
+	if (
+		(typeof(x) != TYPE_INT and typeof(x) != TYPE_FLOAT)
+		or (typeof(y) != TYPE_INT and typeof(y) != TYPE_FLOAT)
+	):
 		return null
 	return Vector2(float(x), float(y))
+
 
 func _m4_physics_raycast(payload: Dictionary) -> Dictionary:
 	var from: Variant = _m4_vector2(payload, "from")
 	var to: Variant = _m4_vector2(payload, "to")
 	if from == null or to == null:
-		return {"ok": false, "code": "invalid_param", "error": "from and to must be Vector2 objects"}
+		return {
+			"ok": false, "code": "invalid_param", "error": "from and to must be Vector2 objects"
+		}
 	var world := get_viewport().world_2d
 	if world == null:
 		return {"ok": false, "code": "not_supported", "error": "World2D is unavailable"}
@@ -327,36 +362,56 @@ func _m4_physics_raycast(payload: Dictionary) -> Dictionary:
 	var collider_path := ""
 	if collider is Node:
 		collider_path = String((collider as Node).get_path())
-	return {"ok": true, "result": {
-		"hit": true,
-		"position": VariantCodec.from_variant(hit.get("position")),
-		"normal": VariantCodec.from_variant(hit.get("normal")),
-		"collider_path": collider_path,
-	}}
+	return {
+		"ok": true,
+		"result":
+		{
+			"hit": true,
+			"position": VariantCodec.from_variant(hit.get("position")),
+			"normal": VariantCodec.from_variant(hit.get("normal")),
+			"collider_path": collider_path,
+		}
+	}
+
 
 func _m4_navigation_path(payload: Dictionary) -> Dictionary:
 	var region_path := String(payload.get("region_path", ""))
 	if _m4_has_3d_vector(payload, "from") or _m4_has_3d_vector(payload, "to"):
-		return {"ok": false, "code": "not_supported", "error": "only Vector2 navigation points are supported"}
+		return {
+			"ok": false,
+			"code": "not_supported",
+			"error": "only Vector2 navigation points are supported"
+		}
 	var from: Variant = _m4_vector2(payload, "from")
 	var to: Variant = _m4_vector2(payload, "to")
 	if region_path.is_empty() or from == null or to == null:
-		return {"ok": false, "code": "invalid_param", "error": "region_path, from and to are required"}
+		return {
+			"ok": false, "code": "invalid_param", "error": "region_path, from and to are required"
+		}
 	var region := get_node_or_null(NodePath(region_path))
 	if region == null:
 		return {"ok": false, "code": "not_found", "error": "navigation region not found"}
 	if not region is NavigationRegion2D:
-		return {"ok": false, "code": "not_supported", "error": "only NavigationRegion2D is supported"}
-	var points := NavigationServer2D.map_get_path((region as NavigationRegion2D).get_navigation_map(), from, to, true)
+		return {
+			"ok": false, "code": "not_supported", "error": "only NavigationRegion2D is supported"
+		}
+	var points := NavigationServer2D.map_get_path(
+		(region as NavigationRegion2D).get_navigation_map(), from, to, true
+	)
 	var encoded_points: Array = []
 	for point in points:
 		encoded_points.append(VariantCodec.from_variant(point))
 	return {"ok": true, "result": {"region_path": region_path, "points": encoded_points}}
 
+
 func _m4_navigation_agent_target(payload: Dictionary) -> Dictionary:
 	var agent_path := String(payload.get("agent_path", ""))
 	if _m4_has_3d_vector(payload, "target"):
-		return {"ok": false, "code": "not_supported", "error": "only Vector2 navigation targets are supported"}
+		return {
+			"ok": false,
+			"code": "not_supported",
+			"error": "only Vector2 navigation targets are supported"
+		}
 	var target: Variant = _m4_vector2(payload, "target")
 	if agent_path.is_empty() or target == null:
 		return {"ok": false, "code": "invalid_param", "error": "agent_path and target are required"}
@@ -364,24 +419,34 @@ func _m4_navigation_agent_target(payload: Dictionary) -> Dictionary:
 	if agent == null:
 		return {"ok": false, "code": "not_found", "error": "navigation agent not found"}
 	if not agent is NavigationAgent2D:
-		return {"ok": false, "code": "not_supported", "error": "only NavigationAgent2D is supported"}
+		return {
+			"ok": false, "code": "not_supported", "error": "only NavigationAgent2D is supported"
+		}
 	(agent as NavigationAgent2D).target_position = target
-	return {"ok": true, "result": {"changed": true, "agent_path": agent_path, "target": VariantCodec.from_variant(target)}}
+	return {
+		"ok": true,
+		"result":
+		{"changed": true, "agent_path": agent_path, "target": VariantCodec.from_variant(target)}
+	}
+
 
 func _m4_has_3d_vector(payload: Dictionary, key: String) -> bool:
 	var raw: Variant = payload.get(key, null)
 	return typeof(raw) == TYPE_DICTIONARY and (raw as Dictionary).has("z")
 
+
 ## 实现 runtime/status
 func _op_status(_payload: Dictionary) -> Dictionary:
 	return {
 		"ok": true,
-		"result": {
+		"result":
+		{
 			"protocol_version": Protocol.VERSION,
 			"editor_connected": true,
 			"session_started_at": Time.get_unix_time_from_system(),
 		},
 	}
+
 
 ## 实现 runtime/log/read
 func _op_log_read(payload: Dictionary) -> Dictionary:
@@ -391,10 +456,12 @@ func _op_log_read(payload: Dictionary) -> Dictionary:
 	var page: Dictionary = _ring.read(after_cursor, cap)
 	return {"ok": true, "result": page}
 
+
 ## 实现 runtime/log/clear
 func _op_log_clear(_payload: Dictionary) -> Dictionary:
 	var info: Dictionary = _ring.clear()
 	return {"ok": true, "result": info}
+
 
 func _op_node_call(payload: Dictionary) -> Dictionary:
 	var result := NodeOps.call_method(payload)
@@ -406,6 +473,7 @@ func _op_node_call(payload: Dictionary) -> Dictionary:
 		record_log("info", "known-info", {"source": "runtime-fixture"})
 		record_log("error", "known-error", {"source": "runtime-fixture"})
 	return result
+
 
 ## Fixture-only fixed-semantics reset. This is intentionally not a public route:
 ## file harness requests use the single internal op, while EngineDebugger harness
@@ -431,6 +499,7 @@ func reset_shared_fixture() -> Dictionary:
 	normalized["cleared_logs"] = int(ring_result.get("cleared", 0))
 	return normalized
 
+
 func _fixture_reset(payload: Dictionary) -> Dictionary:
 	if not payload.is_empty():
 		return {
@@ -445,6 +514,7 @@ func _fixture_reset(payload: Dictionary) -> Dictionary:
 	public_result.erase("ok")
 	return {"ok": true, "result": public_result}
 
+
 ## 实现 runtime/debug/performance
 func _op_debug_performance(payload: Dictionary) -> Dictionary:
 	var names: Array = payload.get("monitors", [])
@@ -457,6 +527,7 @@ func _op_debug_performance(payload: Dictionary) -> Dictionary:
 			values[String(n)] = Performance.get_custom_monitor(String(n))
 	return {"ok": true, "result": {"values": values}}
 
+
 ## 实现 runtime/debug/monitors（默认键集）
 func _op_debug_monitors(_payload: Dictionary) -> Dictionary:
 	var values: Dictionary = {}
@@ -464,10 +535,12 @@ func _op_debug_monitors(_payload: Dictionary) -> Dictionary:
 		values[key] = Performance.get_monitor(STANDARD_MONITORS[key])
 	return {"ok": true, "result": {"monitors": values}}
 
+
 ## runtime/debug/errors：直接列出 stack frames via OS.get_error_count 或最近已知。
 ## v1 暂不实现详细回溯,返回 ok:true + empty list.
 func _op_debug_errors(_payload: Dictionary) -> Dictionary:
 	return {"ok": true, "result": {"items": []}}
+
 
 ## runtime/debug/breakpoints：v1 不支持编辑器端调试协议,直接 not_supported
 func _op_debug_breakpoints(_payload: Dictionary) -> Dictionary:
@@ -477,6 +550,7 @@ func _op_debug_breakpoints(_payload: Dictionary) -> Dictionary:
 		"error": "editor breakpoint mutation is unavailable in runtime probe v1",
 	}
 
+
 ## 发送 hello 事件,告知编辑器 probe 已 ready
 func _send_hello() -> void:
 	if _hello_sent:
@@ -484,15 +558,24 @@ func _send_hello() -> void:
 	_hello_sent = true
 	if not _engine_debugger_registered:
 		return
-	var hello: Dictionary = Protocol.event(0, "hello", {
-		"protocol_version": Protocol.VERSION,
-		"node": OS.get_processor_name(),
-		"generation": String(_file_transport.generation()) if _file_transport != null else "",
-		"pid": OS.get_process_id(),
-		"started_at": Time.get_unix_time_from_system(),
-	})
+	var hello: Dictionary = (
+		Protocol
+		. event(
+			0,
+			"hello",
+			{
+				"protocol_version": Protocol.VERSION,
+				"node": OS.get_processor_name(),
+				"generation":
+				String(_file_transport.generation()) if _file_transport != null else "",
+				"pid": OS.get_process_id(),
+				"started_at": Time.get_unix_time_from_system(),
+			}
+		)
+	)
 	hello["result"]["transport"] = "engine_debugger"
 	_send_message(hello)
+
 
 ## Wire 发送:把 reply / event 通过 EngineDebugger 推到 editor
 func _send_message(message: Dictionary) -> bool:
@@ -504,9 +587,11 @@ func _send_message(message: Dictionary) -> bool:
 	EngineDebugger.send_message(DEBUGGER_CHANNEL, [message])
 	return true
 
+
 ## 接收缓冲区(供 NodeOps 等内部使用)
 func ring_buffer() -> RefCounted:
 	return _ring
+
 
 ## 便利方法：probe 暴露的本地日志记录入口
 func record_log(level: String, message: String, details: Dictionary = {}) -> void:

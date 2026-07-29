@@ -13,6 +13,7 @@ const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 var passed := 0
 var failed := 0
 
+
 func _init() -> void:
 	print("Running GdApiRuntimeProtocol tests...\n")
 
@@ -39,6 +40,7 @@ func _init() -> void:
 	else:
 		quit(0)
 
+
 func assert_eq(actual, expected, context: String = "") -> void:
 	if actual == expected:
 		passed += 1
@@ -47,11 +49,14 @@ func assert_eq(actual, expected, context: String = "") -> void:
 		failed += 1
 		print("  FAIL: %s - expected '%s', got '%s'" % [context, expected, actual])
 
+
 func assert_true(value: bool, context: String = "") -> void:
 	assert_eq(value, true, context)
 
+
 func assert_false(value: bool, context: String = "") -> void:
 	assert_eq(value, false, context)
+
 
 func test_request_message_shape() -> void:
 	var msg: Dictionary = Protocol.request(7, "runtime/status", {})
@@ -61,13 +66,16 @@ func test_request_message_shape() -> void:
 	assert_eq(msg.get("op"), "runtime/status", "op")
 	assert_eq(msg.get("payload"), {}, "payload")
 
+
 func test_validate_message_accepts_valid_request() -> void:
 	var msg := Protocol.request(1, "runtime/status", {})
 	assert_true(Protocol.validate_message(msg).ok, "valid request")
 
+
 func test_validate_message_rejects_wrong_version() -> void:
 	var msg := {"version": 2, "id": 1, "kind": "request", "op": "x", "payload": {}}
 	assert_eq(Protocol.validate_message(msg).code, "not_supported", "version mismatch")
+
 
 func test_validate_message_rejects_non_dict() -> void:
 	assert_eq(Protocol.validate_message("not a dict").code, "invalid_param", "string input")
@@ -75,33 +83,43 @@ func test_validate_message_rejects_non_dict() -> void:
 	assert_eq(Protocol.validate_message(null).code, "invalid_param", "null input")
 	assert_eq(Protocol.validate_message([1, 2, 3]).code, "invalid_param", "array input")
 
+
 func test_validate_message_rejects_non_int_id() -> void:
 	var msg := {"version": 1, "id": "7", "kind": "request", "op": "x", "payload": {}}
 	assert_eq(Protocol.validate_message(msg).code, "invalid_param", "string id")
+
 
 func test_validate_message_rejects_zero_id() -> void:
 	var msg := {"version": 1, "id": 0, "kind": "request", "op": "x", "payload": {}}
 	assert_eq(Protocol.validate_message(msg).code, "invalid_param", "zero id")
 
+
 func test_validate_message_rejects_unknown_kind() -> void:
 	var msg := {"version": 1, "id": 1, "kind": "banana", "op": "x", "payload": {}}
 	assert_eq(Protocol.validate_message(msg).code, "invalid_param", "unknown kind")
+
 
 func test_validate_message_rejects_missing_op() -> void:
 	var msg := {"version": 1, "id": 1, "kind": "request", "payload": {}}
 	assert_eq(Protocol.validate_message(msg).code, "invalid_param", "missing op")
 
+
 func test_validate_message_rejects_eval_op() -> void:
 	var msg := {"version": 1, "id": 1, "kind": "request", "op": "eval", "payload": {}}
 	assert_eq(Protocol.validate_message(msg).code, "permission_denied", "eval denied")
+
 
 func test_validate_message_rejects_process_run_op() -> void:
 	var msg := {"version": 1, "id": 1, "kind": "request", "op": "process/run", "payload": {}}
 	assert_eq(Protocol.validate_message(msg).code, "permission_denied", "process/run denied")
 
+
 func test_validate_message_rejects_network_http_request_op() -> void:
-	var msg := {"version": 1, "id": 1, "kind": "request", "op": "network/http_request", "payload": {}}
+	var msg := {
+		"version": 1, "id": 1, "kind": "request", "op": "network/http_request", "payload": {}
+	}
 	assert_eq(Protocol.validate_message(msg).code, "permission_denied", "network denied")
+
 
 func test_validate_message_rejects_oversized_payload() -> void:
 	var big_value := ""
@@ -115,13 +133,16 @@ func test_validate_message_rejects_oversized_payload() -> void:
 	var verdict := Protocol.validate_message(msg)
 	assert_eq(verdict.code, "invalid_param", "oversize denied")
 
+
 func test_validate_message_accepts_reply() -> void:
 	var msg := {"version": 1, "id": 3, "kind": "reply", "ok": true, "result": {}}
 	assert_true(Protocol.validate_message(msg).ok, "valid reply")
 
+
 func test_validate_message_accepts_event() -> void:
 	var msg := {"version": 1, "id": 4, "kind": "event", "result": {}}
 	assert_true(Protocol.validate_message(msg).ok, "valid event")
+
 
 func test_request_default_payload_empty_dict() -> void:
 	# request tolerates a missing/empty payload argument.
@@ -130,16 +151,24 @@ func test_request_default_payload_empty_dict() -> void:
 	assert_eq(msg1.get("payload"), {}, "default empty payload")
 	assert_eq(msg2.get("payload"), {}, "explicit empty payload")
 
+
 func test_generation_metadata_is_preserved() -> void:
 	var request := Protocol.request(8, "runtime/status", {}, "generation-a")
 	var reply := Protocol.reply(8, true, {"ready": true}, "", "", "generation-a")
-	var hello := Protocol.event(0, "hello", {
-		"protocol_version": Protocol.VERSION,
-		"generation": "generation-a",
-		"pid": 123,
-		"started_at": 1.5,
-		"transport": "file",
-	})
+	var hello := (
+		Protocol
+		. event(
+			0,
+			"hello",
+			{
+				"protocol_version": Protocol.VERSION,
+				"generation": "generation-a",
+				"pid": 123,
+				"started_at": 1.5,
+				"transport": "file",
+			}
+		)
+	)
 	assert_eq(request.get("generation"), "generation-a", "request generation")
 	assert_eq(reply.get("generation"), "generation-a", "reply generation")
 	assert_eq(hello.get("result", {}).get("generation"), "generation-a", "event generation")

@@ -10,6 +10,7 @@ const ROUTE := "filesystem/read"
 
 const MAX_BYTES := 4 * 1024 * 1024
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var path: String = req.get_body("path", "")
 	if path == "":
@@ -27,26 +28,35 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if bytes.size() > MAX_BYTES:
 		res.error("file too large for text read (max 4 MiB)", ErrorCodes.INVALID_PARAM, 400)
 		return
-	res.json({
-		"ok": true,
-		"path": checked.path,
-		"content": bytes.get_string_from_utf8(),
-		"bytes": bytes.size(),
-		"undoable": false,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"path": checked.path,
+				"content": bytes.get_string_from_utf8(),
+				"bytes": bytes.size(),
+				"undoable": false,
+			}
+		)
+	)
 
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("读取文件文本内容")
-		.desc("超过 4 MiB 返回 invalid_param;二进制文件不可预测,推荐走 res:// 二进制资源。")
-		.param("path", "String", true, "res:// 文件路径")
-		.example("{\"path\":\"res://scripts/player.gd\"}")
-		.returns("文本内容", {
-			"ok": "bool",
-			"path": "String",
-			"content": "String",
-			"bytes": "int",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("读取文件文本内容")
+		. desc("超过 4 MiB 返回 invalid_param;二进制文件不可预测,推荐走 res:// 二进制资源。")
+		. param("path", "String", true, "res:// 文件路径")
+		. example('{"path":"res://scripts/player.gd"}')
+		. returns(
+			"文本内容",
+			{
+				"ok": "bool",
+				"path": "String",
+				"content": "String",
+				"bytes": "int",
+				"undoable": "bool, false",
+			}
+		)
 	)

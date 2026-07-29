@@ -7,6 +7,7 @@ const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_ed
 
 const ROUTE := "resource/deps"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var path: String = req.get_body("path", "")
 	if path == "":
@@ -21,14 +22,18 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("读取资源的依赖列表")
-		.desc("通过 ResourceLoader.get_dependencies 获取依赖。返回的 items 是被依赖文件路径。")
-		.param("path", "String", true, "res:// 资源路径")
-		.example("{\"path\":\"res://scenes/main.tscn\"}")
-		.returns("deps", {
-			"ok": "bool",
-			"path": "String",
-			"items": "Array<String>",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("读取资源的依赖列表")
+		. desc("通过 ResourceLoader.get_dependencies 获取依赖。返回的 items 是被依赖文件路径。")
+		. param("path", "String", true, "res:// 资源路径")
+		. example('{"path":"res://scenes/main.tscn"}')
+		. returns(
+			"deps",
+			{
+				"ok": "bool",
+				"path": "String",
+				"items": "Array<String>",
+				"undoable": "bool, false",
+			}
+		)
 	)

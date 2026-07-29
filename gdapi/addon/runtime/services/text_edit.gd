@@ -14,6 +14,7 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
 const MAX_SCRIPT_BYTES := 1 * 1024 * 1024
 
+
 ## 在 path 上读取源代码.仅允许 res:// 脚本类扩展.
 static func read_script(path: String) -> Dictionary:
 	var checked := PathGuard.validate(path, "read")
@@ -21,10 +22,14 @@ static func read_script(path: String) -> Dictionary:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	var abs_path := ProjectSettings.globalize_path(checked.path)
 	if not FileAccess.file_exists(abs_path):
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "file not found: " + checked.path}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "file not found: " + checked.path
+		}
 	var f := FileAccess.open(abs_path, FileAccess.READ)
 	if f == null:
-		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "cannot open: " + checked.path}
+		return {
+			"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "cannot open: " + checked.path
+		}
 	var content := f.get_as_text()
 	f.close()
 	return {
@@ -35,14 +40,28 @@ static func read_script(path: String) -> Dictionary:
 		"undoable": false,
 	}
 
+
 ## 全有或全无的 patch: 1-based 闭区间 [first, last] 替换为 text(text 支持多行).
 static func replace_lines(source: String, first: int, last: int, text: String) -> Dictionary:
 	var lines := source.split("\n", true)
 	if first < 1 or last < first or last > lines.size():
-		return {"ok": false, "error": "line range is outside the file: " + str(first) + ".." + str(last) + " (size=" + str(lines.size()) + ")"}
+		return {
+			"ok": false,
+			"error":
+			(
+				"line range is outside the file: "
+				+ str(first)
+				+ ".."
+				+ str(last)
+				+ " (size="
+				+ str(lines.size())
+				+ ")"
+			)
+		}
 	var replacement := text.split("\n", true)
 	var new_lines: Array = lines.slice(0, first - 1) + replacement + lines.slice(last)
 	return {"ok": true, "text": "\n".join(new_lines)}
+
 
 ## 写入新脚本文件.已存在需要 force.
 static func create_script(path: String, content: String, force: bool) -> Dictionary:
@@ -53,8 +72,18 @@ static func create_script(path: String, content: String, force: bool) -> Diction
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "content too large"}
 	var abs_path := ProjectSettings.globalize_path(checked.path)
 	if FileAccess.file_exists(abs_path) and not force:
-		AuditLog.record("script/create", "file", {"path": checked.path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
-		return {"ok": false, "code": ErrorCodes.UNSAFE_OPERATION, "error": "script/create requires force:true"}
+		AuditLog.record(
+			"script/create",
+			"file",
+			{"path": checked.path, "force": false},
+			false,
+			ErrorCodes.UNSAFE_OPERATION
+		)
+		return {
+			"ok": false,
+			"code": ErrorCodes.UNSAFE_OPERATION,
+			"error": "script/create requires force:true"
+		}
 	var dir: String = checked.path.get_base_dir()
 	if dir != "res://" and !DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir)):
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
@@ -67,29 +96,51 @@ static func create_script(path: String, content: String, force: bool) -> Diction
 	f.close()
 	DirAccess.rename_absolute(tmp, abs_path)
 	AuditLog.record("script/create", "file", {"path": checked.path, "force": force}, true, "")
-	return {"ok": true, "changed": true, "written": true, "saved": true, "undoable": false, "path": checked.path, "bytes": content.length()}
+	return {
+		"ok": true,
+		"changed": true,
+		"written": true,
+		"saved": true,
+		"undoable": false,
+		"path": checked.path,
+		"bytes": content.length()
+	}
+
 
 ## 完整覆盖写入.需要 force.返回 undoable:false 并审计.
 static func write_script(path: String, content: String, force: bool) -> Dictionary:
 	return create_script(path, content, force)
 
+
 ## 行级 patch.写入磁盘前先校验范围,失败时返回 invalid_param 且不动文件.
-static func patch_script(path: String, first: int, last: int, text: String, force: bool) -> Dictionary:
+static func patch_script(
+	path: String, first: int, last: int, text: String, force: bool
+) -> Dictionary:
 	var checked := PathGuard.validate(path, "write")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	var abs_path := ProjectSettings.globalize_path(checked.path)
 	if not FileAccess.file_exists(abs_path):
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "file not found: " + checked.path}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "file not found: " + checked.path
+		}
 	var existing := FileAccess.get_file_as_string(abs_path)
 	if existing.length() > MAX_SCRIPT_BYTES:
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "file too large to patch in-memory"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "file too large to patch in-memory"
+		}
 	var patch_result := replace_lines(existing, first, last, text)
 	if not patch_result.ok:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": patch_result.error}
 	# 覆盖已有文件需要 force:true
 	if not force:
-		return {"ok": false, "code": ErrorCodes.UNSAFE_OPERATION, "error": "script/patch requires force:true to overwrite"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.UNSAFE_OPERATION,
+			"error": "script/patch requires force:true to overwrite"
+		}
 	# 检查是否真的是有变化的 patch
 	var new_text: String = patch_result.text
 	if new_text == existing:
@@ -101,17 +152,38 @@ static func patch_script(path: String, first: int, last: int, text: String, forc
 	f.store_string(new_text)
 	f.close()
 	DirAccess.rename_absolute(tmp, abs_path)
-	AuditLog.record("script/patch", "file", {"path": checked.path, "first": first, "last": last, "force": force}, true, "")
-	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": checked.path, "first": first, "last": last}
+	AuditLog.record(
+		"script/patch",
+		"file",
+		{"path": checked.path, "first": first, "last": last, "force": force},
+		true,
+		""
+	)
+	return {
+		"ok": true,
+		"changed": true,
+		"saved": true,
+		"undoable": false,
+		"path": checked.path,
+		"first": first,
+		"last": last
+	}
+
 
 ## attach script 到节点.接 UndoRedo.
 static func attach_script(node_path: String, path: String) -> Dictionary:
 	if not Engine.is_editor_hint():
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "script/attach requires editor"}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "script/attach requires editor"
+		}
 	# import NodeEditor 是循环依赖,使用延迟查找
-	var EditorInterfaceRef := Engine.get_singleton("EditorInterface") if Engine.has_singleton("EditorInterface") else null
+	var EditorInterfaceRef := (
+		Engine.get_singleton("EditorInterface") if Engine.has_singleton("EditorInterface") else null
+	)
 	if EditorInterfaceRef == null:
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorInterface unavailable"}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorInterface unavailable"
+		}
 	# 直接通过 GdApiNodeEditor.find 解析 node_path
 	var NodeEditor := load("res://addons/gdapi/runtime/services/node_editor.gd")
 	var lookup: Dictionary = NodeEditor.find(node_path)
@@ -123,17 +195,32 @@ static func attach_script(node_path: String, path: String) -> Dictionary:
 		return {"ok": false, "code": script_check.code, "error": script_check.error}
 	var script: Script = load(script_check.path)
 	if script == null:
-		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "cannot load script: " + script_check.path}
+		return {
+			"ok": false,
+			"code": ErrorCodes.GODOT_ERROR,
+			"error": "cannot load script: " + script_check.path
+		}
 	var manager := EditAction.undo_redo()
 	if manager == null:
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorUndoRedoManager unavailable"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.NOT_SUPPORTED,
+			"error": "EditorUndoRedoManager unavailable"
+		}
 	var previous_script: Variant = node.get_script()
 	var owner: Node = EditorInterface.get_edited_scene_root()
 	manager.create_action("gdcli: attach script")
 	manager.add_do_method(node, "set_script", script)
 	manager.add_undo_method(node, "set_script", previous_script)
 	manager.commit_action()
-	return {"ok": true, "changed": true, "undoable": true, "node_path": lookup.node_path, "script_path": script_check.path}
+	return {
+		"ok": true,
+		"changed": true,
+		"undoable": true,
+		"node_path": lookup.node_path,
+		"script_path": script_check.path
+	}
+
 
 ## detach script.接 UndoRedo.
 static func detach_script(node_path: String) -> Dictionary:
@@ -147,12 +234,17 @@ static func detach_script(node_path: String) -> Dictionary:
 		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "node has no script attached"}
 	var manager := EditAction.undo_redo()
 	if manager == null:
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorUndoRedoManager unavailable"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.NOT_SUPPORTED,
+			"error": "EditorUndoRedoManager unavailable"
+		}
 	manager.create_action("gdcli: detach script")
 	manager.add_do_method(node, "set_script", null)
 	manager.add_undo_method(node, "set_script", previous_script)
 	manager.commit_action()
 	return {"ok": true, "changed": true, "undoable": true, "node_path": lookup.node_path}
+
 
 ## 校验 GDScript 语法.不修改文件,使用 GDScript 解析.
 static func validate_script(path: String) -> Dictionary:
@@ -161,7 +253,9 @@ static func validate_script(path: String) -> Dictionary:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	var abs_path := ProjectSettings.globalize_path(checked.path)
 	if not FileAccess.file_exists(abs_path):
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "file not found: " + checked.path}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "file not found: " + checked.path
+		}
 	var src := FileAccess.get_file_as_string(abs_path)
 	var gds := GDScript.new()
 	gds.source_code = src
@@ -175,21 +269,36 @@ static func validate_script(path: String) -> Dictionary:
 	errors.append({"line": 0, "column": 0, "message": "GDScript reload failed: " + str(err)})
 	return {"ok": true, "valid": false, "errors": errors, "path": checked.path, "undoable": false}
 
+
 ## 打开脚本到 script editor,定位 1-based 行/列.
 static func open_script(path: String, line: int = -1, column: int = -1) -> Dictionary:
 	var checked := PathGuard.validate(path, "read")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	if not Engine.is_editor_hint():
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "script/open requires editor"}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "script/open requires editor"
+		}
 	var resource: Resource = load(checked.path)
 	if resource == null or not (resource is Script):
-		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "not a Script resource: " + checked.path}
+		return {
+			"ok": false,
+			"code": ErrorCodes.GODOT_ERROR,
+			"error": "not a Script resource: " + checked.path
+		}
 	if line < 0 or column < 0:
 		EditorInterface.edit_script(resource)
 	else:
 		EditorInterface.edit_script(resource, line - 1, column - 1)
-	return {"ok": true, "changed": false, "undoable": false, "path": checked.path, "line": line, "column": column}
+	return {
+		"ok": true,
+		"changed": false,
+		"undoable": false,
+		"path": checked.path,
+		"line": line,
+		"column": column
+	}
+
 
 ## 返回当前 script editor 打开的脚本路径或空字符串
 static func current_script() -> String:

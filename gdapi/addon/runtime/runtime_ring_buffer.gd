@@ -17,11 +17,13 @@ var _next_cursor: int = 1
 ## 内部顺序数组:[{cursor:int, level:String, message:String, details:Dictionary, ts:float}]
 var _items: Array = []
 
+
 ## 构造器
 ## @param initial_capacity 容量,默认 2000
 func _init(initial_capacity: int = 2000) -> void:
 	if initial_capacity > 0:
 		capacity = initial_capacity
+
 
 ## 追加一条;返回这条的 cursor
 ##
@@ -32,17 +34,23 @@ func _init(initial_capacity: int = 2000) -> void:
 func append(level: String, message: String, details: Dictionary = {}) -> int:
 	var cursor: int = _next_cursor
 	_next_cursor += 1
-	_items.append({
-		"cursor": cursor,
-		"level": level,
-		"message": message,
-		"details": details,
-		"ts": Time.get_unix_time_from_system(),
-	})
+	(
+		_items
+		. append(
+			{
+				"cursor": cursor,
+				"level": level,
+				"message": message,
+				"details": details,
+				"ts": Time.get_unix_time_from_system(),
+			}
+		)
+	)
 	if _items.size() > capacity:
 		var drop: int = _items.size() - capacity
 		_items = _items.slice(drop)
 	return cursor
+
 
 ## 增量读取
 ##
@@ -76,12 +84,14 @@ func read(after_cursor: int, limit: int = 100) -> Dictionary:
 		"dropped": dropped,
 	}
 
+
 ## 清空,返回 cleared / next_cursor
 func clear() -> Dictionary:
 	var cleared: int = _items.size()
 	_items.clear()
 	_next_cursor = 1
 	return {"cleared": cleared, "next_cursor": 0}
+
 
 ## 当前缓存大小
 func size() -> int:

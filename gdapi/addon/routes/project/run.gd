@@ -12,6 +12,7 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
 const RuntimeBroker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 
+
 ## 处理运行场景请求
 ##
 ## 根据请求参数运行主场景或指定路径的场景。
@@ -29,11 +30,16 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if scene_path.is_empty():
 		EditorInterface.play_main_scene()
 		req.log_info("Started playing main scene")
-		res.json({
-			"ok": true,
-			"action": "play_main_scene",
-			"runtime_state": _runtime_state_label(broker),
-		})
+		(
+			res
+			. json(
+				{
+					"ok": true,
+					"action": "play_main_scene",
+					"runtime_state": _runtime_state_label(broker),
+				}
+			)
+		)
 		return
 
 	# 使用 PathGuard 校验路径
@@ -55,12 +61,18 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	req.log_info("Started playing scene: " + scene_path)
 
 	# 返回成功响应
-	res.json({
-		"ok": true,
-		"action": "play_custom_scene",
-		"scene": scene_path,
-		"runtime_state": _runtime_state_label(broker),
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"action": "play_custom_scene",
+				"scene": scene_path,
+				"runtime_state": _runtime_state_label(broker),
+			}
+		)
+	)
+
 
 ## 把 broker 当前 state 转字符串,便于外部调试
 ##
@@ -72,17 +84,24 @@ func _runtime_state_label(broker: Variant) -> String:
 	var status: Dictionary = broker.status()
 	return String(status.get("state", "stopped"))
 
+
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("运行 Godot 场景")
-		.desc("不带 scene_path 时运行主场景；带 scene_path 时运行指定路径的自定义场景；用于自动化测试和快速预览。M3 同时把 runtime broker 切换到 connecting,等待 EditorDebuggerPlugin 的 hello")
-		.param("scene_path", "String", false, "要运行的场景路径,留空则运行主场景", "")
-		.example("{\"scene_path\":\"res://test.tscn\"}")
-		.returns("运行结果", {
-			"ok": "bool",
-			"action": "String, play_main_scene 或 play_custom_scene",
-			"scene": "String, 仅自定义场景模式存在，运行的场景路径",
-			"runtime_state": "String, stopped|connecting|connected",
-		})
+		GdApiRouteDoc
+		. make("运行 Godot 场景")
+		. desc(
+			"不带 scene_path 时运行主场景；带 scene_path 时运行指定路径的自定义场景；用于自动化测试和快速预览。M3 同时把 runtime broker 切换到 connecting,等待 EditorDebuggerPlugin 的 hello"
+		)
+		. param("scene_path", "String", false, "要运行的场景路径,留空则运行主场景", "")
+		. example('{"scene_path":"res://test.tscn"}')
+		. returns(
+			"运行结果",
+			{
+				"ok": "bool",
+				"action": "String, play_main_scene 或 play_custom_scene",
+				"scene": "String, 仅自定义场景模式存在，运行的场景路径",
+				"runtime_state": "String, stopped|connecting|connected",
+			}
+		)
 	)

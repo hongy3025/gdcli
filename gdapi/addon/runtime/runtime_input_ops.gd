@@ -26,6 +26,7 @@ const INPUT_ROUTES := [
 	"runtime/input/action",
 ]
 
+
 static func key(payload: Dictionary) -> Dictionary:
 	var verdict := _validate_key(payload)
 	if not bool(verdict.get("ok", false)):
@@ -37,11 +38,14 @@ static func key(payload: Dictionary) -> Dictionary:
 	event.keycode = keycode
 	event.pressed = pressed
 	Input.parse_input_event(event)
-	return _success({
-		"event_type": "key",
-		"keycode": keycode,
-		"pressed": pressed,
-	})
+	return _success(
+		{
+			"event_type": "key",
+			"keycode": keycode,
+			"pressed": pressed,
+		}
+	)
+
 
 static func mouse(payload: Dictionary) -> Dictionary:
 	var verdict := _validate_mouse(payload)
@@ -55,16 +59,19 @@ static func mouse(payload: Dictionary) -> Dictionary:
 		event.position = position
 		event.pressed = payload.get("pressed", true)
 		Input.parse_input_event(event)
-		return _success({
-			"event_type": "button",
-			"button": event.button_index,
-			"pressed": event.pressed,
-		})
+		return _success(
+			{
+				"event_type": "button",
+				"button": event.button_index,
+				"pressed": event.pressed,
+			}
+		)
 	var motion := InputEventMouseMotion.new()
 	motion.position = position
 	motion.relative = position
 	Input.parse_input_event(motion)
 	return _success({"event_type": "motion"})
+
 
 static func gamepad(payload: Dictionary) -> Dictionary:
 	var verdict := _validate_gamepad(payload)
@@ -78,23 +85,28 @@ static func gamepad(payload: Dictionary) -> Dictionary:
 		event.button_index = int(payload.get("button"))
 		event.pressed = payload.get("pressed", true)
 		Input.parse_input_event(event)
-		return _success({
-			"event_type": "gamepad_button",
-			"device": device,
-			"button": event.button_index,
-			"pressed": event.pressed,
-		})
+		return _success(
+			{
+				"event_type": "gamepad_button",
+				"device": device,
+				"button": event.button_index,
+				"pressed": event.pressed,
+			}
+		)
 	var motion := InputEventJoypadMotion.new()
 	motion.device = device
 	motion.axis = int(payload.get("axis"))
 	motion.axis_value = float(payload.get("value"))
 	Input.parse_input_event(motion)
-	return _success({
-		"event_type": "gamepad_axis",
-		"device": device,
-		"axis": motion.axis,
-		"value": motion.axis_value,
-	})
+	return _success(
+		{
+			"event_type": "gamepad_axis",
+			"device": device,
+			"axis": motion.axis,
+			"value": motion.axis_value,
+		}
+	)
+
 
 static func touch(payload: Dictionary) -> Dictionary:
 	var verdict := _validate_touch(payload)
@@ -105,11 +117,14 @@ static func touch(payload: Dictionary) -> Dictionary:
 	event.position = _position_value(payload.get("position", [0, 0]))
 	event.pressed = payload.get("pressed", true)
 	Input.parse_input_event(event)
-	return _success({
-		"event_type": "touch",
-		"index": event.index,
-		"pressed": event.pressed,
-	})
+	return _success(
+		{
+			"event_type": "touch",
+			"index": event.index,
+			"pressed": event.pressed,
+		}
+	)
+
 
 static func action(payload: Dictionary) -> Dictionary:
 	var verdict := _validate_action(payload)
@@ -123,11 +138,14 @@ static func action(payload: Dictionary) -> Dictionary:
 	event.strength = 1.0 if pressed else 0.0
 	Input.parse_input_event(event)
 	Input.flush_buffered_events()
-	return _success({
-		"event_type": "action",
-		"action": action_name,
-		"pressed": pressed,
-	})
+	return _success(
+		{
+			"event_type": "action",
+			"action": action_name,
+			"pressed": pressed,
+		}
+	)
+
 
 ## Sequence delays are relative per entry. Validate their cumulative sum and every
 ## nested operation before yielding or injecting the first event.
@@ -152,11 +170,14 @@ static func sequence(payload: Dictionary) -> Dictionary:
 		var child_result := _dispatch_child(String(entry["route"]), entry["data"])
 		if not bool(child_result.get("ok", false)):
 			return child_result
-	return _success({
-		"event_type": "sequence",
-		"events": events.size(),
-		"changed": not events.is_empty(),
-	})
+	return _success(
+		{
+			"event_type": "sequence",
+			"events": events.size(),
+			"changed": not events.is_empty(),
+		}
+	)
+
 
 static func _validate_key(payload: Dictionary) -> Dictionary:
 	if not payload.has("keycode"):
@@ -165,6 +186,7 @@ static func _validate_key(payload: Dictionary) -> Dictionary:
 	if not _integer_in_range(keycode, 1, MAX_KEYCODE):
 		return _failure("invalid_param", "keycode must be a bounded positive integer")
 	return _validate_optional_bool(payload, "pressed")
+
 
 static func _validate_mouse(payload: Dictionary) -> Dictionary:
 	var kind: Variant = payload.get("kind", "button")
@@ -181,6 +203,7 @@ static func _validate_mouse(payload: Dictionary) -> Dictionary:
 			return _failure("invalid_param", "mouse button must be 1..8")
 		return _validate_optional_bool(payload, "pressed")
 	return {"ok": true}
+
 
 static func _validate_gamepad(payload: Dictionary) -> Dictionary:
 	var device: Variant = payload.get("device", 0)
@@ -204,9 +227,15 @@ static func _validate_gamepad(payload: Dictionary) -> Dictionary:
 	if not _integer_in_range(axis, 0, MAX_JOYPAD_AXIS):
 		return _failure("invalid_param", "gamepad axis must be 0..3")
 	var value: Variant = payload["value"]
-	if not _is_number(value) or not is_finite(float(value)) or float(value) < -1.0 or float(value) > 1.0:
+	if (
+		not _is_number(value)
+		or not is_finite(float(value))
+		or float(value) < -1.0
+		or float(value) > 1.0
+	):
 		return _failure("invalid_param", "gamepad axis value must be finite and within -1..1")
 	return {"ok": true}
+
 
 static func _validate_touch(payload: Dictionary) -> Dictionary:
 	var index: Variant = payload.get("index", 0)
@@ -217,15 +246,21 @@ static func _validate_touch(payload: Dictionary) -> Dictionary:
 		return position_verdict
 	return _validate_optional_bool(payload, "pressed")
 
+
 static func _validate_action(payload: Dictionary) -> Dictionary:
 	if not payload.has("action"):
 		return _failure("missing_param", "action is required")
 	var action_name: Variant = payload["action"]
-	if typeof(action_name) != TYPE_STRING or String(action_name).is_empty() or String(action_name).length() > MAX_ACTION_LENGTH:
+	if (
+		typeof(action_name) != TYPE_STRING
+		or String(action_name).is_empty()
+		or String(action_name).length() > MAX_ACTION_LENGTH
+	):
 		return _failure("invalid_param", "action must be a non-empty bounded string")
 	if not InputMap.has_action(String(action_name)):
 		return _failure("invalid_param", "action not in InputMap: %s" % String(action_name))
 	return _validate_optional_bool(payload, "pressed")
+
 
 static func _validate_sequence(payload: Dictionary) -> Dictionary:
 	var timeout_ms := _operation_timeout(payload)
@@ -264,6 +299,7 @@ static func _validate_sequence(payload: Dictionary) -> Dictionary:
 			return child_verdict
 	return {"ok": true, "total_ms": total_ms}
 
+
 static func _validate_child(route: String, data: Dictionary) -> Dictionary:
 	match route:
 		"runtime/input/key":
@@ -278,6 +314,7 @@ static func _validate_child(route: String, data: Dictionary) -> Dictionary:
 			return _validate_action(data)
 		_:
 			return _failure("invalid_param", "sequence contains unsupported route: %s" % route)
+
 
 static func _dispatch_child(route: String, data: Dictionary) -> Dictionary:
 	match route:
@@ -294,6 +331,7 @@ static func _dispatch_child(route: String, data: Dictionary) -> Dictionary:
 		_:
 			return _failure("invalid_param", "sequence contains unsupported route: %s" % route)
 
+
 static func _validate_position(value: Variant) -> Dictionary:
 	if typeof(value) != TYPE_ARRAY:
 		return _failure("invalid_param", "position must be a two-number array")
@@ -306,16 +344,20 @@ static func _validate_position(value: Variant) -> Dictionary:
 			return _failure("invalid_param", "position components must be finite and bounded")
 	return {"ok": true}
 
+
 static func _position_value(value: Array) -> Vector2:
 	return Vector2(float(value[0]), float(value[1]))
+
 
 static func _validate_optional_bool(payload: Dictionary, key_name: String) -> Dictionary:
 	if payload.has(key_name) and typeof(payload[key_name]) != TYPE_BOOL:
 		return _failure("invalid_param", "%s must be a boolean" % key_name)
 	return {"ok": true}
 
+
 static func _is_number(value: Variant) -> bool:
 	return typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT
+
 
 static func _integer_in_range(value: Variant, minimum: int, maximum: int) -> bool:
 	if typeof(value) == TYPE_INT:
@@ -323,8 +365,13 @@ static func _integer_in_range(value: Variant, minimum: int, maximum: int) -> boo
 	if typeof(value) != TYPE_FLOAT:
 		return false
 	var number := float(value)
-	return is_finite(number) and number == floor(number) \
-		and number >= float(minimum) and number <= float(maximum)
+	return (
+		is_finite(number)
+		and number == floor(number)
+		and number >= float(minimum)
+		and number <= float(maximum)
+	)
+
 
 static func _operation_timeout(payload: Dictionary) -> int:
 	if not payload.has("timeout_ms"):
@@ -333,6 +380,7 @@ static func _operation_timeout(payload: Dictionary) -> int:
 	if not _integer_in_range(raw, 1, MAX_OPERATION_TIMEOUT_MS):
 		return -1
 	return int(raw)
+
 
 static func _success(fields: Dictionary) -> Dictionary:
 	var result := {
@@ -343,6 +391,7 @@ static func _success(fields: Dictionary) -> Dictionary:
 		if key_name != "changed":
 			result[key_name] = fields[key_name]
 	return {"ok": true, "result": result}
+
 
 static func _failure(code: String, message: String) -> Dictionary:
 	return {"ok": false, "code": code, "error": message}

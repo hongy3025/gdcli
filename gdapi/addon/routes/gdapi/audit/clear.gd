@@ -6,6 +6,7 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
 const ROUTE := "gdapi/audit/clear"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var force: bool = bool(req.get_body("force", false))
 	if not ErrorCodes.require_force(res, force, ROUTE):
@@ -18,11 +19,14 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	plugin.clear_audit()
 	AuditLog.record(ROUTE, "dangerous", {"force": true}, true, "")
 	res.json({"ok": true, "cleared": true, "changed": true, "undoable": false})
+
+
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("清空 gdapi 审计日志")
-		.desc("危险操作；必须传 force:true")
-		.param("force", "bool", true, "必须为 true 才会清空审计日志", false)
-		.example("{\"force\":true}")
-		.returns("清空结果", {"ok":"bool", "cleared":"bool", "changed":"bool", "undoable":"bool"})
+		GdApiRouteDoc
+		. make("清空 gdapi 审计日志")
+		. desc("危险操作；必须传 force:true")
+		. param("force", "bool", true, "必须为 true 才会清空审计日志", false)
+		. example('{"force":true}')
+		. returns("清空结果", {"ok": "bool", "cleared": "bool", "changed": "bool", "undoable": "bool"})
 	)

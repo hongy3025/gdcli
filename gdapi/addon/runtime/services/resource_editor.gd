@@ -13,13 +13,18 @@ const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
+
 ## 读取资源元数据
 static func info(path: String) -> Dictionary:
 	var checked := PathGuard.validate(path, "read")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	if not ResourceLoader.exists(checked.path):
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "resource not found: " + checked.path}
+		return {
+			"ok": false,
+			"code": ErrorCodes.NOT_FOUND,
+			"error": "resource not found: " + checked.path
+		}
 	var res: Resource = load(checked.path)
 	if res == null:
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "failed to load resource"}
@@ -46,16 +51,21 @@ static func info(path: String) -> Dictionary:
 		"undoable": false,
 	}
 
+
 ## 反向依赖列表 (search inbound references using the editor)
 static func deps(path: String) -> Dictionary:
 	var checked := PathGuard.validate(path, "read")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	if not Engine.is_editor_hint():
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "resource/deps requires editor"}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "resource/deps requires editor"
+		}
 	var fs := EditorInterface.get_resource_filesystem()
 	if fs == null:
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorFileSystem unavailable"}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorFileSystem unavailable"
+		}
 	# 简易实现: 用 .get_dependencies 看哪些其它文件依赖于本资源
 	var items: Array = []
 	if not ResourceLoader.exists(checked.path):
@@ -70,6 +80,7 @@ static func deps(path: String) -> Dictionary:
 		"items": items,
 		"undoable": false,
 	}
+
 
 ## 搜索资源 — 通过 DirAccess 扫描文件系统 (不依赖 EditorFileSystem)
 static func search(filter_text: String, offset: int, limit: int) -> Dictionary:
@@ -112,7 +123,11 @@ static func _scan_dir_for_resources(dir_path: String, needle: String, out: Array
 ## 重新导入资源
 static func reimport(paths: Array) -> Dictionary:
 	if not Engine.is_editor_hint():
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "resource/reimport requires editor"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.NOT_SUPPORTED,
+			"error": "resource/reimport requires editor"
+		}
 	var validated: Array = []
 	for raw in paths:
 		var checked := PathGuard.validate(String(raw), "read")
@@ -121,10 +136,13 @@ static func reimport(paths: Array) -> Dictionary:
 		validated.append(checked.path)
 	var fs := EditorInterface.get_resource_filesystem()
 	if fs == null:
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorFileSystem unavailable"}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorFileSystem unavailable"
+		}
 	fs.reimport_files(validated)
 	AuditLog.record("resource/reimport", "file", {"paths": validated}, true, "")
 	return {"ok": true, "changed": true, "reimported": validated, "undoable": false}
+
 
 ## 创建新资源,要求 type 必须是 Resource 的子类
 static func create(path: String, type: String, properties: Dictionary, force: bool) -> Dictionary:
@@ -132,13 +150,31 @@ static func create(path: String, type: String, properties: Dictionary, force: bo
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	if not ClassDB.class_exists(type) or not ClassDB.is_parent_class(type, "Resource"):
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "type is not a Resource subclass: " + type}
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "type is not a Resource subclass: " + type
+		}
 	if not ClassDB.can_instantiate(type):
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "type cannot be instantiated: " + type}
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "type cannot be instantiated: " + type
+		}
 	var abs_path := ProjectSettings.globalize_path(checked.path)
 	if FileAccess.file_exists(abs_path) and not force:
-		AuditLog.record("resource/create", "file", {"path": checked.path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
-		return {"ok": false, "code": ErrorCodes.UNSAFE_OPERATION, "error": "resource/create requires force:true"}
+		AuditLog.record(
+			"resource/create",
+			"file",
+			{"path": checked.path, "force": false},
+			false,
+			ErrorCodes.UNSAFE_OPERATION
+		)
+		return {
+			"ok": false,
+			"code": ErrorCodes.UNSAFE_OPERATION,
+			"error": "resource/create requires force:true"
+		}
 	var instance: Resource = ClassDB.instantiate(type)
 	if instance == null:
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "instantiate failed: " + type}
@@ -147,19 +183,43 @@ static func create(path: String, type: String, properties: Dictionary, force: bo
 		if not decoded.ok:
 			return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": decoded.error}
 		if not (key in instance):
-			return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "property not found on resource: " + key}
+			return {
+				"ok": false,
+				"code": ErrorCodes.NOT_FOUND,
+				"error": "property not found on resource: " + key
+			}
 		instance.set(key, decoded.value)
 	var err := ResourceSaver.save(instance, checked.path)
 	if err != OK:
-		AuditLog.record("resource/create", "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR)
-		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "ResourceSaver.save failed: " + str(err)}
-	AuditLog.record("resource/create", "file", {"path": checked.path, "type": type, "force": force}, true, "")
-	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": checked.path, "class": type}
+		AuditLog.record(
+			"resource/create", "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR
+		)
+		return {
+			"ok": false,
+			"code": ErrorCodes.GODOT_ERROR,
+			"error": "ResourceSaver.save failed: " + str(err)
+		}
+	AuditLog.record(
+		"resource/create", "file", {"path": checked.path, "type": type, "force": force}, true, ""
+	)
+	return {
+		"ok": true,
+		"changed": true,
+		"saved": true,
+		"undoable": false,
+		"path": checked.path,
+		"class": type
+	}
+
 
 ## 把资源赋给节点的属性,接 UndoRedo
 static func assign(node_path: String, property: String, path: String) -> Dictionary:
 	if not Engine.is_editor_hint():
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "resource/assign requires editor"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.NOT_SUPPORTED,
+			"error": "resource/assign requires editor"
+		}
 	var NodeEditor := load("res://addons/gdapi/runtime/services/node_editor.gd")
 	var lookup: Dictionary = NodeEditor.find(node_path)
 	if not lookup.ok:
@@ -169,14 +229,24 @@ static func assign(node_path: String, property: String, path: String) -> Diction
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	if not ResourceLoader.exists(checked.path):
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "resource not found: " + checked.path}
+		return {
+			"ok": false,
+			"code": ErrorCodes.NOT_FOUND,
+			"error": "resource not found: " + checked.path
+		}
 	if not (property in node):
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "node has no property: " + property}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "node has no property: " + property
+		}
 	var res: Resource = load(checked.path)
 	var previous: Variant = node.get(property)
 	var manager := EditAction.undo_redo()
 	if manager == null:
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorUndoRedoManager unavailable"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.NOT_SUPPORTED,
+			"error": "EditorUndoRedoManager unavailable"
+		}
 	manager.create_action("gdcli: assign resource")
 	manager.add_do_method(node, "set", property, res)
 	manager.add_undo_method(node, "set", property, previous)
@@ -190,10 +260,13 @@ static func assign(node_path: String, property: String, path: String) -> Diction
 		"path": checked.path,
 	}
 
+
 ## 在编辑器文件系统中移动资源文件
 static func move(from_path: String, to_path: String, force: bool) -> Dictionary:
 	if not Engine.is_editor_hint():
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "resource/move requires editor"}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "resource/move requires editor"
+		}
 	var from_check := PathGuard.validate(from_path, "read")
 	if not from_check.ok:
 		return {"ok": false, "code": from_check.code, "error": from_check.error}
@@ -201,16 +274,42 @@ static func move(from_path: String, to_path: String, force: bool) -> Dictionary:
 	if not to_check.ok:
 		return {"ok": false, "code": to_check.code, "error": to_check.error}
 	if FileAccess.file_exists(ProjectSettings.globalize_path(to_check.path)) and not force:
-		AuditLog.record("resource/move", "file", {"from": from_check.path, "to": to_check.path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
-		return {"ok": false, "code": ErrorCodes.UNSAFE_OPERATION, "error": "resource/move requires force:true"}
+		AuditLog.record(
+			"resource/move",
+			"file",
+			{"from": from_check.path, "to": to_check.path, "force": false},
+			false,
+			ErrorCodes.UNSAFE_OPERATION
+		)
+		return {
+			"ok": false,
+			"code": ErrorCodes.UNSAFE_OPERATION,
+			"error": "resource/move requires force:true"
+		}
 	var fs := EditorInterface.get_resource_filesystem()
 	if fs == null:
-		return {"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorFileSystem unavailable"}
+		return {
+			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorFileSystem unavailable"
+		}
 	var err: Error = fs.move_file(from_check.path, to_check.path)
 	if err != OK:
-		AuditLog.record("resource/move", "file", {"from": from_check.path, "to": to_check.path}, false, ErrorCodes.GODOT_ERROR)
-		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "move_file failed: " + str(err)}
-	AuditLog.record("resource/move", "file", {"from": from_check.path, "to": to_check.path, "force": force}, true, "")
+		AuditLog.record(
+			"resource/move",
+			"file",
+			{"from": from_check.path, "to": to_check.path},
+			false,
+			ErrorCodes.GODOT_ERROR
+		)
+		return {
+			"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "move_file failed: " + str(err)
+		}
+	AuditLog.record(
+		"resource/move",
+		"file",
+		{"from": from_check.path, "to": to_check.path, "force": force},
+		true,
+		""
+	)
 	return {
 		"ok": true,
 		"changed": true,
@@ -220,20 +319,37 @@ static func move(from_path: String, to_path: String, force: bool) -> Dictionary:
 		"to": to_check.path,
 	}
 
+
 ## 删除资源: 引用计数由人工搜索确定;若存在 inbound 引用需要 force
 static func delete(path: String, force: bool) -> Dictionary:
 	var checked := PathGuard.validate(path, "write")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	if not FileAccess.file_exists(ProjectSettings.globalize_path(checked.path)):
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "resource not found: " + checked.path}
+		return {
+			"ok": false,
+			"code": ErrorCodes.NOT_FOUND,
+			"error": "resource not found: " + checked.path
+		}
 	if not force:
-		AuditLog.record("resource/delete", "file", {"path": checked.path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
-		return {"ok": false, "code": ErrorCodes.UNSAFE_OPERATION, "error": "resource/delete requires force:true"}
+		AuditLog.record(
+			"resource/delete",
+			"file",
+			{"path": checked.path, "force": false},
+			false,
+			ErrorCodes.UNSAFE_OPERATION
+		)
+		return {
+			"ok": false,
+			"code": ErrorCodes.UNSAFE_OPERATION,
+			"error": "resource/delete requires force:true"
+		}
 	var abs_path := ProjectSettings.globalize_path(checked.path)
 	var err: Error = DirAccess.remove_absolute(abs_path)
 	if err != OK:
-		AuditLog.record("resource/delete", "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR)
+		AuditLog.record(
+			"resource/delete", "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR
+		)
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "remove failed: " + str(err)}
 	AuditLog.record("resource/delete", "file", {"path": checked.path, "force": force}, true, "")
 	return {

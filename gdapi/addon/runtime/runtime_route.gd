@@ -18,16 +18,17 @@ const MAX_OPERATION_TIMEOUT := 25000
 const BROKER_GRACE_TIMEOUT := 1000
 const MAX_BROKER_TIMEOUT := 26000
 
+
 ## 将 HTTP route 请求异步派发给运行期 broker。
 ##
 ## req.body 中的 timeout_ms 属于 operation 本身；broker deadline 额外保留固定
 ## grace，避免 operation 刚完成时 transport deadline 先到。
 func dispatch(
-		req: GdApiRequest,
-		res: GdApiResponse,
-		op: String,
-		mutation: bool = false,
-		public_route: String = ""
+	req: GdApiRequest,
+	res: GdApiResponse,
+	op: String,
+	mutation: bool = false,
+	public_route: String = ""
 ) -> void:
 	if res == null or res.is_sent():
 		return
@@ -38,7 +39,11 @@ func dispatch(
 	var timeout := operation_timeout(req)
 	var payload_variant: Variant = req.body
 	if not req.body_error.is_empty() or timeout < 0 or typeof(payload_variant) != TYPE_DICTIONARY:
-		var invalid := {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request body must be a JSON object"}
+		var invalid := {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "request body must be a JSON object"
+		}
 		_reject(req, res, op, mutation, invalid)
 		return
 
@@ -51,19 +56,26 @@ func dispatch(
 	var broker_timeout := mini(timeout + BROKER_GRACE_TIMEOUT, MAX_BROKER_TIMEOUT)
 	var broker: Variant = RuntimeBroker.instance()
 	if broker == null or not broker.has_method("request"):
-		var disconnected := {"ok": false, "code": ErrorCodes.CONFLICT, "error": "runtime is not connected"}
+		var disconnected := {
+			"ok": false, "code": ErrorCodes.CONFLICT, "error": "runtime is not connected"
+		}
 		if mutation:
 			_audit(op, payload, disconnected, false, ErrorCodes.CONFLICT)
 		_send_error(res, disconnected)
 		return
 
 	var completed := false
-	broker.request(op, payload, broker_timeout, func(reply: Dictionary) -> void:
-		if completed or res.is_sent():
-			return
-		completed = true
-		_complete(res, op, payload, mutation, reply)
+	broker.request(
+		op,
+		payload,
+		broker_timeout,
+		func(reply: Dictionary) -> void:
+			if completed or res.is_sent():
+				return
+			completed = true
+			_complete(res, op, payload, mutation, reply)
 	)
+
 
 ## Return the validated operation timeout in milliseconds.
 ## A negative result is the invalid-param sentinel; a missing timeout uses the default.
@@ -79,44 +91,74 @@ static func operation_timeout(req: GdApiRequest) -> int:
 			timeout_value = mini(int(raw), MAX_OPERATION_TIMEOUT)
 	elif typeof(raw) == TYPE_FLOAT:
 		var raw_float := float(raw)
-		if is_finite(raw_float) and raw_float == floor(raw_float) \
-				and raw_float > 0.0 and raw_float <= float(MAX_OPERATION_TIMEOUT):
+		if (
+			is_finite(raw_float)
+			and raw_float == floor(raw_float)
+			and raw_float > 0.0
+			and raw_float <= float(MAX_OPERATION_TIMEOUT)
+		):
 			timeout_value = int(raw_float)
-		elif is_finite(raw_float) and raw_float == floor(raw_float) \
-				and raw_float > float(MAX_OPERATION_TIMEOUT):
+		elif (
+			is_finite(raw_float)
+			and raw_float == floor(raw_float)
+			and raw_float > float(MAX_OPERATION_TIMEOUT)
+		):
 			timeout_value = MAX_OPERATION_TIMEOUT
 	if timeout_value <= 0:
 		return -1
 	return timeout_value
 
+
 ## Return the stable HTTP status for a protocol error code.
 static func http_status(code: String) -> int:
 	return ErrorCodes.http_status(code)
+
 
 ## Recursively make values safe for audit summaries.
 ## Secrets are replaced; binary, base64, and large arrays are summarized by type/size.
 static func redact(value: Variant) -> Variant:
 	return AuditLog.summarize(value)
 
+
 func _validate_boundary(req: GdApiRequest, op: String, public_route: String = "") -> Dictionary:
 	if req == null:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request is required"}
 	if op.is_empty() or op.contains("..") or op.contains("//"):
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid internal operation"}
-	if public_route.is_empty() and (not op.begins_with("runtime/") or op.trim_prefix("runtime/").is_empty()):
+		return {
+			"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid internal operation"
+		}
+	if (
+		public_route.is_empty()
+		and (not op.begins_with("runtime/") or op.trim_prefix("runtime/").is_empty())
+	):
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid runtime operation"}
 	var expected_route := public_route if not public_route.is_empty() else op
 	if expected_route.is_empty() or expected_route.contains("..") or expected_route.contains("//"):
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid public route"}
 	if req.path.is_empty() or not req.path.begins_with("/") or req.path != "/" + expected_route:
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request path does not match public route"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "request path does not match public route"
+		}
 	if typeof(req.params) != TYPE_DICTIONARY:
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request params must be an object"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "request params must be an object"
+		}
 	if not req.params.is_empty():
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "runtime routes do not accept path params"}
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "runtime routes do not accept path params"
+		}
 	return {"ok": true}
 
-func _complete(res: GdApiResponse, op: String, payload: Dictionary, mutation: bool, reply: Dictionary) -> void:
+
+func _complete(
+	res: GdApiResponse, op: String, payload: Dictionary, mutation: bool, reply: Dictionary
+) -> void:
 	if res.is_sent():
 		return
 	if bool(reply.get("ok", false)):
@@ -143,19 +185,26 @@ func _complete(res: GdApiResponse, op: String, payload: Dictionary, mutation: bo
 		_audit(op, payload, reply, false, code)
 	_send_error(res, reply)
 
+
 func _send_error(res: GdApiResponse, failure: Dictionary) -> void:
 	if res.is_sent():
 		return
 	var code := String(failure.get("code", ErrorCodes.GODOT_ERROR))
 	var message := String(failure.get("error", "runtime operation failed"))
-	var details: Dictionary = failure.get("details", {}) if typeof(failure.get("details", {})) == TYPE_DICTIONARY else {}
+	var details: Dictionary = (
+		failure.get("details", {}) if typeof(failure.get("details", {})) == TYPE_DICTIONARY else {}
+	)
 	res.error(message, code, http_status(code), details)
 
-func _reject(req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool, failure: Dictionary) -> void:
+
+func _reject(
+	req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool, failure: Dictionary
+) -> void:
 	if mutation:
 		var payload: Variant = req.body if req != null else null
 		_audit(op, payload, failure, false, String(failure.get("code", ErrorCodes.INVALID_PARAM)))
 	_send_error(res, failure)
+
 
 func _audit(op: String, payload: Variant, result: Variant, ok: bool, code: String) -> void:
 	AuditLog.record_runtime(op, payload, result, ok, code)

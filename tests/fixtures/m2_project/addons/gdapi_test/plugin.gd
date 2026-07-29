@@ -5,6 +5,7 @@ const COMMAND := "res://.godot/gdapi-test-command.json"
 const RESULT := "res://.godot/gdapi-test-result.json"
 const RESULT_TEMP := "res://.godot/gdapi-test-result.tmp"
 
+
 func _process(_delta: float) -> void:
 	if not FileAccess.file_exists(COMMAND):
 		return
@@ -22,6 +23,5 @@ func _process(_delta: float) -> void:
 	if FileAccess.file_exists(RESULT):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(RESULT))
 	DirAccess.rename_absolute(
-		ProjectSettings.globalize_path(RESULT_TEMP),
-		ProjectSettings.globalize_path(RESULT)
+		ProjectSettings.globalize_path(RESULT_TEMP), ProjectSettings.globalize_path(RESULT)
 	)

@@ -13,19 +13,24 @@ const ProbeTransport := preload("res://addons/gdapi/runtime/runtime_transport_fi
 const RuntimeProbe := preload("res://addons/gdapi/runtime/runtime_probe.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
-class FakeRuntimeMain extends Node:
+
+class FakeRuntimeMain:
+	extends Node
 	var reset_calls := 0
 
 	func reset_fixture() -> Dictionary:
 		reset_calls += 1
 		return {"changed": true, "undoable": false}
 
+
 var passed := 0
 var failed := 0
+
 
 func _init() -> void:
 	print("Running runtime broker/file transport integration tests...")
 	call_deferred("_run")
+
 
 func _run() -> void:
 	_cleanup(_make_root())
@@ -42,8 +47,10 @@ func _run() -> void:
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
+
 func _exit_tree() -> void:
 	_cleanup(_make_root())
+
 
 func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void:
 	if actual == expected:
@@ -53,11 +60,14 @@ func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void
 		failed += 1
 		print("  FAIL: %s - expected '%s', got '%s'" % [context, expected, actual])
 
+
 func assert_true(value: bool, context: String = "") -> void:
 	assert_eq(value, true, context)
 
+
 func _make_root() -> String:
 	return ProjectSettings.globalize_path("res://.godot/gdapi_runtime_test")
+
 
 func _cleanup(root: String) -> void:
 	var dir := DirAccess.open(root)
@@ -69,6 +79,7 @@ func _cleanup(root: String) -> void:
 		_cleanup(root.path_join(sub))
 	DirAccess.remove_absolute(root)
 
+
 func _write_json(path: String, message: Dictionary) -> void:
 	var parent := path.get_base_dir()
 	DirAccess.make_dir_recursive_absolute(parent)
@@ -76,11 +87,14 @@ func _write_json(path: String, message: Dictionary) -> void:
 	file.store_string(JSON.stringify(message))
 	file.close()
 
+
 func _write_inbox(root: String, probe_id: String, id: int, message: Dictionary) -> void:
 	_write_json(root.path_join(probe_id).path_join("inbox").path_join("%d.json" % id), message)
 
+
 func _write_outbox(root: String, probe_id: String, id: int, message: Dictionary) -> void:
 	_write_json(root.path_join(probe_id).path_join("outbox").path_join("%d.json" % id), message)
+
 
 func _receive_outbox(root: String, probe_id: String, id: int, broker: RefCounted) -> bool:
 	var path := root.path_join(probe_id).path_join("outbox").path_join("%d.json" % id)
@@ -99,8 +113,10 @@ func _receive_outbox(root: String, probe_id: String, id: int, broker: RefCounted
 	broker.receive(reply)
 	return true
 
+
 func _callback_counter() -> Dictionary:
 	return {"count": 0, "last": {}}
+
 
 func _make_pair(root: String, handler: Callable) -> Dictionary:
 	_cleanup(root)
@@ -115,16 +131,20 @@ func _make_pair(root: String, handler: Callable) -> Dictionary:
 	editor.tick(Time.get_ticks_msec())
 	return {"broker": broker, "editor": editor, "probe": probe}
 
+
 func _sync_handler(message: Dictionary) -> Dictionary:
 	return {"ok": true, "result": {"echo": int(message.get("id", -1))}}
+
 
 func _async_handler(message: Dictionary) -> Dictionary:
 	await process_frame
 	await process_frame
 	return {"ok": true, "result": {"echo": int(message.get("id", -1))}}
 
+
 func _reply(id: int, result: Dictionary = {}) -> Dictionary:
 	return Protocol.reply(id, true, result)
+
 
 func _stop_pair(root: String, pair: Dictionary) -> void:
 	pair.probe.stop()
@@ -132,38 +152,60 @@ func _stop_pair(root: String, pair: Dictionary) -> void:
 	pair.clear()
 	_cleanup(root)
 
+
 func test_broker_file_sync_roundtrip() -> void:
 	var root := _make_root()
 	var pair := _make_pair(root, Callable(self, "_sync_handler"))
 	var callback := _callback_counter()
-	var id: int = pair.broker.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
-		callback.count += 1
-		callback.last = reply
+	var id: int = pair.broker.request(
+		"runtime/status",
+		{},
+		5000,
+		func(reply: Dictionary) -> void:
+			callback.count += 1
+			callback.last = reply
 	)
 	pair.probe.tick(Time.get_ticks_msec())
 	pair.editor.tick(Time.get_ticks_msec())
 	assert_eq(callback.count, 1, "sync callback count")
 	assert_eq(callback.last.get("result", {}).get("echo", -1), id, "sync callback result")
 	assert_eq(pair.broker.status().pending, 0, "sync broker pending")
-	assert_true(not FileAccess.file_exists(root.path_join(pair.probe.probe_id()).path_join("outbox/%d.json" % id)),
-		"sync outbox removed")
+	assert_true(
+		not FileAccess.file_exists(
+			root.path_join(pair.probe.probe_id()).path_join("outbox/%d.json" % id)
+		),
+		"sync outbox removed"
+	)
 	_stop_pair(root, pair)
+
 
 func test_broker_file_async_roundtrip() -> void:
 	var root := _make_root()
 	var pair := _make_pair(root, Callable(self, "_async_handler"))
 	var callback := _callback_counter()
-	var id: int = pair.broker.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
-		callback.count += 1
-		callback.last = reply
+	var id: int = pair.broker.request(
+		"runtime/status",
+		{},
+		5000,
+		func(reply: Dictionary) -> void:
+			callback.count += 1
+			callback.last = reply
 	)
 	pair.probe.tick(Time.get_ticks_msec())
-	assert_true(not FileAccess.file_exists(root.path_join(pair.probe.probe_id()).path_join("outbox/%d.json" % id)),
-		"async outbox waits before first resume")
+	assert_true(
+		not FileAccess.file_exists(
+			root.path_join(pair.probe.probe_id()).path_join("outbox/%d.json" % id)
+		),
+		"async outbox waits before first resume"
+	)
 	await process_frame
 	pair.probe.tick(Time.get_ticks_msec())
-	assert_true(not FileAccess.file_exists(root.path_join(pair.probe.probe_id()).path_join("outbox/%d.json" % id)),
-		"async outbox waits before second resume")
+	assert_true(
+		not FileAccess.file_exists(
+			root.path_join(pair.probe.probe_id()).path_join("outbox/%d.json" % id)
+		),
+		"async outbox waits before second resume"
+	)
 	await process_frame
 	pair.probe.tick(Time.get_ticks_msec())
 	pair.editor.tick(Time.get_ticks_msec())
@@ -172,13 +214,18 @@ func test_broker_file_async_roundtrip() -> void:
 	assert_eq(pair.broker.status().pending, 0, "async broker pending")
 	_stop_pair(root, pair)
 
+
 func test_reply_completes_once() -> void:
 	var root := _make_root()
 	var pair := _make_pair(root, Callable(self, "_sync_handler"))
 	var callback := _callback_counter()
-	var id: int = pair.broker.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
-		callback.count += 1
-		callback.last = reply
+	var id: int = pair.broker.request(
+		"runtime/status",
+		{},
+		5000,
+		func(reply: Dictionary) -> void:
+			callback.count += 1
+			callback.last = reply
 	)
 	pair.probe.tick(Time.get_ticks_msec())
 	pair.editor.tick(Time.get_ticks_msec())
@@ -189,12 +236,13 @@ func test_reply_completes_once() -> void:
 	assert_eq(callback.count, 1, "duplicate reply ignored after completion")
 	_stop_pair(root, pair)
 
+
 func test_unknown_and_duplicate_reply_are_ignored() -> void:
 	var root := _make_root()
 	var pair := _make_pair(root, Callable(self, "_sync_handler"))
 	var callback := _callback_counter()
-	var id: int = pair.broker.request("runtime/status", {}, 5000, func(_reply: Dictionary) -> void:
-		callback.count += 1
+	var id: int = pair.broker.request(
+		"runtime/status", {}, 5000, func(_reply: Dictionary) -> void: callback.count += 1
 	)
 	_write_outbox(root, pair.probe.probe_id(), 9999, _reply(9999))
 	pair.editor.tick(Time.get_ticks_msec())
@@ -207,13 +255,18 @@ func test_unknown_and_duplicate_reply_are_ignored() -> void:
 	assert_eq(callback.count, 1, "duplicate reply ignored")
 	_stop_pair(root, pair)
 
+
 func test_timeout_then_late_reply_is_ignored() -> void:
 	var root := _make_root()
 	var pair := _make_pair(root, Callable(self, "_sync_handler"))
 	var callback := _callback_counter()
-	var id: int = pair.broker.request("runtime/status", {}, 1, func(reply: Dictionary) -> void:
-		callback.count += 1
-		callback.last = reply
+	var id: int = pair.broker.request(
+		"runtime/status",
+		{},
+		1,
+		func(reply: Dictionary) -> void:
+			callback.count += 1
+			callback.last = reply
 	)
 	pair.broker.tick(Time.get_ticks_msec() + 100)
 	assert_eq(callback.count, 1, "timeout callback count")
@@ -225,20 +278,25 @@ func test_timeout_then_late_reply_is_ignored() -> void:
 	assert_eq(pair.broker.status().pending, 0, "late reply leaves broker pending zero")
 	_stop_pair(root, pair)
 
+
 func test_generation_and_priority_reject_stale_hello() -> void:
 	var root := _make_root()
 	_cleanup(root)
 	DirAccess.make_dir_recursive_absolute(root)
 	var broker: RefCounted = Broker.new()
 	var engine_sent: Array = []
-	broker.attach(7, func(message: Dictionary) -> bool:
-		engine_sent.append(message)
-		return true
+	broker.attach(
+		7,
+		func(message: Dictionary) -> bool:
+			engine_sent.append(message)
+			return true
 	)
 	broker.mark_connected()
 	broker._set_active_transport("engine_debugger")
 	assert_eq(broker.status().session_id, 7, "real broker session established")
-	assert_eq(broker.status().transport, "engine_debugger", "engine debugger priority before file hello")
+	assert_eq(
+		broker.status().transport, "engine_debugger", "engine debugger priority before file hello"
+	)
 	if not broker.has_method("begin_generation"):
 		assert_true(false, "generation contract requires broker.begin_generation()")
 		broker = null
@@ -248,35 +306,58 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 	var current_generation: String = String(broker.call("begin_generation"))
 	# begin_generation intentionally detaches the previous transport; bind the
 	# current debugger session to the new generation before testing priority.
-	broker.attach(7, func(message: Dictionary) -> bool:
-		engine_sent.append(message)
-		return true
-	, current_generation)
+	broker.attach(
+		7,
+		func(message: Dictionary) -> bool:
+			engine_sent.append(message)
+			return true,
+		current_generation
+	)
 	broker.mark_connected()
 	var session_id: int = int(broker.status().session_id)
 	var current_probe_id := "current123"
-	_write_json(root.path_join(current_probe_id).path_join("hello.json"), Protocol.event(0, "hello", {
-		"protocol_version": Protocol.VERSION,
-		"transport": "file",
-		"generation": current_generation,
-		"pid": 1,
-		"started_at": 1.0,
-		"session_id": session_id,
-	}))
+	_write_json(
+		root.path_join(current_probe_id).path_join("hello.json"),
+		(
+			Protocol
+			. event(
+				0,
+				"hello",
+				{
+					"protocol_version": Protocol.VERSION,
+					"transport": "file",
+					"generation": current_generation,
+					"pid": 1,
+					"started_at": 1.0,
+					"session_id": session_id,
+				}
+			)
+		)
+	)
 	var editor: RefCounted = EditorTransport.new(root)
 	editor.setup(broker)
 	editor.start()
 	editor.tick(Time.get_ticks_msec())
 	assert_eq(editor.active_probe_ids(), [current_probe_id], "current generation accepted")
 	var stale_probe_id := "stale123"
-	_write_json(root.path_join(stale_probe_id).path_join("hello.json"), Protocol.event(0, "hello", {
-		"protocol_version": Protocol.VERSION,
-		"transport": "file",
-		"generation": stale_generation,
-		"pid": 1,
-		"started_at": 1.0,
-		"session_id": session_id,
-	}))
+	_write_json(
+		root.path_join(stale_probe_id).path_join("hello.json"),
+		(
+			Protocol
+			. event(
+				0,
+				"hello",
+				{
+					"protocol_version": Protocol.VERSION,
+					"transport": "file",
+					"generation": stale_generation,
+					"pid": 1,
+					"started_at": 1.0,
+					"session_id": session_id,
+				}
+			)
+		)
+	)
 	editor.tick(Time.get_ticks_msec())
 	assert_eq(editor.active_probe_ids(), [current_probe_id], "stale generation rejected")
 	assert_eq(broker.status().transport, "engine_debugger", "engine debugger keeps priority")
@@ -284,6 +365,7 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 	editor = null
 	broker = null
 	_cleanup(root)
+
 
 func test_runtime_probe_requires_stripped_protocol_channel() -> void:
 	var root := _make_root()
@@ -300,16 +382,31 @@ func test_runtime_probe_requires_stripped_protocol_channel() -> void:
 
 	var request := Protocol.request(91, "runtime/log/clear", {}, generation)
 	assert_eq(transport.generation(), generation, "probe adopts broker generation")
-	assert_eq(probe._on_runtime_capture("gdapi", [request]), false, "bare EngineDebugger channel is ignored")
-	assert_eq(probe._on_runtime_capture("gdapi:protocol", [request]), false, "full EngineDebugger channel is not passed to runtime callback")
-	assert_eq(probe._on_runtime_capture("protocol", [request]), true, "runtime receives stripped protocol channel")
-	assert_eq(probe.ring_buffer().size(), 0, "accepted request remains isolated from file transport")
+	assert_eq(
+		probe._on_runtime_capture("gdapi", [request]),
+		false,
+		"bare EngineDebugger channel is ignored"
+	)
+	assert_eq(
+		probe._on_runtime_capture("gdapi:protocol", [request]),
+		false,
+		"full EngineDebugger channel is not passed to runtime callback"
+	)
+	assert_eq(
+		probe._on_runtime_capture("protocol", [request]),
+		true,
+		"runtime receives stripped protocol channel"
+	)
+	assert_eq(
+		probe.ring_buffer().size(), 0, "accepted request remains isolated from file transport"
+	)
 
 	probe.free()
 	probe = null
 	transport.stop()
 	broker = null
 	_cleanup(root)
+
 
 func test_fixture_reset_uses_one_fixed_helper_and_rejects_payload() -> void:
 	var fixture := FakeRuntimeMain.new()
@@ -322,19 +419,23 @@ func test_fixture_reset_uses_one_fixed_helper_and_rejects_payload() -> void:
 		return
 	probe.record_log("info", "must be cleared")
 
-	assert_true(probe.has_method("reset_shared_fixture"),
-		"probe exposes one fixed fixture reset helper")
+	assert_true(
+		probe.has_method("reset_shared_fixture"), "probe exposes one fixed fixture reset helper"
+	)
 	if probe.has_method("reset_shared_fixture"):
 		var direct: Dictionary = probe.call("reset_shared_fixture")
 		assert_eq(direct.get("ok", false), true, "fixed helper succeeds")
 		assert_eq(fixture.reset_calls, 1, "fixed helper resets known RuntimeMain")
-		assert_eq(direct.get("cleared_logs", -1), 1,
-			"fixed helper reports the ring entries it cleared")
+		assert_eq(
+			direct.get("cleared_logs", -1), 1, "fixed helper reports the ring entries it cleared"
+		)
 		assert_eq(probe.ring_buffer().size(), 0, "fixed helper clears probe ring")
 
 	var rejected: Dictionary = await probe._dispatch_async(
-		"runtime/fixture/reset", {"op": "runtime/node/remove"})
-	assert_eq(rejected.get("code", ""), "invalid_param",
-		"internal reset rejects all payload fields")
+		"runtime/fixture/reset", {"op": "runtime/node/remove"}
+	)
+	assert_eq(
+		rejected.get("code", ""), "invalid_param", "internal reset rejects all payload fields"
+	)
 
 	fixture.free()

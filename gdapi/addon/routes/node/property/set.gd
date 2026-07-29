@@ -7,6 +7,7 @@ const NodeEditor := preload("res://addons/gdapi/runtime/services/node_editor.gd"
 
 const ROUTE := "node/property/set"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var node_path: String = req.get_body("node_path", "")
 	var property: String = req.get_body("property", "")
@@ -23,18 +24,26 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("设置节点属性接 UndoRedo")
-		.desc("通过 VariantCodec.decode 解码输入,EditAction.commit_property 提交。保留属性 script/source_code 返回 permission_denied。")
-		.param("node_path", "String", true, "节点路径")
-		.param("property", "String", true, "属性名")
-		.param("value", "Variant 编码", true, "Variant 编码字典或裸值")
-		.example("{\"node_path\":\"/root/Main/Player\",\"property\":\"position\",\"value\":{\"type\":\"Vector2\",\"value\":[24,32]}}")
-		.returns("set 结果", {
-			"ok": "bool",
-			"changed": "bool",
-			"undoable": "bool, true",
-			"node_path": "String",
-			"property": "String",
-			"value": "Variant 编码后的值",
-		})
+		GdApiRouteDoc
+		. make("设置节点属性接 UndoRedo")
+		. desc(
+			"通过 VariantCodec.decode 解码输入,EditAction.commit_property 提交。保留属性 script/source_code 返回 permission_denied。"
+		)
+		. param("node_path", "String", true, "节点路径")
+		. param("property", "String", true, "属性名")
+		. param("value", "Variant 编码", true, "Variant 编码字典或裸值")
+		. example(
+			'{"node_path":"/root/Main/Player","property":"position","value":{"type":"Vector2","value":[24,32]}}'
+		)
+		. returns(
+			"set 结果",
+			{
+				"ok": "bool",
+				"changed": "bool",
+				"undoable": "bool, true",
+				"node_path": "String",
+				"property": "String",
+				"value": "Variant 编码后的值",
+			}
+		)
 	)

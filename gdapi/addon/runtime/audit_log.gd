@@ -9,29 +9,52 @@ const MAX_ARRAY_ITEMS := 32
 const MAX_DEPTH := 8
 const REDACTED := "[REDACTED]"
 
-static func record(route: String, safety: String, summary: Dictionary, ok: bool, code: String = "") -> void:
+
+static func record(
+	route: String, safety: String, summary: Dictionary, ok: bool, code: String = ""
+) -> void:
 	if not Engine.has_meta("gdapi_plugin"):
 		return
 	var plugin = Engine.get_meta("gdapi_plugin")
 	if not plugin or not plugin.has_method("audit_event"):
 		return
 	var safe_summary: Variant = summarize(summary)
-	plugin.audit_event({
-		"route": route,
-		"safety": safety,
-		"summary": safe_summary if typeof(safe_summary) == TYPE_DICTIONARY else {
-			"type": type_string(typeof(summary)),
-		},
-		"ok": ok,
-		"code": code,
-	})
+	(
+		plugin
+		. audit_event(
+			{
+				"route": route,
+				"safety": safety,
+				"summary":
+				(
+					safe_summary
+					if typeof(safe_summary) == TYPE_DICTIONARY
+					else {
+						"type": type_string(typeof(summary)),
+					}
+				),
+				"ok": ok,
+				"code": code,
+			}
+		)
+	)
 
-static func record_runtime(route: String, payload: Variant, result: Variant, ok: bool, code: String = "") -> void:
-	record(route, "runtime", {
-		"operation": route,
-		"payload": summarize(payload),
-		"result": summarize(result),
-	}, ok, code)
+
+static func record_runtime(
+	route: String, payload: Variant, result: Variant, ok: bool, code: String = ""
+) -> void:
+	record(
+		route,
+		"runtime",
+		{
+			"operation": route,
+			"payload": summarize(payload),
+			"result": summarize(result),
+		},
+		ok,
+		code
+	)
+
 
 ## Return a bounded, recursively redacted audit representation.
 static func summarize(value: Variant, depth: int = 0) -> Variant:
@@ -74,6 +97,7 @@ static func summarize(value: Variant, depth: int = 0) -> Variant:
 		return value
 	return _unclassified_summary(value)
 
+
 static func _dictionary_summary(value: Dictionary) -> Dictionary:
 	var keys: Array = []
 	for key in value:
@@ -82,17 +106,26 @@ static func _dictionary_summary(value: Dictionary) -> Dictionary:
 			break
 	return {"type": "dictionary", "size": value.size(), "keys": keys}
 
+
 static func _type_summary(value: Variant) -> Variant:
 	match typeof(value):
-		TYPE_DICTIONARY: return _dictionary_summary(value)
-		TYPE_ARRAY: return {"type": "array", "size": value.size()}
-		TYPE_STRING: return {"type": "string", "size": String(value).length()}
-		TYPE_PACKED_BYTE_ARRAY: return {"type": "bytes", "size": value.size()}
-		TYPE_BOOL, TYPE_INT, TYPE_FLOAT: return value
-		_: return _unclassified_summary(value)
+		TYPE_DICTIONARY:
+			return _dictionary_summary(value)
+		TYPE_ARRAY:
+			return {"type": "array", "size": value.size()}
+		TYPE_STRING:
+			return {"type": "string", "size": String(value).length()}
+		TYPE_PACKED_BYTE_ARRAY:
+			return {"type": "bytes", "size": value.size()}
+		TYPE_BOOL, TYPE_INT, TYPE_FLOAT:
+			return value
+		_:
+			return _unclassified_summary(value)
+
 
 static func _bounded_key(key: String) -> String:
 	return key.left(MAX_DICTIONARY_KEY_LENGTH)
+
 
 static func _unclassified_summary(value: Variant) -> Dictionary:
 	var name := type_string(typeof(value))
@@ -101,17 +134,32 @@ static func _unclassified_summary(value: Variant) -> Dictionary:
 		summary["size"] = value.size()
 	return summary
 
+
 static func _is_sensitive_key(key: String) -> bool:
 	var normalized := key.replace("-", "_").replace(".", "_")
 	var compact := normalized.replace("_", "")
 	var segments := normalized.split("_", false)
 	if normalized == "auth" or segments.has("auth"):
 		return true
-	if compact == "authheader" or compact.begins_with("authheader") or compact.ends_with("authheader"):
+	if (
+		compact == "authheader"
+		or compact.begins_with("authheader")
+		or compact.ends_with("authheader")
+	):
 		return true
 	for alias in [
-		"token", "password", "passwd", "secret", "authorization", "cookie",
-		"api_key", "apikey", "private_key", "credential", "credentials", "passphrase",
+		"token",
+		"password",
+		"passwd",
+		"secret",
+		"authorization",
+		"cookie",
+		"api_key",
+		"apikey",
+		"private_key",
+		"credential",
+		"credentials",
+		"passphrase",
 		"bearer",
 	]:
 		if normalized == alias or normalized.contains(alias):

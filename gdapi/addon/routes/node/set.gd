@@ -10,6 +10,7 @@ const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 
 const ROUTE := "node/set"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var node_path: String = req.get_body("node_path", "")
 	var properties: Dictionary = req.get_body("properties", {})
@@ -47,27 +48,38 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		manager.add_undo_property(node, StringName(key), previous)
 		applied[key] = VariantCodec.from_variant(value)
 	manager.commit_action()
-	res.json({
-		"ok": true,
-		"changed": true,
-		"undoable": true,
-		"node_path": lookup.node_path,
-		"applied": applied,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"changed": true,
+				"undoable": true,
+				"node_path": lookup.node_path,
+				"applied": applied,
+			}
+		)
+	)
 
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("批量原子设置节点属性接 UndoRedo")
-		.desc("所有字段一次性校验,任一字段无效则整体拒绝。提交单个 UndoRedo action 便于一次撤销。")
-		.param("node_path", "String", true, "节点绝对路径")
-		.param("properties", "Dictionary<String,Variant>", true, "属性名->属性值,值通过 VariantCodec 解码")
-		.example("{\"node_path\":\"/root/Main/Player\",\"properties\":{\"position\":{\"type\":\"Vector2\",\"value\":[24,32]}}}")
-		.returns("设置结果", {
-			"ok": "bool",
-			"changed": "bool",
-			"undoable": "bool, true",
-			"node_path": "String",
-			"applied": "Dictionary<String,Variant>, 已应用值的编码表示",
-		})
+		GdApiRouteDoc
+		. make("批量原子设置节点属性接 UndoRedo")
+		. desc("所有字段一次性校验,任一字段无效则整体拒绝。提交单个 UndoRedo action 便于一次撤销。")
+		. param("node_path", "String", true, "节点绝对路径")
+		. param("properties", "Dictionary<String,Variant>", true, "属性名->属性值,值通过 VariantCodec 解码")
+		. example(
+			'{"node_path":"/root/Main/Player","properties":{"position":{"type":"Vector2","value":[24,32]}}}'
+		)
+		. returns(
+			"设置结果",
+			{
+				"ok": "bool",
+				"changed": "bool",
+				"undoable": "bool, true",
+				"node_path": "String",
+				"applied": "Dictionary<String,Variant>, 已应用值的编码表示",
+			}
+		)
 	)

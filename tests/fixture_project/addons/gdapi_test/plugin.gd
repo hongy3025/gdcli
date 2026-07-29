@@ -3,9 +3,11 @@ extends EditorPlugin
 
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 
+
 func _enter_tree() -> void:
 	if OS.get_environment("GDAPI_RUN_EDITOR_TESTS") == "1":
 		_run.call_deferred()
+
 
 func _run() -> void:
 	EditorInterface.open_scene_from_path("res://test.tscn")
@@ -31,6 +33,7 @@ func _run() -> void:
 		return
 	print("GDAPI_EDITOR_TEST_PASS")
 	get_tree().quit(0)
+
 
 func _fail(message: String) -> void:
 	push_error(message)

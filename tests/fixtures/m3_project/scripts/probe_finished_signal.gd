@@ -19,24 +19,35 @@ var runtime_wait_timer_count: int:
 	get:
 		return get_tree().get_nodes_in_group(&"gdapi_runtime_wait_timer").size()
 
+
 func _ready() -> void:
 	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")
 	_bind_fixture_connection()
+
 
 func _bind_fixture_connection() -> void:
 	if _target != null:
 		if not _on_finished.is_valid():
 			_on_finished = func() -> void:
 				event_count += 1
-				EngineDebugger.send_message("gdapi:protocol", [{
-					"version": 1,
-					"id": 0,
-					"kind": "event",
-					"event": "probe.finished",
-					"result": {},
-				}])
+				(
+					EngineDebugger
+					. send_message(
+						"gdapi:protocol",
+						[
+							{
+								"version": 1,
+								"id": 0,
+								"kind": "event",
+								"event": "probe.finished",
+								"result": {},
+							}
+						]
+					)
+				)
 		if not _target.is_connected("finished", _on_finished):
 			_target.connect("finished", _on_finished)
+
 
 func reset_fixture() -> void:
 	event_count = 0

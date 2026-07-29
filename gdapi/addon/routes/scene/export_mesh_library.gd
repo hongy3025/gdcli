@@ -12,6 +12,7 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
 const ROUTE := "scene/export_mesh_library"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var scene_path: String = req.get_body("scene_path", "")
 	var output_path: String = req.get_body("output_path", "")
@@ -43,7 +44,13 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	# 目标已存在时要求 force
 	if FileAccess.file_exists(ProjectSettings.globalize_path(output_path)):
 		if not ErrorCodes.require_force(res, force, ROUTE):
-			AuditLog.record(ROUTE, "dangerous", {"target": output_path, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
+			AuditLog.record(
+				ROUTE,
+				"dangerous",
+				{"target": output_path, "force": false},
+				false,
+				ErrorCodes.UNSAFE_OPERATION
+			)
 			return
 
 	# 加载场景
@@ -97,33 +104,57 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var save_result := ResourceSaver.save(mesh_library, output_path)
 	if save_result != OK:
 		AuditLog.record(ROUTE, "dangerous", {"output": output_path}, false, ErrorCodes.GODOT_ERROR)
-		res.error("failed to save MeshLibrary: " + str(save_result), ErrorCodes.GODOT_ERROR, 500, {"godot_error": save_result})
+		res.error(
+			"failed to save MeshLibrary: " + str(save_result),
+			ErrorCodes.GODOT_ERROR,
+			500,
+			{"godot_error": save_result}
+		)
 		return
 
-	AuditLog.record(ROUTE, "dangerous", {"source": scene_path, "output": output_path, "item_count": item_id}, true, "")
-	res.json({
-		"ok": true,
-		"changed": true,
-		"saved": true,
-		"undoable": false,
-		"output": output_path,
-		"item_count": item_id,
-	})
+	AuditLog.record(
+		ROUTE,
+		"dangerous",
+		{"source": scene_path, "output": output_path, "item_count": item_id},
+		true,
+		""
+	)
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"changed": true,
+				"saved": true,
+				"undoable": false,
+				"output": output_path,
+				"item_count": item_id,
+			}
+		)
+	)
+
+
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("从场景导出 MeshLibrary 资源")
-		.desc("从场景中的 MeshInstance3D 节点提取网格和碰撞形状，生成 MeshLibrary 资源")
-		.param("scene_path", "String", true, "源场景路径")
-		.param("output_path", "String", true, "MeshLibrary 输出路径")
-		.param("force", "bool", false, "输出目标已存在时需为 true")
-		.param("mesh_item_names", "Array", false, "要导出的网格项名称列表，留空则导出所有", [])
-		.example("{\"scene_path\":\"res://test.tscn\",\"output_path\":\"res://test.meshlib\",\"force\":true}")
-		.returns("导出结果", {
-			"ok": "bool",
-			"changed": "bool, 是否产生变更",
-			"saved": "bool, 是否已保存到磁盘",
-			"undoable": "bool, 始终为 false",
-			"output": "String, 输出路径",
-			"item_count": "int, 导出的网格项数",
-		})
+		GdApiRouteDoc
+		. make("从场景导出 MeshLibrary 资源")
+		. desc("从场景中的 MeshInstance3D 节点提取网格和碰撞形状，生成 MeshLibrary 资源")
+		. param("scene_path", "String", true, "源场景路径")
+		. param("output_path", "String", true, "MeshLibrary 输出路径")
+		. param("force", "bool", false, "输出目标已存在时需为 true")
+		. param("mesh_item_names", "Array", false, "要导出的网格项名称列表，留空则导出所有", [])
+		. example(
+			'{"scene_path":"res://test.tscn","output_path":"res://test.meshlib","force":true}'
+		)
+		. returns(
+			"导出结果",
+			{
+				"ok": "bool",
+				"changed": "bool, 是否产生变更",
+				"saved": "bool, 是否已保存到磁盘",
+				"undoable": "bool, 始终为 false",
+				"output": "String, 输出路径",
+				"item_count": "int, 导出的网格项数",
+			}
+		)
 	)

@@ -37,6 +37,7 @@ var _file_routes: Dictionary = {}
 ## 是否需要更新内置命令处理器（命令列表变化时触发）
 var _needs_update: bool = false
 
+
 ## 扫描并注册命令处理器
 ##
 ## 使用 mtime 检查文件变化，只有变化的文件才重新加载。
@@ -68,6 +69,7 @@ func scan(root_dir: String, force: bool = false) -> void:
 	# 持有最新的路由表（包括通过 _on_filesystem_changed 触发的增量扫描）
 	_refresh_builtin_handlers()
 
+
 ## 获取已注册命令总数
 ##
 ## 包含内置的 health/ping 命令。
@@ -75,6 +77,7 @@ func scan(root_dir: String, force: bool = false) -> void:
 func count() -> int:
 	# _routes 已含 health/ping；额外三个内置命令：gdapi/routes + command/list + command/doc
 	return _routes.size() + 3
+
 
 func _refresh_builtin_handlers() -> void:
 	_builtin_routes_handler = BuiltinRoutes.new()
@@ -94,6 +97,7 @@ func _refresh_builtin_handlers() -> void:
 	_builtin_commands_handler.set_routes(all_routes)
 	_builtin_command_help_handler.set_routes(all_routes)
 	_needs_update = false
+
 
 ## 递归扫描目录注册命令（使用 MD5 签名检测变化）
 ##
@@ -121,9 +125,13 @@ func _scan_dir(dir_path: String, prefix: String, seen_files: Dictionary) -> void
 			seen_files[full] = true
 			var route_name := name.substr(0, name.length() - 3)
 			var key := (prefix + "/" + route_name) if prefix != "" else route_name
-			var signature := "%s:%s" % [FileAccess.get_md5(full), FileAccess.get_modified_time(full)]
+			var signature := (
+				"%s:%s" % [FileAccess.get_md5(full), FileAccess.get_modified_time(full)]
+			)
 			if signature != _file_signatures.get(full, ""):
-				var script := ResourceLoader.load(full, "Script", ResourceLoader.CACHE_MODE_IGNORE) as Script
+				var script := (
+					ResourceLoader.load(full, "Script", ResourceLoader.CACHE_MODE_IGNORE) as Script
+				)
 				if script != null:
 					_routes[key] = script
 					_file_routes[full] = key
@@ -131,6 +139,7 @@ func _scan_dir(dir_path: String, prefix: String, seen_files: Dictionary) -> void
 					_needs_update = true
 		name = dir.get_next()
 	dir.list_dir_end()
+
 
 ## 分发请求到对应的命令处理器
 ##
@@ -185,6 +194,7 @@ func dispatch(req_dict: Dictionary, server) -> void:
 	var handler = handler_script.new()
 
 	handler.handle(req, res)
+
 
 ## 发送错误响应
 ##

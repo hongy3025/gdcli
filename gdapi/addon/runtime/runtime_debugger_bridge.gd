@@ -16,17 +16,21 @@ var _lookup_session: Callable = Callable()
 var _sessions: Dictionary = {}
 var _active_session_id: int = -1
 
+
 func setup(broker: RefCounted, lookup: Callable = Callable()) -> void:
 	_broker = broker
 	_lookup_session = lookup
 
+
 func setup_session(session_id: int) -> void:
 	_sessions[session_id] = true
+
 
 ## Explicit seam for behavioral tests and narrow host integrations.
 ## The real plugin resolves sessions through its injected lookup callable.
 func set_session_override(session_id: int, session: RefCounted) -> void:
 	_sessions[session_id] = session
+
 
 func capture(message: String, data: Array, session_id: int) -> bool:
 	if message != DEBUGGER_CHANNEL:
@@ -53,6 +57,7 @@ func capture(message: String, data: Array, session_id: int) -> bool:
 	_broker.receive(dict)
 	return true
 
+
 func clear(session_id: int) -> void:
 	if _sessions.has(session_id):
 		_sessions.erase(session_id)
@@ -65,6 +70,7 @@ func clear(session_id: int) -> void:
 		_broker.call("detach_engine_debugger", "session cleared")
 	else:
 		_broker.detach("session cleared")
+
 
 func _valid_hello(payload: Dictionary) -> bool:
 	# Protocol.event(0, "hello", ...) is the existing runtime hello shape;
@@ -99,15 +105,16 @@ func _valid_hello(payload: Dictionary) -> bool:
 		return false
 	return int(result.get("protocol_version")) == Protocol.VERSION
 
+
 func _attach_to_session(session_id: int, generation: String = "") -> bool:
 	if not _sessions.has(session_id):
 		return false
 	var session: RefCounted = _lookup_session_value(session_id)
 	if session == null or _broker == null:
 		return false
-	var send := func(message: Dictionary) -> bool:
-		return _send_to_session(session_id, message)
+	var send := func(message: Dictionary) -> bool: return _send_to_session(session_id, message)
 	return bool(_broker.attach(session_id, send, generation))
+
 
 func _lookup_session_value(session_id: int) -> RefCounted:
 	var cached: Variant = _sessions.get(session_id, null)
@@ -119,6 +126,7 @@ func _lookup_session_value(session_id: int) -> RefCounted:
 	if resolved is RefCounted:
 		return resolved
 	return null
+
 
 func _send_to_session(session_id: int, message: Dictionary) -> bool:
 	var session: RefCounted = _lookup_session_value(session_id)

@@ -8,12 +8,14 @@ const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 const NodeEditor := preload("res://addons/gdapi/runtime/services/node_editor.gd")
 const LAYOUT_PATH := "res://resources/audio_bus_layout.tres"
 
+
 static func list_buses() -> Dictionary:
 	var names: Array = []
 	for index in range(AudioServer.get_bus_count()):
 		names.append(AudioServer.get_bus_name(index))
 	names.sort()
 	return {"ok": true, "buses": names, "undoable": false}
+
 
 static func add_bus(name: Variant) -> Dictionary:
 	if typeof(name) != TYPE_STRING or String(name).strip_edges().is_empty():
@@ -31,6 +33,7 @@ static func add_bus(name: Variant) -> Dictionary:
 		return saved
 	return {"ok": true, "changed": true, "name": bus_name, "undoable": false}
 
+
 static func remove_bus(name: Variant, force: Variant) -> Dictionary:
 	if typeof(name) != TYPE_STRING or String(name).strip_edges().is_empty():
 		return _error(ErrorCodes.MISSING_PARAM, "name is required")
@@ -41,7 +44,13 @@ static func remove_bus(name: Variant, force: Variant) -> Dictionary:
 	if bus_name == "Master" or index == 0:
 		return _error(ErrorCodes.PERMISSION_DENIED, "Master bus cannot be removed")
 	if typeof(force) != TYPE_BOOL or not force:
-		AuditLog.record("audio/bus/remove", "dangerous", {"name": bus_name, "force": false}, false, ErrorCodes.UNSAFE_OPERATION)
+		AuditLog.record(
+			"audio/bus/remove",
+			"dangerous",
+			{"name": bus_name, "force": false},
+			false,
+			ErrorCodes.UNSAFE_OPERATION
+		)
 		return _error(ErrorCodes.UNSAFE_OPERATION, "audio/bus/remove requires force:true")
 	AudioServer.remove_bus(index)
 	var saved := _save_layout("audio/bus/remove")
@@ -49,10 +58,17 @@ static func remove_bus(name: Variant, force: Variant) -> Dictionary:
 		return saved
 	return {"ok": true, "changed": true, "name": bus_name, "undoable": false}
 
+
 static func create_player(parent_path: Variant, name: Variant, stream_path: Variant) -> Dictionary:
 	if typeof(name) != TYPE_STRING or String(name).strip_edges().is_empty():
 		return _error(ErrorCodes.MISSING_PARAM, "name is required")
-	var parent := NodeEditor.find(String(parent_path) if typeof(parent_path) == TYPE_STRING and not String(parent_path).is_empty() else "/root/AudioDomain")
+	var parent := NodeEditor.find(
+		(
+			String(parent_path)
+			if typeof(parent_path) == TYPE_STRING and not String(parent_path).is_empty()
+			else "/root/AudioDomain"
+		)
+	)
 	if not parent.ok:
 		return parent
 	if typeof(stream_path) != TYPE_STRING or not ResourceLoader.exists(String(stream_path)):
@@ -73,7 +89,14 @@ static func create_player(parent_path: Variant, name: Variant, stream_path: Vari
 	manager.add_do_reference(player)
 	manager.add_undo_method(parent.node, "remove_child", player)
 	manager.commit_action()
-	return {"ok": true, "changed": true, "undoable": true, "name": player.name, "node_path": str(player.get_path())}
+	return {
+		"ok": true,
+		"changed": true,
+		"undoable": true,
+		"name": player.name,
+		"node_path": str(player.get_path())
+	}
+
 
 static func play(node_path: Variant) -> Dictionary:
 	var player := _player(node_path)
@@ -82,12 +105,14 @@ static func play(node_path: Variant) -> Dictionary:
 	player.node.play()
 	return {"ok": true, "changed": true, "playing": true, "undoable": false}
 
+
 static func stop(node_path: Variant) -> Dictionary:
 	var player := _player(node_path)
 	if not player.ok:
 		return player
 	player.node.stop()
 	return {"ok": true, "changed": true, "playing": false, "undoable": false}
+
 
 static func _player(node_path: Variant) -> Dictionary:
 	if typeof(node_path) != TYPE_STRING:
@@ -101,20 +126,25 @@ static func _player(node_path: Variant) -> Dictionary:
 		return _error(ErrorCodes.NOT_FOUND, "audio player has no stream")
 	return found
 
+
 static func _bus_index(name: String) -> int:
 	for index in range(AudioServer.get_bus_count()):
 		if AudioServer.get_bus_name(index) == name:
 			return index
 	return -1
 
+
 static func _save_layout(route: String) -> Dictionary:
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(LAYOUT_PATH).get_base_dir())
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(LAYOUT_PATH).get_base_dir()
+	)
 	var error := ResourceSaver.save(AudioServer.generate_bus_layout(), LAYOUT_PATH)
 	if error != OK:
 		AuditLog.record(route, "file", {}, false, ErrorCodes.GODOT_ERROR)
 		return _error(ErrorCodes.GODOT_ERROR, "failed to save audio bus layout")
 	AuditLog.record(route, "file", {"path": LAYOUT_PATH}, true)
 	return {"ok": true}
+
 
 static func _error(code: String, message: String) -> Dictionary:
 	return {"ok": false, "code": code, "error": message}

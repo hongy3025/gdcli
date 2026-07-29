@@ -13,6 +13,7 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
 const ROUTE := "uid/update_all"
 
+
 ## 处理更新所有 UID 请求
 ##
 ## 扫描项目目录，重新保存场景文件以更新 UID，
@@ -37,7 +38,11 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 	# 查找所有场景和脚本文件
 	var scenes := _find_files(project_path, ".tscn")
-	var scripts := _find_files(project_path, ".gd") + _find_files(project_path, ".shader") + _find_files(project_path, ".gdshader")
+	var scripts := (
+		_find_files(project_path, ".gd")
+		+ _find_files(project_path, ".shader")
+		+ _find_files(project_path, ".gdshader")
+	)
 
 	# 处理场景文件
 	var success_count := 0
@@ -77,16 +82,23 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		"uids_generated": generated_uids,
 	}
 	AuditLog.record(ROUTE, "dangerous", counts, true, "")
-	res.json({
-		"ok": true,
-		"changed": true,
-		"undoable": false,
-		"scenes_processed": scenes.size(),
-		"scenes_saved": success_count,
-		"scenes_errors": error_count,
-		"scripts_missing_uids": missing_uids,
-		"uids_generated": generated_uids,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"changed": true,
+				"undoable": false,
+				"scenes_processed": scenes.size(),
+				"scenes_saved": success_count,
+				"scenes_errors": error_count,
+				"scripts_missing_uids": missing_uids,
+				"uids_generated": generated_uids,
+			}
+		)
+	)
+
+
 ## 递归查找指定扩展名的文件
 ##
 ## @param path 要搜索的目录路径
@@ -109,22 +121,27 @@ func _find_files(path: String, extension: String) -> Array:
 	dir.list_dir_end()
 	return files
 
+
 ## 返回该路由的帮助文档
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("批量更新项目中所有资源的 UID")
-		.desc("扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题")
-		.param("force", "bool", true, "必须为 true 才执行危险操作")
-		.param("project_path", "String", false, "要扫描的项目子目录路径，默认为 res://", "res://")
-		.example("{\"project_path\":\"res://tests\",\"force\":true}")
-		.returns("处理结果统计", {
-			"ok": "bool",
-			"changed": "bool, 是否产生变更",
-			"undoable": "bool, 始终为 false",
-			"scenes_processed": "int, 处理的场景文件数",
-			"scenes_saved": "int, 成功保存的场景数",
-			"scenes_errors": "int, 保存失败的场景数",
-			"scripts_missing_uids": "int, 缺少 UID 的脚本数",
-			"uids_generated": "int, 新生成的 UID 数",
-		})
+		GdApiRouteDoc
+		. make("批量更新项目中所有资源的 UID")
+		. desc("扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题")
+		. param("force", "bool", true, "必须为 true 才执行危险操作")
+		. param("project_path", "String", false, "要扫描的项目子目录路径，默认为 res://", "res://")
+		. example('{"project_path":"res://tests","force":true}')
+		. returns(
+			"处理结果统计",
+			{
+				"ok": "bool",
+				"changed": "bool, 是否产生变更",
+				"undoable": "bool, 始终为 false",
+				"scenes_processed": "int, 处理的场景文件数",
+				"scenes_saved": "int, 成功保存的场景数",
+				"scenes_errors": "int, 保存失败的场景数",
+				"scripts_missing_uids": "int, 缺少 UID 的脚本数",
+				"uids_generated": "int, 新生成的 UID 数",
+			}
+		)
 	)

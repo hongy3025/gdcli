@@ -8,24 +8,34 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 const ROUTE := "script/current"
 
+
 func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 	if not Engine.is_editor_hint():
 		res.error("script/current requires editor", ErrorCodes.NOT_SUPPORTED, 400)
 		return
-	res.json({
-		"ok": true,
-		"path": TextEditService.current_script(),
-		"undoable": false,
-	})
+	(
+		res
+		. json(
+			{
+				"ok": true,
+				"path": TextEditService.current_script(),
+				"undoable": false,
+			}
+		)
+	)
 
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("读取 Script Editor 当前编辑的脚本路径")
-		.desc("未打开任何脚本时返回空字符串。")
-		.returns("script/current", {
-			"ok": "bool",
-			"path": "String, 空表示 Script Editor 尚未打开脚本",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("读取 Script Editor 当前编辑的脚本路径")
+		. desc("未打开任何脚本时返回空字符串。")
+		. returns(
+			"script/current",
+			{
+				"ok": "bool",
+				"path": "String, 空表示 Script Editor 尚未打开脚本",
+				"undoable": "bool, false",
+			}
+		)
 	)

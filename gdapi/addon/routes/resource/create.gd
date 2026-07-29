@@ -7,6 +7,7 @@ const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_ed
 
 const ROUTE := "resource/create"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var path: String = req.get_body("path", "")
 	var type: String = req.get_body("type", "")
@@ -24,19 +25,25 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("创建并保存 Resource 子类")
-		.desc("type 必须是 Resource 子类。properties 通过 VariantCodec 解码,逐个属性 set 后保存。已存在需 force:true。")
-		.param("path", "String", true, "目标 res:// 路径")
-		.param("type", "String", true, "ClassDB 中可实例化的 Resource 子类")
-		.param("properties", "Dictionary<String, Variant>", false, "要设置的属性表")
-		.param("force", "bool", false, "覆盖已有文件需为 true", "false")
-		.example("{\"path\":\"res://resources/generated.tres\",\"type\":\"Resource\",\"properties\":{\"resource_name\":\"Generated\"}}")
-		.returns("create", {
-			"ok": "bool",
-			"changed": "bool",
-			"saved": "bool",
-			"undoable": "bool, false",
-			"path": "String",
-			"class": "String",
-		})
+		GdApiRouteDoc
+		. make("创建并保存 Resource 子类")
+		. desc("type 必须是 Resource 子类。properties 通过 VariantCodec 解码,逐个属性 set 后保存。已存在需 force:true。")
+		. param("path", "String", true, "目标 res:// 路径")
+		. param("type", "String", true, "ClassDB 中可实例化的 Resource 子类")
+		. param("properties", "Dictionary<String, Variant>", false, "要设置的属性表")
+		. param("force", "bool", false, "覆盖已有文件需为 true", "false")
+		. example(
+			'{"path":"res://resources/generated.tres","type":"Resource","properties":{"resource_name":"Generated"}}'
+		)
+		. returns(
+			"create",
+			{
+				"ok": "bool",
+				"changed": "bool",
+				"saved": "bool",
+				"undoable": "bool, false",
+				"path": "String",
+				"class": "String",
+			}
+		)
 	)

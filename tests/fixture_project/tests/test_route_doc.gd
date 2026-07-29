@@ -18,6 +18,7 @@ var ParamDoc = preload("res://addons/gdapi/runtime/param_doc.gd")
 var passed := 0
 var failed := 0
 
+
 func _init() -> void:
 	print("Running GdApiRouteDoc tests...\n")
 
@@ -38,6 +39,7 @@ func _init() -> void:
 	else:
 		quit(0)
 
+
 func assert_eq(actual, expected, context: String = "") -> void:
 	if actual == expected:
 		passed += 1
@@ -46,8 +48,10 @@ func assert_eq(actual, expected, context: String = "") -> void:
 		failed += 1
 		print("  FAIL: %s - expected '%s', got '%s'" % [context, expected, actual])
 
+
 func assert_true(value: bool, context: String = "") -> void:
 	assert_eq(value, true, context)
+
 
 func assert_null(value, context: String = "") -> void:
 	if value == null:
@@ -56,6 +60,7 @@ func assert_null(value, context: String = "") -> void:
 	else:
 		failed += 1
 		print("  FAIL: %s - expected null, got '%s'" % [context, value])
+
 
 func test_param_doc_to_dict() -> void:
 	var p := ParamDoc.new()
@@ -71,10 +76,12 @@ func test_param_doc_to_dict() -> void:
 	assert_eq(d.get("description"), "scene path", "param description")
 	assert_eq(d.get("default"), "", "param default empty string")
 
+
 func test_param_doc_default_null() -> void:
 	var p := ParamDoc.new()
 	var d := p.to_dict()
 	assert_null(d.get("default"), "param default null by default")
+
 
 func test_route_doc_make_sets_summary() -> void:
 	var rd := RouteDoc.make("hello")
@@ -82,11 +89,13 @@ func test_route_doc_make_sets_summary() -> void:
 	assert_eq(rd.description, "", "make leaves description empty")
 	assert_eq(rd.params.size(), 0, "make leaves params empty")
 
+
 func test_route_doc_desc_fluent() -> void:
 	var rd := RouteDoc.make("s")
 	var ret = rd.desc("multi-line")
 	assert_true(ret == rd, "desc returns self")
 	assert_eq(rd.description, "multi-line", "desc sets description")
+
 
 func test_route_doc_param_fluent() -> void:
 	var rd := RouteDoc.make("s")
@@ -97,12 +106,14 @@ func test_route_doc_param_fluent() -> void:
 	assert_eq(rd.params[0].required, true, "first param required")
 	assert_null(rd.params[0].default, "first param default null when omitted")
 
+
 func test_route_doc_returns_fluent() -> void:
 	var rd := RouteDoc.make("s")
 	var ret = rd.returns("returns desc", {"ok": "bool"})
 	assert_true(ret == rd, "returns returns self")
 	assert_eq(rd.returns_desc, "returns desc", "returns_desc set")
 	assert_eq(rd.returns_fields.get("ok"), "bool", "returns_fields set")
+
 
 func test_route_doc_example_fluent() -> void:
 	var rd := RouteDoc.make("s")
@@ -111,14 +122,16 @@ func test_route_doc_example_fluent() -> void:
 	assert_eq(rd.examples.size(), 1, "example appended")
 	assert_eq(rd.examples[0], '{"x":1}', "example content")
 
+
 func test_route_doc_to_dict_complete() -> void:
 	var rd = (
-		RouteDoc.make("save scene")
-		.desc("save to disk")
-		.param("scene_path", "String", true, "path")
-		.param("new_path", "String", false, "alt path", "")
-		.returns("save result", {"ok": "bool", "path": "String"})
-		.example('{"scene_path":"res://a.tscn"}')
+		RouteDoc
+		. make("save scene")
+		. desc("save to disk")
+		. param("scene_path", "String", true, "path")
+		. param("new_path", "String", false, "alt path", "")
+		. returns("save result", {"ok": "bool", "path": "String"})
+		. example('{"scene_path":"res://a.tscn"}')
 	)
 	var d := rd.to_dict()
 	assert_eq(d.get("summary"), "save scene", "dict summary")
@@ -130,13 +143,15 @@ func test_route_doc_to_dict_complete() -> void:
 	assert_eq(d.get("returns").get("fields").get("path"), "String", "dict returns.fields.path")
 	assert_eq(d.get("examples").size(), 1, "dict examples length")
 
+
 func test_route_doc_to_summary_dict_minimal() -> void:
 	var rd = (
-		RouteDoc.make("s")
-		.desc("long desc")
-		.param("a", "String", true, "desc-a")
-		.param("b", "int", false, "desc-b", 0)
-		.returns("r")
+		RouteDoc
+		. make("s")
+		. desc("long desc")
+		. param("a", "String", true, "desc-a")
+		. param("b", "int", false, "desc-b", 0)
+		. returns("r")
 	)
 	var d := rd.to_summary_dict()
 	assert_eq(d.get("summary"), "s", "summary present")
@@ -147,6 +162,7 @@ func test_route_doc_to_summary_dict_minimal() -> void:
 	assert_eq(d.get("params")[0].get("required"), true, "summary first param required")
 	assert_eq(d.get("params")[1].get("required"), false, "summary second param required")
 	assert_eq(d.get("params")[0].has("type"), false, "summary params have no type")
+
 
 func test_route_doc_chained_call() -> void:
 	# 不破坏 fluent 链

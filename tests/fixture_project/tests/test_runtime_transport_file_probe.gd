@@ -7,12 +7,13 @@ const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 var passed := 0
 var failed := 0
 
+
 func _init() -> void:
 	print("Running GdApiRuntimeTransportFileProbe tests...")
 	call_deferred("_run")
 
-func _run() -> void:
 
+func _run() -> void:
 	test_probe_id_is_unique_hex()
 	test_root_dir_under_dot_godot()
 	test_start_writes_hello_file()
@@ -36,6 +37,7 @@ func _run() -> void:
 	else:
 		quit(0)
 
+
 func assert_eq(actual, expected, context: String = "") -> void:
 	if actual == expected:
 		passed += 1
@@ -44,11 +46,14 @@ func assert_eq(actual, expected, context: String = "") -> void:
 		failed += 1
 		print("  FAIL: %s - expected '%s', got '%s'" % [context, expected, actual])
 
+
 func assert_true(value: bool, context: String = "") -> void:
 	assert_eq(value, true, context)
 
+
 func _make_root() -> String:
 	return ProjectSettings.globalize_path("res://.godot/gdapi_runtime_test")
+
 
 func _cleanup(root: String) -> void:
 	var dir := DirAccess.open(root)
@@ -64,13 +69,16 @@ func _cleanup(root: String) -> void:
 			sub_dir.remove(sub)
 	DirAccess.remove_absolute(root)
 
+
 func _write_request(path: String, id: int, generation: String) -> void:
 	_write_request_payload(path, id, generation, {})
+
 
 func _write_request_payload(path: String, id: int, generation: String, payload: Dictionary) -> void:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	file.store_string(JSON.stringify(Protocol.request(id, "runtime/status", payload, generation)))
 	file.close()
+
 
 func _read_reply(path: String) -> Dictionary:
 	var file := FileAccess.open(path, FileAccess.READ)
@@ -87,6 +95,7 @@ func _read_reply(path: String) -> Dictionary:
 		reply["id"] = int(reply.id)
 	return reply
 
+
 func test_probe_id_is_unique_hex() -> void:
 	var a := Transport.new()
 	var b := Transport.new()
@@ -96,11 +105,15 @@ func test_probe_id_is_unique_hex() -> void:
 	assert_eq(idb.length(), 8, "probe id length 8")
 	assert_true(ida != idb, "probe ids are unique")
 
+
 func test_root_dir_under_dot_godot() -> void:
 	var t := Transport.new()
 	var root := t.root_path()
-	assert_true(root.ends_with(".godot/gdapi_runtime") or root.contains("/.godot/gdapi_runtime"),
-		"root under .godot/gdapi_runtime, got %s" % root)
+	assert_true(
+		root.ends_with(".godot/gdapi_runtime") or root.contains("/.godot/gdapi_runtime"),
+		"root under .godot/gdapi_runtime, got %s" % root
+	)
+
 
 func test_start_writes_hello_file() -> void:
 	var root := _make_root()
@@ -111,10 +124,11 @@ func test_start_writes_hello_file() -> void:
 	var f := FileAccess.open(hello_path, FileAccess.READ)
 	var content := f.get_as_text()
 	f.close()
-	assert_true(content.contains("\"event\":\"hello\""), "hello event payload")
-	assert_true(content.contains("\"protocol_version\":1"), "protocol_version present")
+	assert_true(content.contains('"event":"hello"'), "hello event payload")
+	assert_true(content.contains('"protocol_version":1'), "protocol_version present")
 	t.stop()
 	_cleanup(root)
+
 
 func test_hello_contains_generation_metadata() -> void:
 	var root := _make_root()
@@ -132,6 +146,7 @@ func test_hello_contains_generation_metadata() -> void:
 	t.stop()
 	_cleanup(root)
 
+
 func test_generationless_request_is_rejected_when_generation_is_active() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
@@ -143,18 +158,22 @@ func test_generationless_request_is_rejected_when_generation_is_active() -> void
 	t.tick(Time.get_ticks_msec())
 	assert_true(not FileAccess.file_exists(inbox_path), "generationless request is removed")
 	assert_true(not t._inflight.has(91), "generationless request is not inflight")
-	assert_true(not FileAccess.file_exists(root.path_join(t.probe_id()).path_join("outbox/91.json")),
-		"generationless request produces no reply")
+	assert_true(
+		not FileAccess.file_exists(root.path_join(t.probe_id()).path_join("outbox/91.json")),
+		"generationless request produces no reply"
+	)
 	t.stop()
 	_cleanup(root)
+
 
 func test_inbox_request_triggers_callback() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
 	var received: Array = []
-	t.set_request_handler(func(msg: Dictionary) -> Dictionary:
-		received.append(msg)
-		return {"ok": true, "result": {"echo": msg.get("id", -1)}}
+	t.set_request_handler(
+		func(msg: Dictionary) -> Dictionary:
+			received.append(msg)
+			return {"ok": true, "result": {"echo": msg.get("id", -1)}}
 	)
 	t.start()
 	# 模拟编辑器写 inbox 请求
@@ -162,10 +181,18 @@ func test_inbox_request_triggers_callback() -> void:
 	DirAccess.make_dir_recursive_absolute(probe_dir.path_join("inbox"))
 	var req_path := probe_dir.path_join("inbox").path_join("42.json")
 	var rf := FileAccess.open(req_path, FileAccess.WRITE)
-	rf.store_string(JSON.stringify({
-		"version": 1, "id": 42, "kind": "request",
-		"op": "runtime/status", "payload": {}, "generation": t.generation()
-	}))
+	rf.store_string(
+		JSON.stringify(
+			{
+				"version": 1,
+				"id": 42,
+				"kind": "request",
+				"op": "runtime/status",
+				"payload": {},
+				"generation": t.generation()
+			}
+		)
+	)
 	rf.close()
 	# 推进 tick
 	t.tick(Time.get_ticks_msec())
@@ -176,15 +203,17 @@ func test_inbox_request_triggers_callback() -> void:
 	t.stop()
 	_cleanup(root)
 
+
 func test_suspended_request_claims_duplicate_id_and_finishes_once() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
 	var tracker := {"calls": 0}
-	t.set_request_handler(func(msg: Dictionary) -> Dictionary:
-		tracker.calls += 1
-		await process_frame
-		await process_frame
-		return {"ok": true, "result": {"echo": msg.get("id", -1)}}
+	t.set_request_handler(
+		func(msg: Dictionary) -> Dictionary:
+			tracker.calls += 1
+			await process_frame
+			await process_frame
+			return {"ok": true, "result": {"echo": msg.get("id", -1)}}
 	)
 	t.start()
 	var probe_dir := root.path_join(t.probe_id())
@@ -192,8 +221,13 @@ func test_suspended_request_claims_duplicate_id_and_finishes_once() -> void:
 	_write_request(probe_dir.path_join("inbox/duplicate-42.json"), 42, t.generation())
 	t.tick(Time.get_ticks_msec())
 	assert_eq(tracker.calls, 1, "duplicate inbox id starts one suspended handler")
-	assert_true(not FileAccess.file_exists(probe_dir.path_join("inbox/42.json")), "claimed inbox removed")
-	assert_true(not FileAccess.file_exists(probe_dir.path_join("inbox/duplicate-42.json")), "duplicate inbox removed")
+	assert_true(
+		not FileAccess.file_exists(probe_dir.path_join("inbox/42.json")), "claimed inbox removed"
+	)
+	assert_true(
+		not FileAccess.file_exists(probe_dir.path_join("inbox/duplicate-42.json")),
+		"duplicate inbox removed"
+	)
 	assert_true(t._inflight.has(42), "suspended request remains inflight")
 	var out_path := probe_dir.path_join("outbox/42.json")
 	assert_true(not FileAccess.file_exists(out_path), "no outbox before first resume")
@@ -212,15 +246,17 @@ func test_suspended_request_claims_duplicate_id_and_finishes_once() -> void:
 	t.stop()
 	_cleanup(root)
 
+
 func test_suspended_request_times_out_once() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
 	t.handler_timeout_ms = 1
 	var tracker := {"calls": 0}
-	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
-		tracker.calls += 1
-		await create_timer(60.0).timeout
-		return {"ok": true}
+	t.set_request_handler(
+		func(_msg: Dictionary) -> Dictionary:
+			tracker.calls += 1
+			await create_timer(60.0).timeout
+			return {"ok": true}
 	)
 	t.start()
 	var probe_dir := root.path_join(t.probe_id())
@@ -237,44 +273,57 @@ func test_suspended_request_times_out_once() -> void:
 	assert_true(not t._inflight.has(45), "timeout clears inflight")
 	var first_timeout_reply := JSON.stringify(reply)
 	t.tick(now + 3)
-	assert_eq(JSON.stringify(_read_reply(out_path)), first_timeout_reply, "timeout reply is written once")
+	assert_eq(
+		JSON.stringify(_read_reply(out_path)), first_timeout_reply, "timeout reply is written once"
+	)
 	_write_request(probe_dir.path_join("inbox/duplicate-45.json"), 45, t.generation())
 	t.tick(now + 4)
 	assert_eq(tracker.calls, 1, "timed out id never restarts")
 	t.stop()
 	_cleanup(root)
 
+
 func test_request_payload_timeout_controls_handler_deadline() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
-	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
-		await create_timer(60.0).timeout
-		return {"ok": true}
+	t.set_request_handler(
+		func(_msg: Dictionary) -> Dictionary:
+			await create_timer(60.0).timeout
+			return {"ok": true}
 	)
 	t.start()
 	var probe_dir := root.path_join(t.probe_id())
-	_write_request_payload(probe_dir.path_join("inbox/48.json"), 48, t.generation(), {
-		"timeout_ms": 10000,
-	})
+	_write_request_payload(
+		probe_dir.path_join("inbox/48.json"),
+		48,
+		t.generation(),
+		{
+			"timeout_ms": 10000,
+		}
+	)
 	var before := Time.get_ticks_msec()
 	t.tick(before)
 	var deadline := int(t._inflight.get(48, {}).get("deadline_msec", 0))
 	assert_true(deadline - before > 10000, "handler deadline includes transport grace")
 	assert_true(deadline - before < 11000, "handler deadline remains below broker grace")
 	t.tick(before + 6000)
-	assert_true(not FileAccess.file_exists(probe_dir.path_join("outbox/48.json")),
-		"request longer than default 5s is still inflight")
+	assert_true(
+		not FileAccess.file_exists(probe_dir.path_join("outbox/48.json")),
+		"request longer than default 5s is still inflight"
+	)
 	t.stop()
 	_cleanup(root)
+
 
 func test_completed_handler_after_disconnect_abandons_inflight_once() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
 	var tracker := {"calls": 0}
-	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
-		tracker.calls += 1
-		await process_frame
-		return {"ok": true, "result": {"late": true}}
+	t.set_request_handler(
+		func(_msg: Dictionary) -> Dictionary:
+			tracker.calls += 1
+			await process_frame
+			return {"ok": true, "result": {"late": true}}
 	)
 	t.start()
 	var probe_dir := root.path_join(t.probe_id())
@@ -284,25 +333,32 @@ func test_completed_handler_after_disconnect_abandons_inflight_once() -> void:
 	assert_true(t._inflight.has(49), "disconnect test request is inflight before completion")
 	t._remove_tree(probe_dir, root)
 	await process_frame
-	assert_true(not t._inflight.has(49),
-		"handler completion after endpoint removal abandons inflight")
-	assert_eq(t.last_disconnect_abandoned_count(), 1,
-		"disconnect cleanup records one abandoned request")
-	assert_eq(t.last_disconnect_remaining_count(), 0,
-		"disconnect cleanup records zero remaining inflight")
+	assert_true(
+		not t._inflight.has(49), "handler completion after endpoint removal abandons inflight"
+	)
+	assert_eq(
+		t.last_disconnect_abandoned_count(), 1, "disconnect cleanup records one abandoned request"
+	)
+	assert_eq(
+		t.last_disconnect_remaining_count(), 0, "disconnect cleanup records zero remaining inflight"
+	)
 	t.tick(Time.get_ticks_msec())
-	assert_true(not DirAccess.dir_exists_absolute(probe_dir),
-		"disconnect cleanup does not recreate endpoint for reply retries")
+	assert_true(
+		not DirAccess.dir_exists_absolute(probe_dir),
+		"disconnect cleanup does not recreate endpoint for reply retries"
+	)
 	t.stop()
 	_cleanup(root)
+
 
 func test_completed_request_id_never_restarts_after_outbox_consumed() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
 	var tracker := {"calls": 0}
-	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
-		tracker.calls += 1
-		return {"ok": true}
+	t.set_request_handler(
+		func(_msg: Dictionary) -> Dictionary:
+			tracker.calls += 1
+			return {"ok": true}
 	)
 	t.start()
 	var probe_dir := root.path_join(t.probe_id())
@@ -319,17 +375,22 @@ func test_completed_request_id_never_restarts_after_outbox_consumed() -> void:
 	_write_request(probe_dir.path_join("inbox/replayed-46.json"), 46, t.generation())
 	t.tick(Time.get_ticks_msec())
 	assert_eq(tracker.calls, 1, "completed id never restarts after outbox consumption")
-	assert_true(not FileAccess.file_exists(probe_dir.path_join("inbox/replayed-46.json")), "completed duplicate is removed")
+	assert_true(
+		not FileAccess.file_exists(probe_dir.path_join("inbox/replayed-46.json")),
+		"completed duplicate is removed"
+	)
 	t.stop()
 	_cleanup(root)
+
 
 func test_failed_outbox_write_retries_without_losing_reply() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
 	var tracker := {"calls": 0}
-	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
-		tracker.calls += 1
-		return {"ok": true, "result": {"saved": true}}
+	t.set_request_handler(
+		func(_msg: Dictionary) -> Dictionary:
+			tracker.calls += 1
+			return {"ok": true, "result": {"saved": true}}
 	)
 	t.start()
 	var probe_dir := root.path_join(t.probe_id())
@@ -339,7 +400,10 @@ func test_failed_outbox_write_retries_without_losing_reply() -> void:
 	t.tick(Time.get_ticks_msec())
 	assert_eq(tracker.calls, 1, "write failure dispatches handler once")
 	assert_true(t._inflight.has(47), "write failure retains inflight reply")
-	assert_true(not FileAccess.file_exists(probe_dir.path_join("outbox/47.json")), "write failure emits no partial outbox")
+	assert_true(
+		not FileAccess.file_exists(probe_dir.path_join("outbox/47.json")),
+		"write failure emits no partial outbox"
+	)
 	DirAccess.remove_absolute(blocked_tmp)
 	t.tick(Time.get_ticks_msec())
 	var reply := _read_reply(probe_dir.path_join("outbox/47.json"))
@@ -352,23 +416,25 @@ func test_failed_outbox_write_retries_without_losing_reply() -> void:
 	t.stop()
 	_cleanup(root)
 
+
 func test_malformed_handler_reply_becomes_structured_error() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
-	t.set_request_handler(func(_msg: Dictionary) -> Variant:
-		return "not a reply dictionary"
-	)
+	t.set_request_handler(func(_msg: Dictionary) -> Variant: return "not a reply dictionary")
 	t.start()
 	var probe_dir := root.path_join(t.probe_id())
 	_write_request(probe_dir.path_join("inbox/43.json"), 43, t.generation())
 	t.tick(Time.get_ticks_msec())
 	var reply := _read_reply(probe_dir.path_join("outbox/43.json"))
-	assert_true(Protocol.validate_message(reply).ok, "malformed handler reply becomes protocol reply")
+	assert_true(
+		Protocol.validate_message(reply).ok, "malformed handler reply becomes protocol reply"
+	)
 	assert_eq(reply.get("ok", true), false, "malformed handler reply fails")
 	assert_eq(reply.get("code", ""), "invalid_param", "malformed handler reply has stable code")
 	assert_true(not t._inflight.has(43), "malformed reply clears inflight")
 	t.stop()
 	_cleanup(root)
+
 
 func test_non_dictionary_inbox_is_discarded() -> void:
 	var root := _make_root()
@@ -383,23 +449,29 @@ func test_non_dictionary_inbox_is_discarded() -> void:
 	t.stop()
 	_cleanup(root)
 
+
 func test_oversized_handler_reply_becomes_structured_error() -> void:
 	var root := _make_root()
 	var t := Transport.new(0, root)
-	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
-		return {"ok": true, "result": {"body": "x".repeat(Protocol.MAX_MESSAGE_BYTES)}}
+	t.set_request_handler(
+		func(_msg: Dictionary) -> Dictionary:
+			return {"ok": true, "result": {"body": "x".repeat(Protocol.MAX_MESSAGE_BYTES)}}
 	)
 	t.start()
 	var probe_dir := root.path_join(t.probe_id())
 	_write_request(probe_dir.path_join("inbox/44.json"), 44, t.generation())
 	t.tick(Time.get_ticks_msec())
 	var reply := _read_reply(probe_dir.path_join("outbox/44.json"))
-	assert_true(Protocol.validate_message(reply).ok, "oversized handler reply becomes bounded protocol reply")
+	assert_true(
+		Protocol.validate_message(reply).ok,
+		"oversized handler reply becomes bounded protocol reply"
+	)
 	assert_eq(reply.get("ok", true), false, "oversized handler reply fails")
 	assert_eq(reply.get("code", ""), "invalid_param", "oversized handler reply has stable code")
 	assert_true(not t._inflight.has(44), "oversized reply clears inflight")
 	t.stop()
 	_cleanup(root)
+
 
 func test_stop_recursively_removes_probe_directory() -> void:
 	var root := _make_root()

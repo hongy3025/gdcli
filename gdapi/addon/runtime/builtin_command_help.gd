@@ -12,11 +12,13 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 ## 完整路由表：{ path: handler_script }，由 router 注入
 var _routes: Dictionary = {}
 
+
 ## 由 router 在扫描完成后调用，传入完整路由表
 ##
 ## @param routes 路由表字典
 func set_routes(routes: Dictionary) -> void:
 	_routes = routes
+
 
 ## 处理 `command/doc` 请求
 ##
@@ -45,17 +47,22 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	detail["path"] = command
 	res.json({"ok": true, "doc": detail})
 
+
 ## 自身的帮助文档
 ##
 ## @return GdApiRouteDoc 描述 `command/doc` 路由的语义
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("查询单个命令的详细帮助文档")
-		.desc("返回指定命令的完整文档，包含参数、返回值和示例")
-		.param("command", "String", true, "要查询的命令路径", "")
-		.example("{\"command\":\"gdapi/health/ping\"}")
-		.returns("命令详细文档", {
-			"ok": "bool, 是否成功",
-			"doc": "Dictionary, 命令完整文档",
-		})
+		GdApiRouteDoc
+		. make("查询单个命令的详细帮助文档")
+		. desc("返回指定命令的完整文档，包含参数、返回值和示例")
+		. param("command", "String", true, "要查询的命令路径", "")
+		. example('{"command":"gdapi/health/ping"}')
+		. returns(
+			"命令详细文档",
+			{
+				"ok": "bool, 是否成功",
+				"doc": "Dictionary, 命令完整文档",
+			}
+		)
 	)

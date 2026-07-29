@@ -37,8 +37,10 @@ var _probes: Dictionary = {}
 ## 是否已 start
 var _started: bool = false
 
+
 func _init(p_root_override: String = "") -> void:
 	root_dir_override = p_root_override
+
 
 ## 注入 broker 引用
 ##
@@ -47,16 +49,19 @@ func _init(p_root_override: String = "") -> void:
 func setup(broker: RefCounted) -> void:
 	_broker = broker
 
+
 ## 返回根目录绝对路径
 func root_path() -> String:
 	if not root_dir_override.is_empty():
 		return ProjectSettings.globalize_path(root_dir_override)
 	return ProjectSettings.globalize_path("res://.godot/gdapi_runtime")
 
+
 ## 启动 manager:确保根目录存在
 func start() -> void:
 	_started = true
 	DirAccess.make_dir_recursive_absolute(root_path())
+
 
 ## 只清理 editor file transport 自己的 root；root_dir_override 仅用于测试。
 func cleanup_root() -> void:
@@ -70,6 +75,7 @@ func cleanup_root() -> void:
 			return
 	_remove_tree(root, root)
 
+
 ## 关闭所有 probe，并让 broker 统一完成尚未返回的请求。
 ##
 ## @param reason 人类可读的关闭原因
@@ -80,9 +86,11 @@ func stop_all(reason: String = "editor transport stopping") -> void:
 	_probes.clear()
 	cleanup_root()
 
+
 ## 返回当前活跃的 probe_id 列表
 func active_probe_ids() -> Array:
 	return _probes.keys()
+
 
 ## 每帧调用:扫 hello、扫 outbox
 func tick(now_msec: int) -> void:
@@ -90,6 +98,7 @@ func tick(now_msec: int) -> void:
 		return
 	_scan_hello_files()
 	_scan_outbox()
+
 
 ## 私有:扫描根目录下所有子目录,凡是含 hello.json 的都注册为 probe
 func _scan_hello_files() -> void:
@@ -114,6 +123,7 @@ func _scan_hello_files() -> void:
 			continue
 		_attach_probe(name, hello)
 
+
 ## 私有:为单个 probe 创建 send callable,注入 broker
 ##
 ## send callable 把字典写到该 probe 的 inbox/<id>.json。
@@ -133,7 +143,9 @@ func _attach_probe(probe_id: String, hello: Dictionary) -> void:
 			return false
 		var raw_id: Variant = message.get("id", 0)
 		var id_int: int = int(raw_id)
-		var inbox_path := root_path().path_join(probe_id).path_join("inbox").path_join(str(id_int) + ".json")
+		var inbox_path := root_path().path_join(probe_id).path_join("inbox").path_join(
+			str(id_int) + ".json"
+		)
 		return self_ref._atomic_write(inbox_path, JSON.stringify(message))
 	var generation := _hello_generation(hello)
 	var attached := true
@@ -143,6 +155,7 @@ func _attach_probe(probe_id: String, hello: Dictionary) -> void:
 		_cleanup_probe_dir(probe_id)
 		return
 	_probes[probe_id] = {"attached": true, "generation": generation}
+
 
 ## 私有:扫描每个 probe 的 outbox，删除文件后将完整 reply 交给 broker。
 func _scan_outbox() -> void:
@@ -192,6 +205,7 @@ func _scan_outbox() -> void:
 			if _broker != null and _broker.has_method("receive"):
 				_broker.call("receive", reply)
 
+
 func _read_json(path: String) -> Dictionary:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
@@ -208,9 +222,11 @@ func _read_json(path: String) -> Dictionary:
 	_normalize_protocol_integers(result)
 	return result
 
+
 func _hello_generation(hello: Dictionary) -> String:
 	var result: Variant = hello.get("result", {})
 	return String(result.get("generation", "")) if typeof(result) == TYPE_DICTIONARY else ""
+
 
 func _valid_hello(hello: Dictionary) -> bool:
 	if hello.is_empty() or int(hello.get("version", -1)) != Protocol.VERSION:
@@ -220,7 +236,10 @@ func _valid_hello(hello: Dictionary) -> bool:
 	if String(hello.get("kind", "")) != "event" or String(hello.get("event", "")) != "hello":
 		return false
 	var result: Variant = hello.get("result", null)
-	if typeof(result) != TYPE_DICTIONARY or int(result.get("protocol_version", -1)) != Protocol.VERSION:
+	if (
+		typeof(result) != TYPE_DICTIONARY
+		or int(result.get("protocol_version", -1)) != Protocol.VERSION
+	):
 		return false
 	var raw_generation: Variant = result.get("generation", null)
 	if typeof(raw_generation) != TYPE_STRING or String(raw_generation).is_empty():
@@ -244,10 +263,12 @@ func _valid_hello(hello: Dictionary) -> bool:
 	# 一旦绑定，后续 hello 必须精确匹配当前 generation。
 	return broker_generation.is_empty() or generation == broker_generation
 
+
 func _hello_matches_probe(probe_id: String, hello: Dictionary) -> bool:
 	if not _valid_hello(hello):
 		return false
 	return String(_probes[probe_id].get("generation", "")) == _hello_generation(hello)
+
 
 func _detach_probe(probe_id: String, reason: String) -> void:
 	if not _probes.has(probe_id):
@@ -258,9 +279,11 @@ func _detach_probe(probe_id: String, reason: String) -> void:
 		_broker.call("detach_file_transport", reason, generation)
 	_cleanup_probe_dir(probe_id)
 
+
 func _cleanup_probe_dir(probe_id: String) -> void:
 	var probe_dir := root_path().path_join(probe_id)
 	_remove_tree(probe_dir, root_path())
+
 
 func _remove_tree(path: String, root: String) -> void:
 	if path != root and not path.begins_with(root + "/") and not path.begins_with(root + "\\"):
@@ -275,6 +298,7 @@ func _remove_tree(path: String, root: String) -> void:
 			_remove_tree(path.path_join(dir_name), root)
 	DirAccess.remove_absolute(path)
 
+
 func _normalize_protocol_integers(message: Dictionary) -> void:
 	if typeof(message.get("version")) == TYPE_FLOAT:
 		message["version"] = int(message.version)
@@ -288,6 +312,7 @@ func _normalize_protocol_integers(message: Dictionary) -> void:
 			var pid_value: float = float(result.pid)
 			if pid_value >= 1.0 and pid_value <= 2147483647.0 and pid_value == floor(pid_value):
 				result["pid"] = int(pid_value)
+
 
 ## 私有:原子写(先写 .tmp 再 rename)
 func _atomic_write(target_path: String, content: String) -> bool:

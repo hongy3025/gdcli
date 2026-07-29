@@ -7,6 +7,7 @@ const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_ed
 
 const ROUTE := "resource/reimport"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var paths_v: Variant = req.get_body("paths", [])
 	if typeof(paths_v) != TYPE_ARRAY or paths_v.is_empty():
@@ -21,14 +22,18 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("重新导入一组资源")
-		.desc("通过 EditorInterface.get_resource_filesystem().reimport_files 触发导入。")
-		.param("paths", "Array<String>", true, "res:// 资源路径列表")
-		.example("{\"paths\":[\"res://icon.svg\"]}")
-		.returns("reimport", {
-			"ok": "bool",
-			"changed": "bool",
-			"reimported": "Array<String>",
-			"undoable": "bool, false",
-		})
+		GdApiRouteDoc
+		. make("重新导入一组资源")
+		. desc("通过 EditorInterface.get_resource_filesystem().reimport_files 触发导入。")
+		. param("paths", "Array<String>", true, "res:// 资源路径列表")
+		. example('{"paths":["res://icon.svg"]}')
+		. returns(
+			"reimport",
+			{
+				"ok": "bool",
+				"changed": "bool",
+				"reimported": "Array<String>",
+				"undoable": "bool, false",
+			}
+		)
 	)
