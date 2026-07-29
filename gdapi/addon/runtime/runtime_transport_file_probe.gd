@@ -10,6 +10,7 @@
 ##     outbox/<id>.json —— probe 处理后的 reply
 
 @tool
+# gdlint: ignore=class-definitions-order
 class_name GdApiRuntimeTransportFileProbe
 extends RefCounted
 
@@ -26,6 +27,9 @@ var hello_delay_ms: int = 0
 ## 自定义根目录(用于单元测试隔离);默认 res://.godot/gdapi_runtime
 var root_dir_override: String = ""
 
+## 单个 handler 的超时；默认值与 runtime operation timeout 一致。
+var handler_timeout_ms: int = DEFAULT_HANDLER_TIMEOUT_MS
+
 ## 唯一 probe_id,start() 时生成
 var _probe_id: String = ""
 ## 运行世代；优先读取 editor 在 runtime root 写入的 marker。
@@ -36,9 +40,6 @@ var _started: bool = false
 
 ## request handler,由 editor 侧 bridge 调用;签名 (msg) -> reply
 var _handler: Callable = Callable()
-
-## 单个 handler 的超时；默认值与 runtime operation timeout 一致。
-var handler_timeout_ms: int = DEFAULT_HANDLER_TIMEOUT_MS
 
 ## 已领取但尚未写出 reply 的 request id。值仅用于保活异步处理；
 ## id 是否存在才是唯一的状态契约。

@@ -83,11 +83,14 @@ static func tick(state: Dictionary, _now_ms: int) -> bool:
 		"truncated": result.truncated
 	}
 	if result.timed_out:
+		state["outcome"] = {"ok": false, "code": ErrorCodes.TIMEOUT, "summary": "process timed out"}
 		state.response.error("process timed out", ErrorCodes.TIMEOUT, 408)
 	else:
+		state["outcome"] = {"ok": true, "code": "", "summary": "process completed"}
 		state.response.json(payload)
 	return true
 
 
 static func cancel(state: Dictionary, _reason: String) -> void:
 	state.runner.cancel(state.id)
+	state["outcome"] = {"ok": false, "code": ErrorCodes.CONFLICT, "summary": "process cancelled"}

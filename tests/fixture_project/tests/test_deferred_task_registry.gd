@@ -11,6 +11,7 @@ func _init() -> void:
 	test_tick_removes_completed_task_after_one_response()
 	test_timeout_cancels_and_sends_one_terminal_error()
 	test_cancel_all_cleans_up_every_pending_task_once()
+	test_terminal_callback_is_exactly_once()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -52,6 +53,15 @@ func test_cancel_all_cleans_up_every_pending_task_once() -> void:
 	assert_eq(registry.pending_count(), 0, "shutdown clears registry")
 
 
+func test_terminal_callback_is_exactly_once() -> void:
+	var registry := DeferredTaskRegistry.new()
+	var task := FakeTask.new(50, false)
+	registry.register(task.as_registration())
+	registry.tick(50)
+	registry.cancel_all("plugin exiting")
+	assert_eq(task.terminal_count, 1, "timeout emits one terminal callback")
+
+
 class FakeResponse:
 	extends RefCounted
 	var sent_count := 0
@@ -76,6 +86,7 @@ class FakeTask:
 	var deadline_ms: int
 	var completes_on_tick: bool
 	var cancel_reasons: Array = []
+	var terminal_count := 0
 
 	func _init(deadline: int, should_complete: bool) -> void:
 		deadline_ms = deadline
@@ -87,6 +98,7 @@ class FakeTask:
 			"deadline_ms": deadline_ms,
 			"tick": tick,
 			"cancel": cancel,
+			"terminal": terminal,
 		}
 
 	func tick(_now_ms: int) -> bool:
@@ -97,6 +109,9 @@ class FakeTask:
 
 	func cancel(reason: String) -> void:
 		cancel_reasons.append(reason)
+
+	func terminal(_outcome: Dictionary) -> void:
+		terminal_count += 1
 
 
 func assert_true(value: bool, context: String) -> void:

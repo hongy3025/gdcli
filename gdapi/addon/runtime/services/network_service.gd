@@ -66,6 +66,16 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 				return
 			state.done = true
 			if result != HTTPRequest.RESULT_SUCCESS:
+				state["outcome"] = {
+					"ok": false,
+					"code":
+					(
+						ErrorCodes.TIMEOUT
+						if result == HTTPRequest.RESULT_TIMEOUT
+						else ErrorCodes.GODOT_ERROR
+					),
+					"summary": "HTTP request failed"
+				}
 				response.error(
 					"HTTP request failed",
 					(
@@ -76,6 +86,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 					408 if result == HTTPRequest.RESULT_TIMEOUT else 500
 				)
 			else:
+				state["outcome"] = {"ok": true, "code": "", "summary": "HTTP request completed"}
 				var context := HashingContext.new()
 				context.start(HashingContext.HASH_SHA256)
 				context.update(body)

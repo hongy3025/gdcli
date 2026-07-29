@@ -15,6 +15,7 @@
 ##   置为 engine_debugger,headless 下 file transport 兜底。
 
 @tool
+# gdlint: ignore=class-definitions-order
 extends Node
 
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
@@ -52,23 +53,6 @@ var _ring: RefCounted = RingBuffer.new(2000)
 
 ## 文件 transport 实例;非编辑器进程下 _ready() 中创建
 var _file_transport: RefCounted = null
-# gdlint: ignore=class-definitions-order
-var file_transport_last_disconnect_abandoned: int:
-	get:
-		if (
-			_file_transport == null
-			or not _file_transport.has_method("last_disconnect_abandoned_count")
-		):
-			return 0
-		return int(_file_transport.last_disconnect_abandoned_count())
-var file_transport_last_disconnect_remaining: int:
-	get:
-		if (
-			_file_transport == null
-			or not _file_transport.has_method("last_disconnect_remaining_count")
-		):
-			return 0
-		return int(_file_transport.last_disconnect_remaining_count())
 
 
 ## 容器,根据 _ready 时机,允许 hello 阶段被推迟
@@ -141,25 +125,20 @@ func _on_hello_timer_timeout() -> void:
 ## @return true 表示已处理, false 表示忽略
 # gdlint: ignore=max-returns
 func _on_runtime_capture(channel: String, args: Array) -> bool:
-	if channel != DEBUGGER_CALLBACK_CHANNEL:
-		return false
-	if typeof(args) != TYPE_ARRAY or args.size() < 1:
-		return false
-	var raw: Variant = args[0]
-	if typeof(raw) != TYPE_DICTIONARY:
-		return false
-	var request_msg: Dictionary = raw
-	if not _generation_matches(request_msg):
-		return false
-	var verdict: Dictionary = Protocol.validate_message(raw)
-	if not bool(verdict.get("ok", false)):
-		if Protocol.message_exceeds_limit(request_msg):
-			return _send_request_rejection(request_msg, verdict)
-		return false
-	if String(request_msg.get("kind", "")) != "request":
-		return false
-	_dispatch(request_msg)
-	return true
+	var handled := false
+	if channel == DEBUGGER_CALLBACK_CHANNEL and args.size() > 0:
+		var raw: Variant = args[0]
+		if typeof(raw) == TYPE_DICTIONARY:
+			var request_msg: Dictionary = raw
+			if _generation_matches(request_msg):
+				var verdict: Dictionary = Protocol.validate_message(raw)
+				if bool(verdict.get("ok", false)):
+					if String(request_msg.get("kind", "")) == "request":
+						_dispatch(request_msg)
+						handled = true
+				elif Protocol.message_exceeds_limit(request_msg):
+					handled = _send_request_rejection(request_msg, verdict)
+	return handled
 
 
 ## 按 op 字段把消息分发给对应实现
@@ -246,9 +225,10 @@ func _send_request_rejection(request_msg: Dictionary, verdict: Dictionary) -> bo
 ## 把 op 转成对应 reply
 # gdlint: ignore=max-returns
 func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
+	var result: Dictionary
 	match op:
 		"eval":
-			return EvalService.execute(
+			result = EvalService.execute(
 				String(payload.get("source", "")),
 				payload.get("inputs", {}),
 				{
@@ -257,89 +237,90 @@ func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 				}
 			)
 		"runtime/status":
-			return _op_status(payload)
+			result = _op_status(payload)
 		"runtime/scene/tree":
-			return NodeOps.tree(payload)
+			result = NodeOps.tree(payload)
 		"runtime/node/info":
-			return NodeOps.info(payload)
+			result = NodeOps.info(payload)
 		"runtime/node/get":
-			return NodeOps.get_property(payload)
+			result = NodeOps.get_property(payload)
 		"runtime/node/set":
-			return NodeOps.set_property(payload)
+			result = NodeOps.set_property(payload)
 		"runtime/node/call":
-			return _op_node_call(payload)
+			result = _op_node_call(payload)
 		"runtime/node/find":
-			return NodeOps.find(payload)
+			result = NodeOps.find(payload)
 		"runtime/node/remove":
-			return NodeOps.remove(payload)
+			result = NodeOps.remove(payload)
 		"runtime/node/reparent":
-			return NodeOps.reparent(payload)
+			result = NodeOps.reparent(payload)
 		"runtime/node/create":
-			return NodeOps.create(payload)
+			result = NodeOps.create(payload)
 		"runtime/node/duplicate":
-			return NodeOps.duplicate_node(payload)
+			result = NodeOps.duplicate_node(payload)
 		"runtime/node/rename":
-			return NodeOps.rename(payload)
+			result = NodeOps.rename(payload)
 		"runtime/input/key":
-			return InputOps.key(payload)
+			result = InputOps.key(payload)
 		"runtime/input/mouse":
-			return InputOps.mouse(payload)
+			result = InputOps.mouse(payload)
 		"runtime/input/gamepad":
-			return InputOps.gamepad(payload)
+			result = InputOps.gamepad(payload)
 		"runtime/input/touch":
-			return InputOps.touch(payload)
+			result = InputOps.touch(payload)
 		"runtime/input/action":
-			return InputOps.action(payload)
+			result = InputOps.action(payload)
 		"runtime/input/sequence":
-			return await InputOps.sequence(payload)
+			result = await InputOps.sequence(payload)
 		"runtime/fixture/reset":
-			return _fixture_reset(payload)
+			result = _fixture_reset(payload)
 		"runtime/screenshot/viewport":
-			return await CaptureOps.viewport(payload)
+			result = await CaptureOps.viewport(payload)
 		"runtime/screenshot/camera":
-			return await CaptureOps.camera(payload)
+			result = await CaptureOps.camera(payload)
 		"runtime/screenshot/frames":
-			return await CaptureOps.frames(payload)
+			result = await CaptureOps.frames(payload)
 		"runtime/log/read":
-			return _op_log_read(payload)
+			result = _op_log_read(payload)
 		"runtime/log/clear":
-			return _op_log_clear(payload)
+			result = _op_log_clear(payload)
 		"runtime/debug/performance":
-			return _op_debug_performance(payload)
+			result = _op_debug_performance(payload)
 		"runtime/debug/monitors":
-			return _op_debug_monitors(payload)
+			result = _op_debug_monitors(payload)
 		"runtime/debug/errors":
-			return _op_debug_errors(payload)
+			result = _op_debug_errors(payload)
 		"runtime/debug/breakpoints":
-			return _op_debug_breakpoints(payload)
+			result = _op_debug_breakpoints(payload)
 		"runtime/assert/condition":
-			return await NodeOps.assert_condition(payload)
+			result = await NodeOps.assert_condition(payload)
 		"runtime/assert/node_exists":
-			return await NodeOps.assert_node_exists(payload)
+			result = await NodeOps.assert_node_exists(payload)
 		"runtime/assert/property_equals":
-			return await NodeOps.assert_property_equals(payload)
+			result = await NodeOps.assert_property_equals(payload)
 		"runtime/assert/signal_received":
-			return await NodeOps.assert_signal_received(payload)
+			result = await NodeOps.assert_signal_received(payload)
 		"runtime/signal/connect":
-			return NodeOps.signal_connect(payload)
+			result = NodeOps.signal_connect(payload)
 		"runtime/signal/disconnect":
-			return NodeOps.signal_disconnect(payload)
+			result = NodeOps.signal_disconnect(payload)
 		"runtime/signal/emit":
-			return NodeOps.signal_emit(payload)
+			result = NodeOps.signal_emit(payload)
 		"runtime/signal/await":
-			return await NodeOps.signal_await(payload)
+			result = await NodeOps.signal_await(payload)
 		"m4/physics/raycast":
-			return _m4_physics_raycast(payload)
+			result = _m4_physics_raycast(payload)
 		"m4/navigation/path/get":
-			return _m4_navigation_path(payload)
+			result = _m4_navigation_path(payload)
 		"m4/navigation/agent/target":
-			return _m4_navigation_agent_target(payload)
+			result = _m4_navigation_agent_target(payload)
 		_:
-			return {
+			result = {
 				"ok": false,
 				"code": "not_supported",
 				"error": "unknown runtime op: %s" % op,
 			}
+	return result
 
 
 func _m4_vector2(payload: Dictionary, key: String) -> Variant:

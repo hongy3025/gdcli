@@ -54,6 +54,11 @@ func doc() -> GdApiRouteDoc:
 		. param("force", "bool", true, "确认部署")
 		. returns("每设备终态", {"devices": "Array", "changed": "bool", "plan_hash": "String"})
 		. example(
-			'{"serials":["device-a"],"apk_path":"res://build/app.apk","package":"org.example","activity":"com.godot.game.GodotApp","dry_run":true,"force":true}'
+			(
+				'{"serials":["device-a"],'
+				+ '"apk_path":"res://build/app.apk",'
+				+ '"package":"org.example","activity":"com.godot.game.GodotApp",'
+				+ '"dry_run":true,"force":true}'
+			)
 		)
 	)

@@ -37,7 +37,12 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"response": res,
 				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
 				"tick": func(_now): return bool(started.state.done),
-				"cancel": func(_reason): started.state.node.cancel_request()
+				"cancel": func(_reason): started.state.node.cancel_request(),
+				"terminal":
+				func(outcome):
+					AuditLog.record(
+						ROUTE, "dangerous", {"url": checked.url}, outcome.ok, outcome.code
+					)
 			}
 		)
 	):

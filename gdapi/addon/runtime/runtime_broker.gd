@@ -465,37 +465,33 @@ func receive(message: Variant) -> void:
 	# The editor broker remains on v1 until a session explicitly negotiates v2.
 	# Protocol.validate_message accepts v2 for the M6 probe boundary, but an
 	# unnegotiated v2 reply must not consume a v1 pending request.
-	if (
-		typeof(message) != TYPE_DICTIONARY
-		or int(Dictionary(message).get("version", -1)) != _negotiated_version
-	):
-		return
-	var verdict: Dictionary = Protocol.validate_message(message)
-	if not bool(verdict.get("ok", false)):
-		if Protocol.message_exceeds_limit(message):
+	var valid := typeof(message) == TYPE_DICTIONARY
+	if valid:
+		valid = int(Dictionary(message).get("version", -1)) == _negotiated_version
+	var verdict: Dictionary = {}
+	if valid:
+		verdict = Protocol.validate_message(message)
+		valid = bool(verdict.get("ok", false))
+		if not valid and Protocol.message_exceeds_limit(message):
 			_complete_oversized_reply(message, verdict)
-		return
-	var dict: Dictionary = message
-	var message_generation := String(dict.get("generation", ""))
-	if not _generation.is_empty() and message_generation != _generation:
-		return
-	var kind: String = String(dict.get("kind", ""))
-	if kind != "reply":
-		# event 由 transport 决定怎么呈现，这里先接受但不回调 request。
-		return
-	var raw_id: Variant = dict.get("id", 0)
-	if typeof(raw_id) != TYPE_INT:
-		return
-	var id: int = int(raw_id)
-	if not _pending.has(id):
-		return
-	var entry: Dictionary = _pending[id]
-	if String(entry.get("generation", "")) != message_generation:
-		return
-	entry = _take_pending(id)
-	var cb: Callable = entry.callback
-	if cb.is_valid():
-		cb.call(dict)
+	if valid:
+		var dict: Dictionary = message
+		var message_generation := String(dict.get("generation", ""))
+		valid = _generation.is_empty() or message_generation == _generation
+		if valid and String(dict.get("kind", "")) == "reply":
+			var raw_id: Variant = dict.get("id", 0)
+			valid = typeof(raw_id) == TYPE_INT
+			if valid:
+				var id: int = int(raw_id)
+				valid = _pending.has(id)
+				if valid:
+					var entry: Dictionary = _pending[id]
+					valid = String(entry.get("generation", "")) == message_generation
+					if valid:
+						entry = _take_pending(id)
+						var cb: Callable = entry.callback
+						if cb.is_valid():
+							cb.call(dict)
 
 
 ## A size-invalid reply still contains enough bounded envelope metadata to
@@ -503,30 +499,29 @@ func receive(message: Variant) -> void:
 ## transport boundary cannot turn an explicit bound violation into a timeout.
 # gdlint: ignore=max-returns
 func _complete_oversized_reply(message: Variant, verdict: Dictionary) -> void:
-	if typeof(message) != TYPE_DICTIONARY:
-		return
-	var dict: Dictionary = message
-	if int(dict.get("version", -1)) != _negotiated_version:
-		return
-	if String(dict.get("kind", "")) != "reply":
-		return
-	var raw_id: Variant = dict.get("id", null)
-	if typeof(raw_id) != TYPE_INT or int(raw_id) < 1:
-		return
-	var message_generation := String(dict.get("generation", ""))
-	if not _generation.is_empty() and message_generation != _generation:
-		return
-	var id := int(raw_id)
-	if not _pending.has(id):
-		return
-	var pending_generation := String(Dictionary(_pending[id]).get("generation", ""))
-	if pending_generation != message_generation:
-		return
-	_complete_with_failure(
-		id,
-		String(verdict.get("code", "invalid_param")),
-		String(verdict.get("error", "runtime reply exceeds protocol bounds"))
-	)
+	var valid := typeof(message) == TYPE_DICTIONARY
+	var id := 0
+	var message_generation := ""
+	if valid:
+		var dict: Dictionary = message
+		valid = int(dict.get("version", -1)) == _negotiated_version
+		valid = valid and String(dict.get("kind", "")) == "reply"
+		var raw_id: Variant = dict.get("id", null)
+		valid = valid and typeof(raw_id) == TYPE_INT and int(raw_id) >= 1
+		if valid:
+			id = int(raw_id)
+			message_generation = String(dict.get("generation", ""))
+			valid = _generation.is_empty() or message_generation == _generation
+		valid = valid and _pending.has(id)
+		if valid:
+			var pending_generation := String(Dictionary(_pending[id]).get("generation", ""))
+			valid = pending_generation == message_generation
+	if valid:
+		_complete_with_failure(
+			id,
+			String(verdict.get("code", "invalid_param")),
+			String(verdict.get("error", "runtime reply exceeds protocol bounds"))
+		)
 
 
 ## 由 transport 周期性调用,清理已超时请求

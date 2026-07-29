@@ -150,39 +150,39 @@ static func redact(value: Variant) -> Variant:
 
 # gdlint: ignore=max-returns
 func _validate_boundary(req: GdApiRequest, op: String, public_route: String = "") -> Dictionary:
+	var error := ""
 	if req == null:
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request is required"}
-	if op.is_empty() or op.contains("..") or op.contains("//"):
-		return {
-			"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid internal operation"
-		}
-	if (
+		error = "request is required"
+	elif op.is_empty() or op.contains("..") or op.contains("//"):
+		error = "invalid internal operation"
+	elif (
 		public_route.is_empty()
 		and (not op.begins_with("runtime/") or op.trim_prefix("runtime/").is_empty())
 	):
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid runtime operation"}
-	var expected_route := public_route if not public_route.is_empty() else op
-	if expected_route.is_empty() or expected_route.contains("..") or expected_route.contains("//"):
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid public route"}
-	if req.path.is_empty() or not req.path.begins_with("/") or req.path != "/" + expected_route:
-		return {
-			"ok": false,
-			"code": ErrorCodes.INVALID_PARAM,
-			"error": "request path does not match public route"
-		}
-	if typeof(req.params) != TYPE_DICTIONARY:
-		return {
-			"ok": false,
-			"code": ErrorCodes.INVALID_PARAM,
-			"error": "request params must be an object"
-		}
-	if not req.params.is_empty():
-		return {
-			"ok": false,
-			"code": ErrorCodes.INVALID_PARAM,
-			"error": "runtime routes do not accept path params"
-		}
+		error = "invalid runtime operation"
+	else:
+		var expected_route := public_route if not public_route.is_empty() else op
+		if (
+			expected_route.is_empty()
+			or expected_route.contains("..")
+			or expected_route.contains("//")
+		):
+			error = "invalid public route"
+		elif (
+			req.path.is_empty() or not req.path.begins_with("/") or req.path != "/" + expected_route
+		):
+			error = "request path does not match public route"
+		elif typeof(req.params) != TYPE_DICTIONARY:
+			error = "request params must be an object"
+		elif not req.params.is_empty():
+			error = "runtime routes do not accept path params"
+	if not error.is_empty():
+		return _invalid_boundary(error)
 	return {"ok": true}
+
+
+func _invalid_boundary(error: String) -> Dictionary:
+	return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": error}
 
 
 func _complete(

@@ -117,49 +117,51 @@ func _reload_if_changed() -> void:
 	_valid = true
 
 
+# gdlint: ignore=max-returns
 func _is_valid_policy(policy: Dictionary) -> bool:
-	if not _has_exact_keys(policy, ["version", "capabilities"]):
-		return false
-	if not _is_json_integer(policy.get("version")) or int(policy["version"]) != 1:
-		return false
-	if typeof(policy.get("capabilities")) != TYPE_DICTIONARY:
-		return false
-	var capabilities: Dictionary = policy["capabilities"]
-	for capability_name in capabilities:
-		if typeof(capability_name) != TYPE_STRING or not CAPABILITIES.has(capability_name):
-			return false
-		if typeof(capabilities[capability_name]) != TYPE_DICTIONARY:
-			return false
-		if not _is_valid_capability(capability_name, capabilities[capability_name]):
-			return false
-	return true
+	var valid := _has_exact_keys(policy, ["version", "capabilities"])
+	if valid:
+		valid = _is_json_integer(policy.get("version")) and int(policy["version"]) == 1
+	if valid:
+		valid = typeof(policy.get("capabilities")) == TYPE_DICTIONARY
+	if valid:
+		var capabilities: Dictionary = policy["capabilities"]
+		for capability_name in capabilities:
+			if typeof(capability_name) != TYPE_STRING or not CAPABILITIES.has(capability_name):
+				valid = false
+				break
+			if typeof(capabilities[capability_name]) != TYPE_DICTIONARY:
+				valid = false
+				break
+			if not _is_valid_capability(capability_name, capabilities[capability_name]):
+				valid = false
+				break
+	return valid
 
 
+# gdlint: ignore=max-returns
 func _is_valid_capability(name: String, capability: Dictionary) -> bool:
 	var allowed_fields: Array = CAPABILITY_FIELDS[name]
-	if not capability.has("enabled") or typeof(capability["enabled"]) != TYPE_BOOL:
-		return false
+	var valid := capability.has("enabled") and typeof(capability["enabled"]) == TYPE_BOOL
 	for field in capability:
+		if not valid:
+			break
 		if typeof(field) != TYPE_STRING or not allowed_fields.has(field):
-			return false
+			valid = false
+			break
 		var value: Variant = capability[field]
 		match field:
 			"max_source_bytes", "max_timeout_ms", "max_output_bytes", "max_response_bytes":
-				if not _is_valid_limit(field, value):
-					return false
+				valid = _is_valid_limit(field, value)
 			"executables", "cwd_roots", "allowed_input_keys", "schemes", "hosts":
-				if not _is_string_array(value):
-					return false
+				valid = _is_string_array(value)
 			"ports":
-				if not _is_valid_ports(value):
-					return false
+				valid = _is_valid_ports(value)
 			"allow_private":
-				if typeof(value) != TYPE_BOOL:
-					return false
+				valid = typeof(value) == TYPE_BOOL
 			"max_redirects":
-				if not _is_json_integer(value) or int(value) < 0 or int(value) > 5:
-					return false
-	return true
+				valid = _is_json_integer(value) and int(value) >= 0 and int(value) <= 5
+	return valid
 
 
 func _is_valid_limit(field: String, value: Variant) -> bool:

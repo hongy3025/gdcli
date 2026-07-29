@@ -39,24 +39,22 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"response": res,
 				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
 				"tick": func(now): return Service.tick(started.state, now),
-				"cancel": func(reason): Service.cancel(started.state, reason)
+				"cancel": func(reason): Service.cancel(started.state, reason),
+				"terminal":
+				func(outcome):
+					AuditLog.record(
+						ROUTE,
+						"dangerous",
+						{"executable": checked.executable},
+						outcome.ok,
+						outcome.code
+					)
 			}
 		)
 	):
 		Service.cancel(started.state, "registration failed")
 		res.error("process task could not be registered", ErrorCodes.GODOT_ERROR, 500)
 		return
-	AuditLog.record(
-		ROUTE,
-		"dangerous",
-		{
-			"executable": checked.executable,
-			"arg_count": checked.args.size(),
-			"cwd": req.get_body("cwd", "res://")
-		},
-		true,
-		""
-	)
 
 
 func doc() -> GdApiRouteDoc:
