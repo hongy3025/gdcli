@@ -258,11 +258,45 @@ def test_runtime_node_mutations_reject_unsafe_targets_without_mutation(m3_runnin
     assert exec_error(m3_running, "runtime/node/rename", {
         "node_path": source, "name": "RuntimeMain/Bad",
     })["code"] == "invalid_param"
-    cycle = exec_error(m3_running, "runtime/node/reparent", {
+    assert exec_ok(m3_running, "runtime/node/info", {"node_path": source})["node_path"] == source
+
+
+def test_runtime_reparent_rejects_self_after_game_dispatch_without_mutation(m3_running):
+    source = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain", "type": "Node", "name": "Task15SelfSource",
+    })["node_path"]
+    before = exec_ok(m3_running, "runtime/scene/tree", {"max_depth": 4})
+
+    # Both paths identify a live game node, so the stable cycle message can only
+    # come from RuntimeProbe's NodeOps.reparent rather than route validation.
+    error = exec_error(m3_running, "runtime/node/reparent", {
         "node_path": source, "new_parent": source,
     })
-    assert cycle["code"] == "conflict"
+    assert error["code"] == "conflict"
+    assert error["error"] == "reparent would create a cycle"
+
+    after = exec_ok(m3_running, "runtime/scene/tree", {"max_depth": 4})
+    assert after == before
     assert exec_ok(m3_running, "runtime/node/info", {"node_path": source})["node_path"] == source
+
+
+def test_runtime_reparent_rejects_scene_root_after_game_dispatch_without_mutation(m3_running):
+    new_parent = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain", "type": "Node", "name": "Task15RootDestination",
+    })["node_path"]
+    before = exec_ok(m3_running, "runtime/scene/tree", {"max_depth": 4})
+
+    # A live dedicated destination and the NodeOps-specific error demonstrate
+    # that this valid CLI/broker request reached the game-side operation.
+    error = exec_error(m3_running, "runtime/node/reparent", {
+        "node_path": "/root/RuntimeMain", "new_parent": new_parent,
+    })
+    assert error["code"] == "permission_denied"
+    assert error["error"] == "node is not a reparentable fixture node"
+
+    after = exec_ok(m3_running, "runtime/scene/tree", {"max_depth": 4})
+    assert after == before
+    assert exec_ok(m3_running, "runtime/node/info", {"node_path": new_parent})["node_path"] == new_parent
 
 
 def test_runtime_reparent_rejects_descendant_cycle_after_game_dispatch(m3_running):
