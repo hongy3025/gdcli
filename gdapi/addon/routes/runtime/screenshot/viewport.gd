@@ -3,19 +3,10 @@
 ## 等 RenderingServer.frame_post_draw 后从 viewport.get_texture().get_image() 中读取。
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var ops := load("res://addons/gdapi/runtime/runtime_capture_ops.gd")
-	var result: Dictionary = await ops.viewport(req.body)
-	if not bool(result.get("ok", false)):
-		res.error(String(result.get("error", "viewport capture failed")), String(result.get("code", "godot_error")), 500)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/screenshot/viewport", false)
 
 func doc() -> GdApiRouteDoc:
 	return (

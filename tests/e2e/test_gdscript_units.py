@@ -22,6 +22,7 @@ from conftest import run_godot_script
         "res://tests/test_runtime_route.gd",
         "res://tests/test_runtime_node_ops.gd",
         "res://tests/test_runtime_input_ops.gd",
+        "res://tests/test_runtime_capture_ops.gd",
     ],
 )
 def test_gdscript_unit_suite(godot_env, script):

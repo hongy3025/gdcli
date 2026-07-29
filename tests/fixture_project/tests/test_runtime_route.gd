@@ -19,6 +19,9 @@ const RuntimeNodeReparentRoute := preload("res://addons/gdapi/routes/runtime/nod
 const RuntimeNodeCreateRoute := preload("res://addons/gdapi/routes/runtime/node/create.gd")
 const RuntimeNodeDuplicateRoute := preload("res://addons/gdapi/routes/runtime/node/duplicate.gd")
 const RuntimeNodeRenameRoute := preload("res://addons/gdapi/routes/runtime/node/rename.gd")
+const RuntimeScreenshotViewportRoute := preload("res://addons/gdapi/routes/runtime/screenshot/viewport.gd")
+const RuntimeScreenshotCameraRoute := preload("res://addons/gdapi/routes/runtime/screenshot/camera.gd")
+const RuntimeScreenshotFramesRoute := preload("res://addons/gdapi/routes/runtime/screenshot/frames.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
@@ -55,6 +58,7 @@ func _init() -> void:
 	test_dispatch_requires_exact_runtime_path_and_operation()
 	test_runtime_node_get_dispatches_through_broker()
 	test_scene_node_routes_dispatch_through_broker()
+	test_capture_routes_dispatch_through_broker_as_read_only()
 	test_dispatch_rejects_unknown_path_params_before_broker()
 	test_mutation_boundary_failures_are_audited()
 	test_timeout_defaults_caps_and_rejects_invalid_values()
@@ -182,6 +186,24 @@ func test_scene_node_routes_dispatch_through_broker() -> void:
 			assert_eq(broker.calls[0].op, item.route, item.route + " uses exact broker operation")
 		if item.mutation:
 			assert_eq(_last_response(server).body.undoable, false, item.route + " is not undoable")
+
+func test_capture_routes_dispatch_through_broker_as_read_only() -> void:
+	var cases := [
+		{"route": "runtime/screenshot/viewport", "script": RuntimeScreenshotViewportRoute},
+		{"route": "runtime/screenshot/camera", "script": RuntimeScreenshotCameraRoute},
+		{"route": "runtime/screenshot/frames", "script": RuntimeScreenshotFramesRoute},
+	]
+	for item in cases:
+		var broker := FakeBroker.new()
+		broker.next_reply = {"ok": true, "result": {"width": 1, "height": 1}}
+		Engine.set_meta("gdapi_runtime_broker", broker)
+		var server := FakeServer.new()
+		item.script.new().handle(_request_at("/" + item.route), _response(server))
+		assert_eq(broker.calls.size(), 1, item.route + " dispatches through broker")
+		if broker.calls.size() == 1:
+			assert_eq(broker.calls[0].op, item.route, item.route + " uses exact broker operation")
+		assert_false(_last_response(server).body.has("changed"), item.route + " is read-only")
+		assert_false(_last_response(server).body.has("undoable"), item.route + " has no mutation fields")
 
 func test_dispatch_rejects_unknown_path_params_before_broker() -> void:
 	var broker := FakeBroker.new()
