@@ -353,3 +353,57 @@ def test_runtime_created_node_can_reparent_and_remove(m3_running):
     assert removed["changed"] is True
     assert removed["undoable"] is False
     assert exec_error(m3_running, "runtime/node/info", {"node_path": created_path})["code"] == "not_found"
+
+
+def test_nested_runtime_node_named_like_fixture_remains_mutable(m3_running):
+    collision = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain",
+        "type": "Node2D",
+        "name": "Task10Collision",
+    })["node_path"]
+    exec_ok(m3_running, "runtime/node/reparent", {
+        "node_path": collision,
+        "new_parent": "/root/RuntimeMain/ProbeTarget",
+    })
+    renamed = exec_ok(m3_running, "runtime/node/rename", {
+        "node_path": "/root/RuntimeMain/ProbeTarget/Task10Collision",
+        "name": "ProbeTarget",
+    })
+    nested_collision = "/root/RuntimeMain/ProbeTarget/ProbeTarget"
+    assert renamed["node_path"] == nested_collision
+
+    duplicate = exec_ok(m3_running, "runtime/node/duplicate", {
+        "node_path": nested_collision,
+        "name": "Task10CollisionCopy",
+    })
+    assert duplicate["node_path"] == "/root/RuntimeMain/ProbeTarget/Task10CollisionCopy"
+
+    renamed_again = exec_ok(m3_running, "runtime/node/rename", {
+        "node_path": nested_collision,
+        "name": "Task10CollisionRenamed",
+    })
+    assert renamed_again["node_path"] == "/root/RuntimeMain/ProbeTarget/Task10CollisionRenamed"
+    exec_ok(m3_running, "runtime/node/rename", {
+        "node_path": renamed_again["node_path"],
+        "name": "ProbeTarget",
+    })
+
+    container = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain",
+        "type": "Node",
+        "name": "Task10Container",
+    })["node_path"]
+    moved = exec_ok(m3_running, "runtime/node/reparent", {
+        "node_path": nested_collision,
+        "new_parent": container,
+    })
+    assert moved["new_parent"] == container
+
+    moved_collision = "/root/RuntimeMain/Task10Container/ProbeTarget"
+    removed = exec_ok(m3_running, "runtime/node/remove", {
+        "node_path": moved_collision,
+    })
+    assert removed["removed"] == moved_collision
+    assert exec_error(m3_running, "runtime/node/info", {
+        "node_path": moved_collision,
+    })["code"] == "not_found"

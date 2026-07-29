@@ -178,3 +178,65 @@ log/debug behavior. No skip, xfail, direct HTTP fallback, or local operation
 was added.
 
 Fix round 1 is recorded by the commit containing this report.
+
+## Fix round 2
+
+### Open finding
+
+The first hardening pass protected fixed fixture identities by node name
+globally. A runtime-created descendant renamed to `ProbeTarget` (or an
+infrastructure name) was therefore incorrectly rejected by duplicate, rename,
+reparent, and remove.
+
+### TDD evidence
+
+Before changing `runtime_node_ops.gd`, the focused GDScript regression reached
+the nested name collision and failed the five subsequent mutation assertions:
+
+```text
+uv run pytest tests/e2e/test_gdscript_units.py -k runtime_node_ops -v
+1 failed; 22 assertions passed and 5 assertions failed
+```
+
+The real broker-to-game E2E reproduced the same boundary:
+
+```text
+uv run pytest \
+  tests/e2e/m3/test_runtime_nodes.py::test_nested_runtime_node_named_like_fixture_remains_mutable \
+  -v --maxfail=1
+1 failed: runtime/node/duplicate returned permission_denied for
+/root/RuntimeMain/ProbeTarget/ProbeTarget
+```
+
+### Fix
+
+`_is_protected_node()` now protects fixture names only when the node is a
+direct child of the current scene root. The scene root and tree root remain
+identity-protected. `GdApiRuntimeProbe` remains protected by the actual
+autoload object at `/root/GdApiRuntimeProbe` or by the `runtime_probe.gd`
+script identity.
+
+Both GDScript and real E2E regressions create a runtime node, nest it, rename it
+to `ProbeTarget`, then verify duplicate, rename, reparent, and remove remain
+available. Existing tests continue to require all four destructive operations
+to reject the real direct-child `ProbeTarget`, `ProbeInput`,
+`ProbeInputAction`, and `ProbeFinishedSignal`.
+
+### Verification
+
+```text
+$env:GODOT_BIN='D:\app\devel\Godot\v4.7.1\godot_console.exe'
+uv run pytest tests/e2e/test_gdscript_units.py -v
+14 passed
+
+uv run pytest tests/e2e/m3/test_runtime_status.py \
+  tests/e2e/m3/test_runtime_nodes.py -v --durations=20 --maxfail=1
+26 passed
+
+uv run pytest tests/e2e/m3/test_m3_contract.py \
+  -k "runtime_manifest_match or runtime_manifest_has_no_aliases" -v
+2 passed, 2 deselected; runtime route files = 35
+```
+
+`git diff --check` passed, no Godot/gdcli process remained, and protected
+working-tree files were not staged.

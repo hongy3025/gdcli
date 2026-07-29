@@ -489,13 +489,18 @@ static func _is_protected_node(node: Node) -> bool:
 	if node == null:
 		return true
 	var tree := Engine.get_main_loop() as SceneTree
-	if node == tree.root or node == _scene_root():
+	var scene := _scene_root()
+	if node == tree.root or node == scene:
 		return true
+	var node_name := String(node.name)
 	if (
-		String(node.name) == "GdApiRuntimeProbe"
-		or String(node.name) in INFRASTRUCTURE_NODE_NAMES
-		or String(node.name) in DEDICATED_FIXTURE_NODE_NAMES
+		scene != null
+		and node.get_parent() == scene
+		and (node_name in INFRASTRUCTURE_NODE_NAMES or node_name in DEDICATED_FIXTURE_NODE_NAMES)
 	):
+		return true
+	var runtime_probe := tree.root.get_node_or_null(NodePath("GdApiRuntimeProbe"))
+	if node == runtime_probe:
 		return true
 	var script := node.get_script()
 	return script != null and String(script.resource_path).ends_with("/runtime_probe.gd")

@@ -109,6 +109,55 @@ func _run() -> void:
 	var removed := NodeOps.remove({"node_path": created_path})
 	_assert_true(removed.get("ok", false), "dedicated node can be removed")
 
+	var collision := NodeOps.create({
+		"parent_path": "/root/Task9Scene",
+		"type": "Node2D",
+		"name": "Task10Collision",
+	})
+	_assert_true(collision.get("ok", false), "name-collision node is created")
+	var collision_path := String(collision.get("result", {}).get("node_path", ""))
+	var collision_nested := NodeOps.reparent({
+		"node_path": collision_path,
+		"new_parent": "/root/Task9Scene/ProbeTarget",
+	})
+	_assert_true(collision_nested.get("ok", false), "name-collision node can nest")
+	var collision_renamed := NodeOps.rename({
+		"node_path": "/root/Task9Scene/ProbeTarget/Task10Collision",
+		"name": "ProbeTarget",
+	})
+	_assert_true(collision_renamed.get("ok", false), "nested runtime node can use fixed fixture name")
+	var nested_collision_path := "/root/Task9Scene/ProbeTarget/ProbeTarget"
+	var collision_copy := NodeOps.duplicate_node({
+		"node_path": nested_collision_path,
+		"name": "Task10CollisionCopy",
+	})
+	_assert_true(collision_copy.get("ok", false), "nested same-name runtime node can duplicate")
+	var collision_rename_again := NodeOps.rename({
+		"node_path": nested_collision_path,
+		"name": "Task10CollisionRenamed",
+	})
+	_assert_true(collision_rename_again.get("ok", false), "nested same-name runtime node can rename")
+	var rename_back := NodeOps.rename({
+		"node_path": "/root/Task9Scene/ProbeTarget/Task10CollisionRenamed",
+		"name": "ProbeTarget",
+	})
+	_assert_true(rename_back.get("ok", false), "runtime node can restore colliding name")
+	var container := NodeOps.create({
+		"parent_path": "/root/Task9Scene",
+		"type": "Node",
+		"name": "Task10Container",
+	})
+	_assert_true(container.get("ok", false), "name-collision container is created")
+	var collision_reparented := NodeOps.reparent({
+		"node_path": nested_collision_path,
+		"new_parent": "/root/Task9Scene/Task10Container",
+	})
+	_assert_true(collision_reparented.get("ok", false), "nested same-name runtime node can reparent")
+	var collision_removed := NodeOps.remove({
+		"node_path": "/root/Task9Scene/Task10Container/ProbeTarget",
+	})
+	_assert_true(collision_removed.get("ok", false), "nested same-name runtime node can remove")
+
 	scene.free()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
