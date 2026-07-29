@@ -12,13 +12,14 @@ var input_actions: int = 0
 var _reset_epoch: int = 0
 var _pending_timers: Array[Dictionary] = []
 
-signal counted
+signal counted(value: int)
 signal finished
 
 ## 在 autoload 中,声明可被 runtime/node/call 调用的方法名清单
 func _init() -> void:
 	set_meta("gdapi_callable_methods", PackedStringArray([
 		"increment", "increment_later", "emit_finished", "emit_known_logs",
+		"block_then_emit_finished",
 		"add_keys", "add_mouse", "add_gamepad", "add_touch", "add_action",
 		"reset_shared_fixture", "prepare_capture_fixture", "probe_capture_boundary",
 	]))
@@ -101,6 +102,10 @@ func _disconnect_signal_connections(signal_name: StringName) -> void:
 			disconnect(signal_name, callback)
 
 func emit_finished() -> void:
+	finished.emit()
+
+func block_then_emit_finished(block_ms: int) -> void:
+	OS.delay_msec(maxi(block_ms, 0))
 	finished.emit()
 
 func emit_known_logs() -> void:

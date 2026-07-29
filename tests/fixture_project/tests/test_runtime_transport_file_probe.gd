@@ -22,6 +22,7 @@ func _run() -> void:
 	await test_suspended_request_claims_duplicate_id_and_finishes_once()
 	await test_suspended_request_times_out_once()
 	await test_request_payload_timeout_controls_handler_deadline()
+	await test_completed_handler_after_disconnect_abandons_inflight_once()
 	test_completed_request_id_never_restarts_after_outbox_consumed()
 	test_failed_outbox_write_retries_without_losing_reply()
 	test_non_dictionary_inbox_is_discarded()
@@ -263,6 +264,35 @@ func test_request_payload_timeout_controls_handler_deadline() -> void:
 	t.tick(before + 6000)
 	assert_true(not FileAccess.file_exists(probe_dir.path_join("outbox/48.json")),
 		"request longer than default 5s is still inflight")
+	t.stop()
+	_cleanup(root)
+
+func test_completed_handler_after_disconnect_abandons_inflight_once() -> void:
+	var root := _make_root()
+	var t := Transport.new(0, root)
+	var tracker := {"calls": 0}
+	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
+		tracker.calls += 1
+		await process_frame
+		return {"ok": true, "result": {"late": true}}
+	)
+	t.start()
+	var probe_dir := root.path_join(t.probe_id())
+	_write_request(probe_dir.path_join("inbox/49.json"), 49, t.generation())
+	t.tick(Time.get_ticks_msec())
+	assert_eq(tracker.calls, 1, "disconnect test starts one suspended handler")
+	assert_true(t._inflight.has(49), "disconnect test request is inflight before completion")
+	t._remove_tree(probe_dir, root)
+	await process_frame
+	assert_true(not t._inflight.has(49),
+		"handler completion after endpoint removal abandons inflight")
+	assert_eq(t.last_disconnect_abandoned_count(), 1,
+		"disconnect cleanup records one abandoned request")
+	assert_eq(t.last_disconnect_remaining_count(), 0,
+		"disconnect cleanup records zero remaining inflight")
+	t.tick(Time.get_ticks_msec())
+	assert_true(not DirAccess.dir_exists_absolute(probe_dir),
+		"disconnect cleanup does not recreate endpoint for reply retries")
 	t.stop()
 	_cleanup(root)
 

@@ -29,8 +29,6 @@ const Codec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const Condition := preload("res://addons/gdapi/runtime/runtime_condition.gd")
 const ALLOWED_CREATE_TYPES := ["Node", "Node2D", "Control", "Marker2D"]
 const DEDICATED_NODE_META := &"gdapi_runtime_dedicated"
-const TEMPORARY_WAIT_GROUP := &"gdapi_runtime_wait_timer"
-const TEMPORARY_WAIT_TIMER_NAME := &"GdApiRuntimeWaitTimer"
 const DEDICATED_FIXTURE_NODE_NAMES := ["ProbeTarget"]
 const INFRASTRUCTURE_NODE_NAMES := ["ProbeInput", "ProbeInputAction", "ProbeFinishedSignal"]
 const MUTABLE_PROPERTIES := [
@@ -315,12 +313,16 @@ static func assert_node_exists(payload: Dictionary) -> Dictionary:
 static func assert_property_equals(payload: Dictionary) -> Dictionary:
 	var node_path: String = String(payload.get("node_path", ""))
 	var property: String = String(payload.get("property", ""))
+	if property.is_empty() or not payload.has("value"):
+		return {"ok": false, "code": "missing_param", "error": "property and value are required"}
 	var expected: Variant = payload.get("value", null)
 	var timeout_ms: int = clampi(int(payload.get("timeout_ms", 1000)), 1, 30000)
 	var deadline: int = Time.get_ticks_msec() + timeout_ms
 	while Time.get_ticks_msec() < deadline:
 		var lookup: Dictionary = _resolve(node_path)
-		if bool(lookup.get("ok", false)) and _has_property(lookup.node, property):
+		if bool(lookup.get("ok", false)):
+			if not _has_property(lookup.node, property):
+				return {"ok": false, "code": "not_found", "error": "property does not exist: %s" % property}
 			var got: Variant = lookup.node.get(property)
 			if _variants_equal(got, expected):
 				return {"ok": true, "result": {"passed": true, "value": got}}
@@ -347,10 +349,13 @@ static func signal_connect(payload: Dictionary) -> Dictionary:
 		return lookup
 	var node: Node = lookup.node
 	var signal_name: String = String(payload.get("signal", ""))
-	if not _has_signal(node, signal_name):
-		return {"ok": false, "code": "not_found", "error": "signal not declared"}
+	var signal_result := _require_signal(node, signal_name)
+	if not bool(signal_result.get("ok", false)):
+		return signal_result
 	var target_path: String = String(payload.get("target", ""))
 	var method_name: String = String(payload.get("method", ""))
+	if target_path.is_empty():
+		return {"ok": false, "code": "missing_param", "error": "target is required"}
 	var target_lookup: Dictionary = _resolve(target_path)
 	if not bool(target_lookup.get("ok", false)):
 		return target_lookup
@@ -359,6 +364,8 @@ static func signal_connect(payload: Dictionary) -> Dictionary:
 	if not (allowlist is PackedStringArray) or not (target_method in allowlist):
 		return {"ok": false, "code": "permission_denied", "error": "target method not in allowlist"}
 	var bound := Callable(target_lookup.node, target_method)
+	if node.is_connected(signal_name, bound):
+		return {"ok": false, "code": "conflict", "error": "callable is already connected to this signal"}
 	var err: int = node.connect(signal_name, bound)
 	if err != OK:
 		return {"ok": false, "code": "godot_error", "error": "connect failed with code %d" % err}
@@ -371,6 +378,9 @@ static func signal_disconnect(payload: Dictionary) -> Dictionary:
 		return lookup
 	var node: Node = lookup.node
 	var signal_name: String = String(payload.get("signal", ""))
+	var signal_result := _require_signal(node, signal_name)
+	if not bool(signal_result.get("ok", false)):
+		return signal_result
 	var target_path: String = String(payload.get("target", ""))
 	var method_name: String = String(payload.get("method", ""))
 	if target_path.is_empty() or method_name.is_empty():
@@ -391,24 +401,27 @@ static func signal_emit(payload: Dictionary) -> Dictionary:
 		return lookup
 	var node: Node = lookup.node
 	var signal_name: String = String(payload.get("signal", ""))
-	if not _has_signal(node, signal_name):
-		return {"ok": false, "code": "not_found", "error": "signal not declared"}
+	var signal_result := _require_signal(node, signal_name)
+	if not bool(signal_result.get("ok", false)):
+		return signal_result
 	var raw_args: Variant = payload.get("args", [])
 	if typeof(raw_args) != TYPE_ARRAY:
 		return {"ok": false, "code": "invalid_param", "error": "args must be an array"}
 	var args: Array = raw_args
-	if args.is_empty():
-		node.emit_signal(signal_name)
-	elif args.size() == 1:
-		node.emit_signal(signal_name, args[0])
-	elif args.size() == 2:
-		node.emit_signal(signal_name, args[0], args[1])
-	elif args.size() == 3:
-		node.emit_signal(signal_name, args[0], args[1], args[2])
-	elif args.size() == 4:
-		node.emit_signal(signal_name, args[0], args[1], args[2], args[3])
-	else:
+	if args.size() > 4:
 		return {"ok": false, "code": "invalid_param", "error": "args must contain 0..4 elements"}
+	var normalized_result := _normalize_signal_arguments(signal_result.info, args)
+	if not bool(normalized_result.get("ok", false)):
+		return normalized_result
+	var emit_args: Array = [signal_name]
+	emit_args.append_array(normalized_result.args)
+	var emit_result: Variant = node.callv("emit_signal", emit_args)
+	if typeof(emit_result) != TYPE_INT or int(emit_result) != OK:
+		return {
+			"ok": false,
+			"code": "godot_error",
+			"error": "emit_signal failed with code %d" % int(emit_result),
+		}
 	return {"ok": true, "result": {"emitted": signal_name, "arg_count": args.size()}}
 
 ## 实现 runtime/signal/await
@@ -420,9 +433,9 @@ static func signal_await(payload: Dictionary) -> Dictionary:
 		return waited
 	return {"ok": true, "result": {"signal": String(waited.get("signal", ""))}}
 
-## Wait for one signal emission with one owned Timer and one temporary connection.
-## Every completion path uses the same cleanup block; reset-driven disconnection is
-## reported as conflict instead of leaving the HTTP request suspended.
+## Wait for one signal emission using a monotonic absolute deadline.
+## process_frame keeps the deadline observable while the scene is paused, and the
+## callback itself rejects a signal emitted after a main-thread stall crossed it.
 static func _wait_for_signal(payload: Dictionary) -> Dictionary:
 	var lookup: Dictionary = _resolve(String(payload.get("node_path", "")))
 	if not bool(lookup.get("ok", false)):
@@ -430,34 +443,32 @@ static func _wait_for_signal(payload: Dictionary) -> Dictionary:
 	var node: Node = lookup.node
 	var signal_name: String = String(payload.get("signal", ""))
 	var timeout_ms: int = clampi(int(payload.get("timeout_ms", 1000)), 1, 30000)
-	if not _has_signal(node, signal_name):
-		return {"ok": false, "code": "not_found", "error": "signal not declared"}
+	var signal_result := _require_signal(node, signal_name)
+	if not bool(signal_result.get("ok", false)):
+		return signal_result
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return {"ok": false, "code": "conflict", "error": "scene tree is unavailable"}
+	var deadline := Time.get_ticks_msec() + timeout_ms
 	var completion := {"state": "pending"}
 	var proxy: Callable = func(_a0=null, _a1=null, _a2=null, _a3=null) -> void:
 		if String(completion.state) == "pending":
-			completion["state"] = "signal"
+			completion["state"] = (
+				"signal" if Time.get_ticks_msec() < deadline else "timeout"
+			)
 	var connect_error := node.connect(signal_name, proxy)
 	if connect_error != OK:
 		return {"ok": false, "code": "godot_error", "error": "temporary signal connection failed"}
-	var timer := _create_wait_timer(timeout_ms)
-	if timer == null:
-		node.disconnect(signal_name, proxy)
-		return {"ok": false, "code": "conflict", "error": "scene tree is unavailable"}
-	var timeout_callback: Callable = func() -> void:
-		if String(completion.state) == "pending":
-			completion["state"] = "timeout"
-	timer.timeout.connect(timeout_callback)
-	var tree := Engine.get_main_loop() as SceneTree
 	while String(completion.state) == "pending":
 		if not is_instance_valid(node) or not node.is_connected(signal_name, proxy):
 			completion["state"] = "disconnected"
 			break
+		if Time.get_ticks_msec() >= deadline:
+			completion["state"] = "timeout"
+			break
 		await tree.process_frame
 	if is_instance_valid(node) and node.is_connected(signal_name, proxy):
 		node.disconnect(signal_name, proxy)
-	if is_instance_valid(timer) and timer.timeout.is_connected(timeout_callback):
-		timer.timeout.disconnect(timeout_callback)
-	_dispose_wait_timer(timer)
 	match String(completion.state):
 		"signal":
 			return {"ok": true, "signal": signal_name}
@@ -472,28 +483,6 @@ static func _wait_interval(wait_ms: int) -> void:
 		return
 	var timer := tree.create_timer(maxf(float(wait_ms) / 1000.0, 0.001))
 	await timer.timeout
-
-static func _create_wait_timer(wait_ms: int) -> Timer:
-	var tree := Engine.get_main_loop() as SceneTree
-	if tree == null or tree.root == null:
-		return null
-	var timer := Timer.new()
-	timer.name = TEMPORARY_WAIT_TIMER_NAME
-	timer.one_shot = true
-	timer.wait_time = maxf(float(wait_ms) / 1000.0, 0.001)
-	timer.add_to_group(TEMPORARY_WAIT_GROUP)
-	tree.root.add_child(timer)
-	timer.start()
-	return timer
-
-static func _dispose_wait_timer(timer: Timer) -> void:
-	if not is_instance_valid(timer):
-		return
-	timer.stop()
-	var parent := timer.get_parent()
-	if parent != null:
-		parent.remove_child(timer)
-	timer.free()
 
 ## 在 tree 中按 name/type/group 查找
 static func _walk_find(node: Node, name: String, type_filter: String, group: String, out: Array, limit: int) -> void:
@@ -625,12 +614,67 @@ static func _has_property(node: Node, property: String) -> bool:
 			return true
 	return false
 
-## 判断 node 是否声明了 signal
-static func _has_signal(node: Node, signal_name: String) -> bool:
-	for s in node.get_signal_list():
-		if String(s.name) == signal_name:
-			return true
-	return false
+static func _require_signal(node: Node, signal_name: String) -> Dictionary:
+	if signal_name.is_empty():
+		return {"ok": false, "code": "missing_param", "error": "signal is required"}
+	for info in node.get_signal_list():
+		if String(info.get("name", "")) == signal_name:
+			return {"ok": true, "info": info}
+	return {"ok": false, "code": "not_found", "error": "signal not declared"}
+
+static func _normalize_signal_arguments(signal_info: Dictionary, args: Array) -> Dictionary:
+	var declared: Array = signal_info.get("args", [])
+	var defaults: Array = signal_info.get("default_args", [])
+	var minimum := maxi(declared.size() - defaults.size(), 0)
+	if args.size() < minimum or args.size() > declared.size():
+		return {
+			"ok": false,
+			"code": "invalid_param",
+			"error": "signal expects %d..%d arguments, got %d" % [
+				minimum, declared.size(), args.size(),
+			],
+		}
+	var normalized: Array = []
+	for index in args.size():
+		var info: Dictionary = declared[index]
+		var normalized_arg := _normalize_signal_argument(
+			args[index], int(info.get("type", TYPE_NIL)), String(info.get("class_name", ""))
+		)
+		if not bool(normalized_arg.get("ok", false)):
+			return {
+				"ok": false,
+				"code": "invalid_param",
+				"error": "signal argument %d: %s" % [
+					index, String(normalized_arg.get("error", "type mismatch")),
+				],
+			}
+		normalized.append(normalized_arg.value)
+	return {"ok": true, "args": normalized}
+
+static func _normalize_signal_argument(value: Variant, expected_type: int, expected_class: String) -> Dictionary:
+	if expected_type == TYPE_NIL:
+		return {"ok": true, "value": value}
+	if expected_type == TYPE_INT and typeof(value) == TYPE_FLOAT:
+		var numeric := float(value)
+		if is_finite(numeric) and numeric == floor(numeric):
+			return {"ok": true, "value": int(numeric)}
+	if expected_type == TYPE_FLOAT and (typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT):
+		return {"ok": true, "value": float(value)}
+	if expected_type == TYPE_STRING_NAME and typeof(value) == TYPE_STRING:
+		return {"ok": true, "value": StringName(value)}
+	if expected_type == TYPE_NODE_PATH and typeof(value) == TYPE_STRING:
+		return {"ok": true, "value": NodePath(value)}
+	if typeof(value) != expected_type:
+		return {
+			"ok": false,
+			"error": "expected %s, got %s" % [
+				type_string(expected_type), type_string(typeof(value)),
+			],
+		}
+	if expected_type == TYPE_OBJECT and not expected_class.is_empty():
+		if value == null or not value.is_class(expected_class):
+			return {"ok": false, "error": "expected object class %s" % expected_class}
+	return {"ok": true, "value": value}
 
 ## 判断 candidate 是否在 root 之下（fallback=False 时仅查「不等于 candidate」）
 static func _is_descendant_of(candidate: Node, root: Node, include_self: bool) -> bool:

@@ -50,6 +50,16 @@ var _ring: RefCounted = RingBuffer.new(2000)
 
 ## 文件 transport 实例;非编辑器进程下 _ready() 中创建
 var _file_transport: RefCounted = null
+var file_transport_last_disconnect_abandoned: int:
+	get:
+		if _file_transport == null or not _file_transport.has_method("last_disconnect_abandoned_count"):
+			return 0
+		return int(_file_transport.last_disconnect_abandoned_count())
+var file_transport_last_disconnect_remaining: int:
+	get:
+		if _file_transport == null or not _file_transport.has_method("last_disconnect_remaining_count"):
+			return 0
+		return int(_file_transport.last_disconnect_remaining_count())
 
 ## 容器,根据 _ready 时机,允许 hello 阶段被推迟
 func _ready() -> void:

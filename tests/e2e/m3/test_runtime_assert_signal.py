@@ -12,6 +12,7 @@ from .conftest import exec_error, exec_ok, wait_for, wait_for_connected
 
 TARGET = "/root/RuntimeMain/ProbeTarget"
 SIGNAL_PROBE = "/root/RuntimeMain/ProbeFinishedSignal"
+RUNTIME_PROBE = "/root/GdApiRuntimeProbe"
 
 
 def _start_cli(env: dict[str, Any], route: str, data: dict | None = None) -> subprocess.Popen[str]:
@@ -194,6 +195,22 @@ def test_node_exists_and_property_equals_run_in_game(m3_running):
     _assert_async_resources_clean(m3_running)
 
 
+def test_property_equals_rejects_missing_property_or_value_immediately(m3_running):
+    missing_property = exec_error(m3_running, "runtime/assert/property_equals", {
+        "node_path": TARGET,
+        "value": 0,
+        "timeout_ms": 1000,
+    })
+    missing_value = exec_error(m3_running, "runtime/assert/property_equals", {
+        "node_path": TARGET,
+        "property": "counter",
+        "timeout_ms": 1000,
+    })
+    assert missing_property["code"] == "missing_param"
+    assert missing_value["code"] == "missing_param"
+    _assert_async_resources_clean(m3_running)
+
+
 def test_signal_await_suspends_until_second_cli_emits_once(m3_running):
     waiter = _start_cli(m3_running, "runtime/signal/await", {
         "node_path": TARGET,
@@ -211,6 +228,25 @@ def test_signal_await_suspends_until_second_cli_emits_once(m3_running):
     assert emitted["changed"] is True
     assert result["signal"] == "finished"
     _assert_not_mutation(result)
+    assert _node_plain(m3_running, SIGNAL_PROBE, "event_count") == 1
+    _assert_async_resources_clean(m3_running)
+
+
+def test_signal_await_absolute_deadline_wins_after_main_thread_block(m3_running):
+    waiter = _start_cli(m3_running, "runtime/signal/await", {
+        "node_path": TARGET,
+        "signal": "finished",
+        "timeout_ms": 80,
+    })
+    _wait_for_pending(m3_running)
+    _run_second_cli(m3_running, waiter, "runtime/node/call", {
+        "node_path": TARGET,
+        "method": "block_then_emit_finished",
+        "args": [150],
+    })
+    error, stderr = _finish_cli(waiter, success=False)
+    assert error["code"] == "timeout"
+    assert stderr.startswith("Error (408):")
     assert _node_plain(m3_running, SIGNAL_PROBE, "event_count") == 1
     _assert_async_resources_clean(m3_running)
 
@@ -273,6 +309,57 @@ def test_signal_connect_disconnect_emit_are_mutations(m3_running):
     assert _node_plain(m3_running, TARGET, "input_keys") == 1
 
 
+def test_signal_routes_reject_empty_signal_duplicate_connect_and_bad_emit_args(m3_running):
+    connection = {
+        "node_path": TARGET,
+        "signal": "finished",
+        "target": TARGET,
+        "method": "add_keys",
+    }
+    for route, payload in [
+        ("runtime/signal/connect", {
+            "node_path": TARGET,
+            "signal": "",
+            "target": TARGET,
+            "method": "add_keys",
+        }),
+        ("runtime/signal/disconnect", {
+            "node_path": TARGET,
+            "signal": "",
+            "target": TARGET,
+            "method": "add_keys",
+        }),
+        ("runtime/signal/emit", {"node_path": TARGET, "signal": ""}),
+        ("runtime/signal/await", {
+            "node_path": TARGET,
+            "signal": "",
+            "timeout_ms": 1000,
+        }),
+    ]:
+        error = exec_error(m3_running, route, payload)
+        assert error["code"] == "missing_param"
+
+    exec_ok(m3_running, "runtime/signal/connect", connection)
+    duplicate = exec_error(m3_running, "runtime/signal/connect", connection)
+    assert duplicate["code"] == "conflict"
+    exec_ok(m3_running, "runtime/signal/disconnect", connection)
+
+    wrong_count = exec_error(m3_running, "runtime/signal/emit", {
+        "node_path": TARGET,
+        "signal": "finished",
+        "args": [1],
+    })
+    wrong_type = exec_error(m3_running, "runtime/signal/emit", {
+        "node_path": TARGET,
+        "signal": "counted",
+        "args": ["not-an-int"],
+    })
+    assert wrong_count["code"] == "invalid_param"
+    assert wrong_type["code"] == "invalid_param"
+    assert _node_plain(m3_running, SIGNAL_PROBE, "event_count") == 0
+    _assert_async_resources_clean(m3_running)
+
+
 def test_reset_disconnects_pending_await_exactly_once(m3_running):
     waiter = _start_cli(m3_running, "runtime/signal/await", {
         "node_path": TARGET,
@@ -295,14 +382,39 @@ def test_transport_disconnect_completes_await_once_and_cleans_late_runtime_work(
     waiter = _start_cli(m3_running, "runtime/signal/await", {
         "node_path": TARGET,
         "signal": "finished",
-        "timeout_ms": 300,
+        "timeout_ms": 1500,
     })
     _wait_for_pending(m3_running)
+    wait_for(
+        lambda: _node_plain(
+            m3_running,
+            SIGNAL_PROBE,
+            "temporary_finished_connections",
+        ) == 1,
+        timeout=0.5,
+        interval=0.02,
+    )
     hello_path, hello_json = _disconnect_active_file_probe(m3_running)
     error, stderr = _finish_cli(waiter, success=False)
     assert error["code"] == "conflict"
     assert stderr.count("Error (409):") == 1
     _restore_file_probe(m3_running, hello_path, hello_json)
+    wait_for(
+        lambda: (
+            _node_plain(
+                m3_running,
+                RUNTIME_PROBE,
+                "file_transport_last_disconnect_abandoned",
+            ) >= 1
+            and _node_plain(
+                m3_running,
+                RUNTIME_PROBE,
+                "file_transport_last_disconnect_remaining",
+            ) == 0
+        ),
+        timeout=0.5,
+        interval=0.02,
+    )
     wait_for(
         lambda: (
             _node_plain(m3_running, SIGNAL_PROBE, "temporary_finished_connections") == 0

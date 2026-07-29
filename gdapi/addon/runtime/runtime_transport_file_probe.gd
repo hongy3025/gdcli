@@ -47,6 +47,9 @@ var _inflight: Dictionary = {}
 ## 当前 probe 生命周期内已领取的 request id。完成后仍保留，避免重放 inbox
 ## 在 outbox 被编辑器消费后再次执行副作用。
 var _claimed: Dictionary = {}
+var _endpoint_disconnected: bool = false
+var _last_disconnect_abandoned: int = 0
+var _last_disconnect_remaining: int = 0
 
 ## hello 定时器到期时刻
 var _hello_due_msec: int = 0
@@ -64,6 +67,12 @@ func probe_id() -> String:
 
 func generation() -> String:
 	return _generation
+
+func last_disconnect_abandoned_count() -> int:
+	return _last_disconnect_abandoned
+
+func last_disconnect_remaining_count() -> int:
+	return _last_disconnect_remaining
 
 ## 返回根目录绝对路径
 func root_path() -> String:
@@ -88,6 +97,9 @@ func start() -> void:
 	DirAccess.make_dir_recursive_absolute(dir.path_join("inbox"))
 	DirAccess.make_dir_recursive_absolute(dir.path_join("outbox"))
 	_started = true
+	_endpoint_disconnected = false
+	_last_disconnect_abandoned = 0
+	_last_disconnect_remaining = 0
 	if hello_delay_ms <= 0:
 		_write_hello_file()
 	else:
@@ -102,6 +114,7 @@ func stop() -> void:
 	_hello_due_msec = 0
 	_inflight.clear()
 	_claimed.clear()
+	_endpoint_disconnected = false
 	var dir := root_path().path_join(_probe_id)
 	_remove_tree(dir, root_path())
 
@@ -111,6 +124,11 @@ func tick(now_msec: int) -> void:
 		return
 	if not _hello_sent and hello_delay_ms > 0 and now_msec >= _hello_due_msec:
 		_write_hello_file()
+	if _hello_sent and not _endpoint_exists():
+		_abandon_disconnected_inflight()
+		return
+	if _endpoint_disconnected:
+		_endpoint_disconnected = false
 	_expire_inflight(now_msec)
 	_retry_pending_replies()
 	_scan_inbox(now_msec)
@@ -218,6 +236,9 @@ func _request_handler_timeout(payload: Variant) -> int:
 
 ## 将已经完成但首次落盘失败的 reply 重试；成功前保留 inflight 状态。
 func _retry_pending_replies() -> void:
+	if not _endpoint_exists():
+		_abandon_disconnected_inflight()
+		return
 	for raw_id in _inflight.keys():
 		var id: int = int(raw_id)
 		var state: Dictionary = _inflight[id]
@@ -225,6 +246,9 @@ func _retry_pending_replies() -> void:
 			continue
 		if _write_reply(id, state.reply):
 			_inflight.erase(id)
+		elif not _endpoint_exists():
+			_abandon_disconnected_inflight()
+			return
 
 ## 给仍在等待 handler 的 request 写入一次 timeout reply。
 func _expire_inflight(now_msec: int) -> void:
@@ -249,16 +273,38 @@ func _start_request(id: int, message: Dictionary) -> void:
 func _finish_request(id: int, handler_reply: Variant) -> void:
 	if not _inflight.has(id):
 		return
+	if not _endpoint_exists():
+		_abandon_disconnected_inflight()
+		return
 	var reply: Dictionary = _make_reply(id, handler_reply, String(_inflight[id].get("generation", "")))
 	var state: Dictionary = _inflight[id]
 	state["reply"] = reply
 	_inflight[id] = state
 	if _write_reply(id, reply):
 		_inflight.erase(id)
+	elif not _endpoint_exists():
+		_abandon_disconnected_inflight()
 
 func _write_reply(id: int, reply: Dictionary) -> bool:
 	var out_path := root_path().path_join(_probe_id).path_join("outbox").path_join(str(id) + ".json")
 	return _atomic_write(out_path, JSON.stringify(reply))
+
+func _endpoint_exists() -> bool:
+	var probe_dir := root_path().path_join(_probe_id)
+	return (
+		DirAccess.dir_exists_absolute(probe_dir)
+		and FileAccess.file_exists(probe_dir.path_join("hello.json"))
+		and DirAccess.dir_exists_absolute(probe_dir.path_join("inbox"))
+		and DirAccess.dir_exists_absolute(probe_dir.path_join("outbox"))
+	)
+
+func _abandon_disconnected_inflight() -> void:
+	if _endpoint_disconnected:
+		return
+	_endpoint_disconnected = true
+	_last_disconnect_abandoned = _inflight.size()
+	_inflight.clear()
+	_last_disconnect_remaining = _inflight.size()
 
 ## 把 handler body 转为一个已验证且有界的 protocol reply。
 func _make_reply(id: int, handler_reply: Variant, generation: String = "") -> Dictionary:
