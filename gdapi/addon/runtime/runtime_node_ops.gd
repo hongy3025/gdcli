@@ -75,7 +75,7 @@ static func get_property(payload: Dictionary) -> Dictionary:
 	if not _has_property(node, property):
 		return {"ok": false, "code": "not_found", "error": "property does not exist: %s" % property}
 	var raw: Variant = node.get(property)
-	var encoded: Dictionary = Codec.from_variant(raw) if raw != null else {"plain": null}
+	var encoded: Variant = Codec.from_variant(raw) if raw != null else {"plain": null}
 	return {"ok": true, "result": {"value": encoded}}
 
 ## 实现 runtime/node/set

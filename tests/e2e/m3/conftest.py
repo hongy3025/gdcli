@@ -34,6 +34,7 @@ from e2e.m2.helpers import (  # noqa: E402
 M3_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m3_project"
 CLI_TIMEOUT_SECONDS = 35
 RECOVERY_RESTART_LIMIT = 1
+INTERNAL_RESET_TIMEOUT_SECONDS = 10.0
 DIAGNOSTIC_FIELDS = (
     "command",
     "exit_code",
@@ -56,6 +57,13 @@ def runtime_route_source(route: str) -> str:
     """Read a runtime route from the addon source tree for source-contract checks."""
     route_path = repo_root() / "gdapi" / "addon" / "routes" / Path(*route.split("/"))
     return route_path.with_suffix(".gd").read_text(encoding="utf-8")
+
+
+def fixture_script_source(name: str) -> str:
+    """Read one checked-in M3 fixture script for narrow reset source contracts."""
+    if Path(name).name != name or not name.endswith(".gd"):
+        raise ValueError(f"invalid fixture script name: {name}")
+    return (M3_FIXTURE_SOURCE / "scripts" / name).read_text(encoding="utf-8")
 
 
 def _gdcli_ping(env_root: Path, godot_bin: str) -> bool:
@@ -113,6 +121,80 @@ def _runtime_entries(env: dict[str, Any]) -> list[str]:
     if not root.exists():
         return []
     return sorted(path.name for path in root.iterdir())
+
+
+def _active_file_probe(env: dict[str, Any]) -> tuple[Path, str]:
+    root = _runtime_root(env)
+    candidates: list[tuple[Path, str]] = []
+    if root.exists():
+        for probe in sorted(path for path in root.iterdir() if path.is_dir()):
+            hello = _read_metadata(probe / "hello.json")
+            result = hello.get("result", {}) if isinstance(hello, dict) else {}
+            generation = result.get("generation") if isinstance(result, dict) else None
+            if isinstance(generation, str) and generation:
+                candidates.append((probe, generation))
+    if len(candidates) != 1:
+        raise RuntimeError(f"expected one active file probe, found {len(candidates)}")
+    return candidates[0]
+
+
+def _internal_fixture_reset_once(env: dict[str, Any]) -> dict[str, Any]:
+    probe, generation = _active_file_probe(env)
+    request_id = int(env.get("internal_reset_next_id", 10_000_000))
+    env["internal_reset_next_id"] = request_id + 1
+    request = {
+        "version": 1,
+        "id": request_id,
+        "kind": "request",
+        "op": "runtime/fixture/reset",
+        "payload": {},
+        "generation": generation,
+    }
+    inbox = probe / "inbox" / f"{request_id}.json"
+    outbox = probe / "outbox" / f"{request_id}.json"
+    inbox.parent.mkdir(parents=True, exist_ok=True)
+    temp = inbox.with_suffix(".tmp")
+    temp.write_text(json.dumps(request), encoding="utf-8")
+    temp.replace(inbox)
+    deadline = time.monotonic() + INTERNAL_RESET_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        hello = _read_metadata(probe / "hello.json")
+        hello_result = hello.get("result", {}) if isinstance(hello, dict) else {}
+        if not isinstance(hello_result, dict) or hello_result.get("generation") != generation:
+            raise RuntimeError("fixture reset probe generation changed during request")
+        if outbox.exists():
+            reply = _read_metadata(outbox)
+            outbox.unlink(missing_ok=True)
+            if not isinstance(reply, dict) or reply.get("id") != request_id:
+                raise RuntimeError(f"fixture reset reply id mismatch: {reply}")
+            if reply.get("generation") != generation:
+                raise RuntimeError("fixture reset reply generation mismatch")
+            if reply.get("kind") != "reply" or reply.get("ok") is not True:
+                raise RuntimeError(f"fixture reset failed: {reply}")
+            result = reply.get("result", {})
+            if not isinstance(result, dict) or result.get("changed") is not True:
+                raise RuntimeError(f"fixture reset returned invalid result: {reply}")
+            return {"ok": True, **result}
+        time.sleep(0.05)
+    raise RuntimeError(
+        f"fixture reset timed out; inbox={inbox.exists()} outbox={outbox.exists()} "
+        f"generation={generation}"
+    )
+
+
+def _fixture_hook_reset_once(env: dict[str, Any]) -> dict[str, Any]:
+    """Use the fixture-only reset hook when EngineDebugger owns the data plane."""
+    call = exec_ok(env, "runtime/node/call", {
+        "node_path": "/root/RuntimeMain/ProbeTarget",
+        "method": "reset_shared_fixture",
+        "args": [],
+    })
+    if call.get("method") != "reset_shared_fixture":
+        raise RuntimeError(f"fixture reset hook method mismatch: {call}")
+    result = call.get("result", {})
+    if not isinstance(result, dict) or result.get("changed") is not True:
+        raise RuntimeError(f"fixture reset hook returned invalid result: {call}")
+    return {"ok": True, **result}
 
 
 def _record_editor_use(env: dict[str, Any]) -> None:
@@ -359,6 +441,9 @@ def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         "editor_pids": set(),
         "game_run_count": 0,
         "game_stop_count": 0,
+        "fixture_reset_count": 0,
+        "fixture_reset_restarts": 0,
+        "recovery_markers": [],
         "recovery_events": [],
         "game_attached": False,
     }
@@ -381,26 +466,28 @@ def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         detach_editor(env)
 
 
-@pytest.fixture
-def m3_running(m3_editor: dict[str, Any]) -> Any:
-    """Attach one isolated game for a test and always detach it explicitly."""
+@pytest.fixture(scope="session")
+def m3_running(m3_editor: dict[str, Any], m3_lifecycle: dict[str, Any]) -> Any:
+    """Own one shared data-plane game for all fixture-state E2E tests."""
+    assert len(m3_lifecycle["cycles"]) == 2
     attach_game(m3_editor)
-    original_error: BaseException | None = None
     try:
         yield m3_editor
-    except BaseException as exc:
-        original_error = exc
-        raise
     finally:
-        try:
+        if m3_editor.get("game_attached"):
             detach_game(m3_editor)
-        except BaseException as cleanup_error:
-            _record_recovery(m3_editor, "test cleanup", cleanup_error)
-            if original_error is None:
-                raise
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
+def reset_shared_m3_data_plane(request: pytest.FixtureRequest):
+    """Reset the shared game before each test that requests m3_running."""
+    if "m3_running" in request.fixturenames:
+        env = request.getfixturevalue("m3_running")
+        reset_fixture(env)
+    yield
+
+
+@pytest.fixture(scope="session")
 def m3_lifecycle(m3_editor: dict[str, Any]) -> dict[str, Any]:
     """Run the single status lifecycle scenario: initial stopped, then run/stop twice."""
     initial = exec_ok(m3_editor, "runtime/status")
@@ -411,7 +498,14 @@ def m3_lifecycle(m3_editor: dict[str, Any]) -> dict[str, Any]:
             started = project_run(m3_editor)
             connected = wait_for_connected(m3_editor, timeout=30.0)
             active = exec_ok(m3_editor, "runtime/status")
-            stopped_status = reset_fixture(m3_editor)
+            stale = (
+                _runtime_root(m3_editor)
+                / f"stale-lifecycle-{cycle}"
+                / "reply.json"
+            )
+            stale.parent.mkdir(parents=True, exist_ok=True)
+            stale.write_text("stale", encoding="utf-8")
+            stopped_status = detach_game(m3_editor)
             stopped = {"ok": True, "runtime_state": stopped_status["state"]}
             cycles.append({
                 "cycle": cycle,
@@ -421,6 +515,7 @@ def m3_lifecycle(m3_editor: dict[str, Any]) -> dict[str, Any]:
                 "stopped": stopped,
                 "stopped_status": stopped_status,
                 "runtime_entries": _runtime_entries(m3_editor),
+                "stale_removed": not stale.exists(),
             })
     except BaseException as exc:
         scenario_error = exc
@@ -526,15 +621,56 @@ def detach_game(env: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def reset_fixture(env: dict[str, Any]) -> dict[str, Any]:
-    """Reset session-owned transport state; runtime node state stays game-isolated until Task 10."""
-    status = exec_ok(env, "runtime/status")
-    if status.get("state") != "stopped" or status.get("pending", 0) != 0:
-        return detach_game(env)
-    cleanup_stale_runtime(env)
-    entries = _runtime_entries(env)
-    if entries:
-        raise RuntimeError(f"stale runtime entries remain after reset: {entries}")
-    return status
+    """Reset known fixture state without restarting the shared data-plane game."""
+    if not env.get("game_attached", False):
+        status = exec_ok(env, "runtime/status")
+        if status.get("state") != "stopped" or status.get("pending", 0) != 0:
+            return detach_game(env)
+        cleanup_stale_runtime(env)
+        entries = _runtime_entries(env)
+        if entries:
+            raise RuntimeError(f"stale runtime entries remain after reset: {entries}")
+        return status
+
+    try:
+        status = exec_ok(env, "runtime/status")
+        if status.get("transport") == "engine_debugger":
+            result = _fixture_hook_reset_once(env)
+        else:
+            result = _internal_fixture_reset_once(env)
+        env["fixture_reset_count"] = int(env.get("fixture_reset_count", 0)) + 1
+        return result
+    except BaseException as original_error:
+        args = ["exec", "runtime/fixture/reset", "--project", str(env["project"])]
+        failed = subprocess.CompletedProcess(
+            [str(env.get("gdcli", "gdcli")), "--json", *args],
+            1,
+            stdout="",
+            stderr=str(original_error),
+        )
+        diagnostics = _diagnostics(env, args, failed)
+        diagnostics["recovery_marker"] = {
+            "operation": "runtime/fixture/reset",
+            "restart_allowed": RECOVERY_RESTART_LIMIT,
+            "original_error": str(original_error),
+        }
+        env["last_reset_diagnostics"] = diagnostics
+        env.setdefault("recovery_markers", []).append(diagnostics["recovery_marker"])
+        _record_recovery(env, "fixture reset failed; preserving original diagnostics", original_error)
+        env["fixture_reset_restarts"] = int(env.get("fixture_reset_restarts", 0)) + 1
+        detach_game(env)
+        attach_game(env, recovery_restarts=0)
+        try:
+            status = exec_ok(env, "runtime/status")
+            if status.get("transport") == "engine_debugger":
+                result = _fixture_hook_reset_once(env)
+            else:
+                result = _internal_fixture_reset_once(env)
+            env["fixture_reset_count"] = int(env.get("fixture_reset_count", 0)) + 1
+            return result
+        except BaseException as recovery_error:
+            diagnostics["recovery_error"] = str(recovery_error)
+            raise HarnessFailure("fixture reset recovery failed", diagnostics) from recovery_error
 
 
 def project_run(env: dict) -> dict:

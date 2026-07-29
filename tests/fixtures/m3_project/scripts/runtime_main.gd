@@ -9,3 +9,15 @@ extends Node2D
 @onready var probe_input: Node = $ProbeInput
 @onready var probe_input_action: Node = $ProbeInputAction
 @onready var probe_finished_signal: Node = $ProbeFinishedSignal
+
+func reset_fixture() -> Dictionary:
+	_remove_runtime_children(self)
+	probe_target.reset_fixture()
+	return {"changed": true, "undoable": false}
+
+func _remove_runtime_children(parent: Node) -> void:
+	for child in parent.get_children():
+		if child == probe_target or child == probe_input or child == probe_input_action or child == probe_finished_signal:
+			_remove_runtime_children(child)
+		else:
+			child.free()

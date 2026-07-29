@@ -23,6 +23,9 @@ const InputOps := preload("res://addons/gdapi/runtime/runtime_input_ops.gd")
 const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
 const RingBuffer := preload("res://addons/gdapi/runtime/runtime_ring_buffer.gd")
 const FileTransport := preload("res://addons/gdapi/runtime/runtime_transport_file_probe.gd")
+const DEBUGGER_CHANNEL_PREFIX := "gdapi"
+const DEBUGGER_CHANNEL := "gdapi:protocol"
+const DEBUGGER_CALLBACK_CHANNEL := "protocol"
 
 ## hello 延迟：从 _ready 到第一条 hello 事件之间的毫秒数。
 ## 在项目设置中通过 gdapi/runtime_probe_hello_delay_ms 覆盖，默认 0。
@@ -46,7 +49,7 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		# Editor 进程不运行游戏,probe 仅在游戏进程里注册 capture
 		return
-	EngineDebugger.register_message_capture("gdapi", _on_runtime_capture)
+	EngineDebugger.register_message_capture(DEBUGGER_CHANNEL_PREFIX, _on_runtime_capture)
 	# 文件 transport:总在游戏进程里启动,与 EngineDebugger 并存。
 	# EngineDebugger 在 headless 不可达时由 file transport 接管。
 	_file_transport = FileTransport.new(_hello_delay_ms)
@@ -89,7 +92,9 @@ func _on_hello_timer_timeout() -> void:
 ## 校验后再分发,可以向 reply 中加入业务字段。
 ##
 ## @return true 表示已处理, false 表示忽略
-func _on_runtime_capture(_channel: String, args: Array) -> bool:
+func _on_runtime_capture(channel: String, args: Array) -> bool:
+	if channel != DEBUGGER_CALLBACK_CHANNEL:
+		return false
 	if typeof(args) != TYPE_ARRAY or args.size() < 1:
 		return false
 	var raw: Variant = args[0]
@@ -162,6 +167,8 @@ func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 			return InputOps.action(payload)
 		"runtime/input/sequence":
 			return await InputOps.sequence(payload)
+		"runtime/fixture/reset":
+			return _fixture_reset(payload)
 		"runtime/screenshot/viewport":
 			return await CaptureOps.viewport(payload)
 		"runtime/screenshot/camera":
@@ -227,6 +234,44 @@ func _op_log_clear(_payload: Dictionary) -> Dictionary:
 	var info: Dictionary = _ring.clear()
 	return {"ok": true, "result": info}
 
+## Fixture-only fixed-semantics reset. This is intentionally not a public route:
+## file harness requests use the single internal op, while EngineDebugger harness
+## requests enter through ProbeTarget.reset_shared_fixture's explicit call allowlist.
+func reset_shared_fixture() -> Dictionary:
+	var root := get_tree().root.get_node_or_null("RuntimeMain")
+	if root == null or not root.has_method("reset_fixture"):
+		return {
+			"ok": false,
+			"changed": false,
+			"undoable": false,
+			"code": "not_supported",
+			"error": "fixture reset is unavailable",
+		}
+	var result: Variant = root.call("reset_fixture")
+	var ring_result: Dictionary = _ring.clear()
+	if typeof(result) != TYPE_DICTIONARY:
+		result = {"changed": true, "undoable": false}
+	var normalized: Dictionary = result
+	normalized["ok"] = true
+	normalized["changed"] = bool(normalized.get("changed", true))
+	normalized["undoable"] = false
+	normalized["cleared_logs"] = int(ring_result.get("cleared", 0))
+	return normalized
+
+func _fixture_reset(payload: Dictionary) -> Dictionary:
+	if not payload.is_empty():
+		return {
+			"ok": false,
+			"code": "invalid_param",
+			"error": "fixture reset does not accept payload fields",
+		}
+	var result := reset_shared_fixture()
+	if not bool(result.get("ok", false)):
+		return result
+	var public_result := result.duplicate(true)
+	public_result.erase("ok")
+	return {"ok": true, "result": public_result}
+
 ## 实现 runtime/debug/performance
 func _op_debug_performance(payload: Dictionary) -> Dictionary:
 	var names: Array = payload.get("monitors", [])
@@ -288,7 +333,7 @@ func _send_hello() -> void:
 func _send_message(message: Dictionary) -> bool:
 	if EngineDebugger == null or not EngineDebugger.is_active():
 		return false
-	EngineDebugger.send_message("gdapi", [message])
+	EngineDebugger.send_message(DEBUGGER_CHANNEL, [message])
 	return true
 
 ## 接收缓冲区(供 NodeOps 等内部使用)

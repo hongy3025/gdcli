@@ -9,6 +9,7 @@ class_name GdApiRuntimeDebuggerBridge
 extends RefCounted
 
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
+const DEBUGGER_CHANNEL := "gdapi:protocol"
 
 var _broker: RefCounted = null
 var _lookup_session: Callable = Callable()
@@ -28,7 +29,7 @@ func set_session_override(session_id: int, session: RefCounted) -> void:
 	_sessions[session_id] = session
 
 func capture(message: String, data: Array, session_id: int) -> bool:
-	if message != "gdapi":
+	if message != DEBUGGER_CHANNEL:
 		return false
 	if _broker == null:
 		return true
@@ -123,5 +124,5 @@ func _send_to_session(session_id: int, message: Dictionary) -> bool:
 	var session: RefCounted = _lookup_session_value(session_id)
 	if session == null or not session.has_method("send_message"):
 		return false
-	session.call("send_message", "gdapi", [message])
+	session.call("send_message", DEBUGGER_CHANNEL, [message])
 	return true

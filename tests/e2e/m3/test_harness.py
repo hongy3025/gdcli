@@ -110,6 +110,54 @@ def test_reset_failure_preserves_last_runtime_status_payload(
     assert set(harness.DIAGNOSTIC_FIELDS) <= set(caught.value.diagnostics)
 
 
+def test_each_reset_flow_gets_one_explicit_recovery_restart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    env = {
+        "project": tmp_path,
+        "gdcli": "gdcli",
+        "godot_log_path": tmp_path / "godot.log",
+        "game_attached": True,
+        "fixture_reset_count": 0,
+        "recovery_markers": [],
+        "recovery_events": [],
+    }
+    attempts = iter([
+        RuntimeError("first reset failed"),
+        {"ok": True, "changed": True, "undoable": False},
+        RuntimeError("second reset failed"),
+        {"ok": True, "changed": True, "undoable": False},
+    ])
+
+    monkeypatch.setattr(
+        harness,
+        "exec_ok",
+        lambda _env, route, data=None: {
+            "ok": True, "state": "connected", "pending": 0,
+            "transport": "engine_debugger",
+        } if route == "runtime/status" else {},
+    )
+
+    def reset_once(_env):
+        outcome = next(attempts)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(harness, "_fixture_hook_reset_once", reset_once)
+    monkeypatch.setattr(harness, "detach_game", lambda _env: _env.update(game_attached=False))
+    monkeypatch.setattr(
+        harness,
+        "attach_game",
+        lambda _env, recovery_restarts=0: _env.update(game_attached=True),
+    )
+    monkeypatch.setattr(harness, "_record_recovery", lambda *_args: None)
+
+    assert harness.reset_fixture(env)["changed"] is True
+    assert harness.reset_fixture(env)["changed"] is True
+    assert len(env["recovery_markers"]) == 2
+
+
 def test_failed_game_commands_do_not_increment_lifecycle_counters(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):

@@ -1,6 +1,6 @@
 ## 运行时 debugger plugin transport
 ##
-## 作为 EditorPlugin 注入，把 EngineDebugger capture "gdapi" 当作
+## 作为 EditorPlugin 注入，把 EngineDebugger capture "gdapi:protocol" 当作
 ## broker ↔ runtime_probe 双向通道。本类不持有业务状态——broker 是
 ## 真正的 pending 字典与状态机所有者。
 ##
@@ -32,7 +32,7 @@ func setup(broker: RefCounted) -> void:
 		return _lookup_session(session_id)
 	_bridge.setup(broker, lookup)
 
-## 是否希望接收 capture "gdapi"
+## 是否希望接收以 "gdapi:" 为前缀的 capture
 ##
 ## 必须返回 true,否则 _capture 不会被调用。
 ## @param name 通道名
@@ -52,11 +52,11 @@ func _setup_session(session_id: int) -> void:
 ## 接收 runtime probe 推过来的 reply / event / hello
 ##
 ## Godot 4.7 签名:`_capture(message: String, data: Array, session_id: int) -> bool`.
-## - message 是 EngineDebugger.send_message 的 sub-channel(我们约定为 "gdapi")。
+## - message 是 EngineDebugger.send_message 的完整 channel(我们约定为 "gdapi:protocol")。
 ## - data 是 probe 推送的协议数组,data[0] 是 protocol v1 字典。
 ## - session_id 是 debugger session id。
 ##
-## @param message 协议层子通道(我们只接受 "gdapi")
+## @param message 完整协议 channel(我们只接受 "gdapi:protocol")
 ## @param data 数据数组,data[0] 是 protocol v1 字典
 ## @param session_id 对应 debugger session id
 ## @return true 表示已处理

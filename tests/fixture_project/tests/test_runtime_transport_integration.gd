@@ -13,6 +13,13 @@ const ProbeTransport := preload("res://addons/gdapi/runtime/runtime_transport_fi
 const RuntimeProbe := preload("res://addons/gdapi/runtime/runtime_probe.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
+class FakeRuntimeMain extends Node:
+	var reset_calls := 0
+
+	func reset_fixture() -> Dictionary:
+		reset_calls += 1
+		return {"changed": true, "undoable": false}
+
 var passed := 0
 var failed := 0
 
@@ -28,7 +35,8 @@ func _run() -> void:
 	await test_unknown_and_duplicate_reply_are_ignored()
 	await test_timeout_then_late_reply_is_ignored()
 	await test_generation_and_priority_reject_stale_hello()
-	test_runtime_probe_rejects_generationless_engine_request()
+	test_runtime_probe_requires_stripped_protocol_channel()
+	await test_fixture_reset_uses_one_fixed_helper_and_rejects_payload()
 
 	_cleanup(_make_root())
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
@@ -277,7 +285,7 @@ func test_generation_and_priority_reject_stale_hello() -> void:
 	broker = null
 	_cleanup(root)
 
-func test_runtime_probe_rejects_generationless_engine_request() -> void:
+func test_runtime_probe_requires_stripped_protocol_channel() -> void:
 	var root := _make_root()
 	_cleanup(root)
 	DirAccess.make_dir_recursive_absolute(root)
@@ -290,14 +298,43 @@ func test_runtime_probe_rejects_generationless_engine_request() -> void:
 	probe._file_transport = transport
 	probe.record_log("info", "must remain")
 
-	var request := Protocol.request(91, "runtime/log/clear", {})
-	var accepted: bool = probe._on_runtime_capture("gdapi", [request])
+	var request := Protocol.request(91, "runtime/log/clear", {}, generation)
 	assert_eq(transport.generation(), generation, "probe adopts broker generation")
-	assert_eq(accepted, false, "generationless EngineDebugger request is ignored")
-	assert_eq(probe.ring_buffer().size(), 1, "ignored request is not dispatched or replied")
+	assert_eq(probe._on_runtime_capture("gdapi", [request]), false, "bare EngineDebugger channel is ignored")
+	assert_eq(probe._on_runtime_capture("gdapi:protocol", [request]), false, "full EngineDebugger channel is not passed to runtime callback")
+	assert_eq(probe._on_runtime_capture("protocol", [request]), true, "runtime receives stripped protocol channel")
+	assert_eq(probe.ring_buffer().size(), 0, "accepted request remains isolated from file transport")
 
 	probe.free()
 	probe = null
 	transport.stop()
 	broker = null
 	_cleanup(root)
+
+func test_fixture_reset_uses_one_fixed_helper_and_rejects_payload() -> void:
+	var fixture := FakeRuntimeMain.new()
+	fixture.name = "RuntimeMain"
+	root.add_child(fixture)
+	var probe: Node = root.get_node_or_null("GdApiRuntimeProbe")
+	assert_true(probe != null, "fixture project provides the runtime probe autoload")
+	if probe == null:
+		fixture.free()
+		return
+	probe.record_log("info", "must be cleared")
+
+	assert_true(probe.has_method("reset_shared_fixture"),
+		"probe exposes one fixed fixture reset helper")
+	if probe.has_method("reset_shared_fixture"):
+		var direct: Dictionary = probe.call("reset_shared_fixture")
+		assert_eq(direct.get("ok", false), true, "fixed helper succeeds")
+		assert_eq(fixture.reset_calls, 1, "fixed helper resets known RuntimeMain")
+		assert_eq(direct.get("cleared_logs", -1), 1,
+			"fixed helper reports the ring entries it cleared")
+		assert_eq(probe.ring_buffer().size(), 0, "fixed helper clears probe ring")
+
+	var rejected: Dictionary = await probe._dispatch_async(
+		"runtime/fixture/reset", {"op": "runtime/node/remove"})
+	assert_eq(rejected.get("code", ""), "invalid_param",
+		"internal reset rejects all payload fields")
+
+	fixture.free()

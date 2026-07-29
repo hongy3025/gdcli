@@ -83,7 +83,8 @@ func test_capture_hello_attaches_and_reply_reaches_broker() -> void:
 	var bridge: RefCounted = DebuggerBridge.new()
 	var broker: RefCounted = Broker.new()
 	var session := _attach_fake_session(bridge, broker, 17)
-	assert_true(bridge.capture("gdapi", [_valid_hello()], 17), "valid hello is handled")
+	assert_false(bridge.capture("gdapi", [_valid_hello()], 17), "bare debugger channel is rejected")
+	assert_true(bridge.capture("gdapi:protocol", [_valid_hello()], 17), "full debugger channel is handled")
 	assert_eq(broker.status().transport, "engine_debugger", "hello activates engine debugger")
 	assert_eq(broker.status().session_id, 17, "hello binds session id")
 
@@ -92,11 +93,12 @@ func test_capture_hello_attaches_and_reply_reaches_broker() -> void:
 		received.append(reply)
 	)
 	assert_eq(session.sent.size(), 1, "request is sent through fake debugger session")
-	assert_true(bridge.capture("gdapi", [Protocol.reply(request_id, true, {"generationless": true})], 17), "generationless reply is consumed")
+	assert_eq(session.sent[0].get("channel", ""), "gdapi:protocol", "session sends full debugger channel")
+	assert_true(bridge.capture("gdapi:protocol", [Protocol.reply(request_id, true, {"generationless": true})], 17), "generationless reply is consumed")
 	assert_eq(received.size(), 0, "generationless debugger reply is ignored")
 	assert_eq(broker.status().pending, 1, "generationless debugger reply leaves pending")
 	var generation: String = String(broker.status().get("generation", ""))
-	assert_true(bridge.capture("gdapi", [Protocol.reply(request_id, true, {"ready": true}, "", "", generation)], 17), "reply capture is handled")
+	assert_true(bridge.capture("gdapi:protocol", [Protocol.reply(request_id, true, {"ready": true}, "", "", generation)], 17), "reply capture is handled")
 	assert_eq(received.size(), 1, "reply reaches broker callback")
 	assert_eq(received[0].get("ok"), true, "broker receives successful reply")
 
@@ -104,7 +106,7 @@ func test_stale_session_clear_does_not_detach_active_session() -> void:
 	var bridge: RefCounted = DebuggerBridge.new()
 	var broker: RefCounted = Broker.new()
 	_attach_fake_session(bridge, broker, 23)
-	assert_true(bridge.capture("gdapi", [_valid_hello()], 23), "active hello is handled")
+	assert_true(bridge.capture("gdapi:protocol", [_valid_hello()], 23), "active hello is handled")
 	var received: Array = []
 	broker.request("runtime/status", {}, 5000, func(reply: Dictionary) -> void:
 		received.append(reply)
@@ -128,13 +130,13 @@ func test_malformed_hello_is_rejected_before_connecting() -> void:
 	_attach_fake_session(bridge, broker, 31)
 	var malformed := _valid_hello()
 	malformed["version"] = 2
-	assert_false(bridge.capture("gdapi", [malformed], 31), "wrong-version hello is rejected")
+	assert_false(bridge.capture("gdapi:protocol", [malformed], 31), "wrong-version hello is rejected")
 	assert_eq(broker.status().transport, "none", "wrong-version hello does not activate transport")
 	assert_eq(broker.status().state, "stopped", "wrong-version hello leaves broker stopped")
 
 	var malformed_shape := _valid_hello()
 	malformed_shape["id"] = "0"
-	assert_false(bridge.capture("gdapi", [malformed_shape], 31), "non-integer hello id is rejected")
+	assert_false(bridge.capture("gdapi:protocol", [malformed_shape], 31), "non-integer hello id is rejected")
 	assert_eq(broker.status().transport, "none", "malformed hello remains disconnected")
 
 func test_hello_requires_generation_metadata() -> void:
@@ -144,5 +146,5 @@ func test_hello_requires_generation_metadata() -> void:
 	var incomplete := _valid_hello()
 	var result: Dictionary = incomplete["result"]
 	result.erase("transport")
-	assert_false(bridge.capture("gdapi", [incomplete], 37), "incomplete hello is rejected")
+	assert_false(bridge.capture("gdapi:protocol", [incomplete], 37), "incomplete hello is rejected")
 	assert_eq(broker.status().transport, "none", "incomplete hello leaves broker disconnected")

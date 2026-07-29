@@ -8,7 +8,13 @@ import subprocess
 
 import pytest
 
-from .conftest import exec_ok, exec_error, runtime_counter, wait_for
+from .conftest import (
+    exec_ok,
+    exec_error,
+    fixture_script_source,
+    runtime_counter,
+    wait_for,
+)
 
 
 def start_exec(env, route, data=None):
@@ -21,6 +27,13 @@ def start_exec(env, route, data=None):
 
 def get_counter(env, name):
     return runtime_counter(env, name)
+
+
+def test_fixture_reset_releases_action_edge_state():
+    source = fixture_script_source("probe_input_action.gd")
+    assert "func reset_fixture()" in source
+    assert "_action_down = false" in source
+    assert 'Input.action_release("ui_accept")' in source
 
 
 @pytest.mark.parametrize("counter_name", ["input_keys", "input_mouse", "input_gamepad", "input_touch"])

@@ -33,6 +33,14 @@ func _run() -> void:
 	control.name = "FixtureControl"
 	scene.add_child(control)
 
+	var scalar := NodeOps.get_property({
+		"node_path": "/root/Task9Scene/ProbeInput",
+		"property": "process_mode",
+	})
+	_assert_true(scalar.get("ok", false), "scalar property get returns successfully")
+	_assert_eq(scalar.get("result", {}).get("value", null), Node.PROCESS_MODE_INHERIT,
+		"scalar property get preserves the scalar value")
+
 	_assert_permission(NodeOps.set_property({
 		"node_path": "/root/Task9Scene/ProbeInput",
 		"property": "process_mode",

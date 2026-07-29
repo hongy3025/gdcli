@@ -7,6 +7,7 @@ extends Node
 ## 仅在发生 add_action 时计数。
 
 var _target: Node = null
+var _action_down := false
 
 func _ready() -> void:
 	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")
@@ -20,4 +21,14 @@ func _input(event: InputEvent) -> void:
 		if _target == null:
 			return
 	if event.is_action_pressed("ui_accept", false):
+		if _action_down:
+			return
+		_action_down = true
 		_target.call("add_action")
+	elif event.is_action_released("ui_accept", false):
+		_action_down = false
+
+func reset_fixture() -> void:
+	_action_down = false
+	Input.action_release("ui_accept")
+	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")

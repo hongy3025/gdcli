@@ -28,3 +28,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		_target.call("add_gamepad")
 	elif event is InputEventScreenTouch:
 		_target.call("add_touch")
+
+func reset_fixture() -> void:
+	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")
