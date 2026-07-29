@@ -382,11 +382,7 @@ func _notify_pending_failures(snapshot: Array, reason: String) -> void:
 ## @param on_complete 收到 reply 或失败时调用的 callback(reply:Dictionary)
 ## @return 本次请求的整数 id(失败立即回调时返回的 id 也保留)
 func request(
-	op: String,
-	payload: Dictionary,
-	timeout_ms: int,
-	on_complete: Callable,
-	version: int = Protocol.VERSION
+	op: String, payload: Dictionary, timeout_ms: int, on_complete: Callable, version: int = 0
 ) -> int:
 	var id: int = _next_id
 	_next_id += 1

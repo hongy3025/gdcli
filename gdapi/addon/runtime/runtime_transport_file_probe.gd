@@ -213,7 +213,12 @@ func _scan_inbox(_now_msec: int) -> void:
 			inbox.remove(filename)
 			continue
 		var id: int = int(dict.id)
-		if not _claim_inbox(id, request_generation, dict.get("payload", {})):
+		if not _claim_inbox(
+			id,
+			request_generation,
+			dict.get("payload", {}),
+			int(dict.get("version", Protocol.VERSION))
+		):
 			inbox.remove(filename)
 			continue
 		# 删除 inbox 防止重复消费；领取后异步处理只拥有内存中的 request。
@@ -225,13 +230,16 @@ func _scan_inbox(_now_msec: int) -> void:
 
 
 ## 原子领取 request id；同一 id 的后续 inbox 文件只会被删除，不会再次分派。
-func _claim_inbox(id: int, generation: String = "", payload: Variant = {}) -> bool:
+func _claim_inbox(
+	id: int, generation: String = "", payload: Variant = {}, version: int = Protocol.VERSION
+) -> bool:
 	if _claimed.has(id):
 		return false
 	_claimed[id] = true
 	_inflight[id] = {
 		"deadline_msec": Time.get_ticks_msec() + _request_handler_timeout(payload),
 		"generation": generation,
+		"version": version,
 	}
 	return true
 
@@ -287,7 +295,11 @@ func _expire_inflight(now_msec: int) -> void:
 		if state.has("reply") or now_msec < int(state.get("deadline_msec", now_msec + 1)):
 			continue
 		state["reply"] = _error_reply(
-			id, "timeout", "runtime handler timed out", String(state.get("generation", ""))
+			id,
+			"timeout",
+			"runtime handler timed out",
+			String(state.get("generation", "")),
+			int(state.get("version", Protocol.VERSION))
 		)
 		_inflight[id] = state
 
@@ -309,7 +321,10 @@ func _finish_request(id: int, handler_reply: Variant) -> void:
 		_abandon_disconnected_inflight()
 		return
 	var reply: Dictionary = _make_reply(
-		id, handler_reply, String(_inflight[id].get("generation", ""))
+		id,
+		handler_reply,
+		String(_inflight[id].get("generation", "")),
+		int(_inflight[id].get("version", Protocol.VERSION))
 	)
 	var state: Dictionary = _inflight[id]
 	state["reply"] = reply
@@ -333,7 +348,7 @@ func _write_reply(id: int, reply: Dictionary) -> bool:
 ## Convert a correlatable oversized request into one bounded reply. The id is
 ## claimed before writing so duplicate inbox files cannot execute or reply twice.
 func _reject_oversized_request(request: Dictionary, verdict: Dictionary) -> void:
-	if int(request.get("version", -1)) != Protocol.VERSION:
+	if not Protocol.SUPPORTED_VERSIONS.has(int(request.get("version", -1))):
 		return
 	if String(request.get("kind", "")) != "request":
 		return
@@ -351,7 +366,8 @@ func _reject_oversized_request(request: Dictionary, verdict: Dictionary) -> void
 		id,
 		String(verdict.get("code", "invalid_param")),
 		String(verdict.get("error", "runtime request exceeds protocol bounds")),
-		generation
+		generation,
+		int(request.get("version", Protocol.VERSION))
 	)
 	_inflight[id] = state
 	if _write_reply(id, state.reply):
@@ -380,17 +396,24 @@ func _abandon_disconnected_inflight() -> void:
 
 
 ## 把 handler body 转为一个已验证且有界的 protocol reply。
-func _make_reply(id: int, handler_reply: Variant, generation: String = "") -> Dictionary:
+func _make_reply(
+	id: int, handler_reply: Variant, generation: String = "", version: int = Protocol.VERSION
+) -> Dictionary:
 	if typeof(handler_reply) != TYPE_DICTIONARY:
 		return _error_reply(
-			id, "invalid_param", "runtime handler returned an invalid reply", generation
+			id, "invalid_param", "runtime handler returned an invalid reply", generation, version
 		)
 	var reply_body: Dictionary = handler_reply
 	if typeof(reply_body.get("ok", null)) != TYPE_BOOL:
 		return _error_reply(
-			id, "invalid_param", "runtime handler reply must contain boolean ok", generation
+			id,
+			"invalid_param",
+			"runtime handler reply must contain boolean ok",
+			generation,
+			version
 		)
-	var reply := Protocol.reply(
+	var reply := Protocol.reply_for_version(
+		version,
 		id,
 		bool(reply_body.ok),
 		reply_body.get("result", null),
@@ -404,13 +427,16 @@ func _make_reply(id: int, handler_reply: Variant, generation: String = "") -> Di
 			id,
 			String(verdict.get("code", "invalid_param")),
 			"runtime handler reply is invalid: %s" % String(verdict.get("error", "invalid reply")),
-			generation
+			generation,
+			version
 		)
 	return reply
 
 
-func _error_reply(id: int, code: String, error: String, generation: String = "") -> Dictionary:
-	return Protocol.reply(id, false, null, error, code, generation)
+func _error_reply(
+	id: int, code: String, error: String, generation: String = "", version: int = Protocol.VERSION
+) -> Dictionary:
+	return Protocol.reply_for_version(version, id, false, null, error, code, generation)
 
 
 ## 私有:分派 request 到已注册 handler,或返回 not_supported

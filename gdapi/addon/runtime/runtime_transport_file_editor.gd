@@ -1,4 +1,5 @@
 ## 文件 transport —— 编辑器侧 (plugin)
+# gdlint: ignore=max-returns
 ##
 ## 每帧扫描 res://.godot/gdapi_runtime/*/hello.json 发现 probe;
 ## 通过 send callable 注入 GdApiRuntimeBroker,与 EngineDebugger transport
@@ -93,7 +94,7 @@ func active_probe_ids() -> Array:
 
 
 ## 每帧调用:扫 hello、扫 outbox
-func tick(now_msec: int) -> void:
+func tick(_now_msec: int) -> void:
 	if not _started:
 		return
 	_scan_hello_files()
@@ -154,6 +155,12 @@ func _attach_probe(probe_id: String, hello: Dictionary) -> void:
 	if not attached:
 		_cleanup_probe_dir(probe_id)
 		return
+	if _broker.has_method("negotiate"):
+		var negotiated := int(_broker.call("negotiate", _hello_versions(hello)))
+		if negotiated <= 0:
+			_broker.call("detach_file_transport", "no common protocol version", generation)
+			_cleanup_probe_dir(probe_id)
+			return
 	_probes[probe_id] = {"attached": true, "generation": generation}
 
 
@@ -228,6 +235,16 @@ func _hello_generation(hello: Dictionary) -> String:
 	return String(result.get("generation", "")) if typeof(result) == TYPE_DICTIONARY else ""
 
 
+func _hello_versions(hello: Dictionary) -> Array:
+	var result: Variant = hello.get("result", {})
+	return (
+		result.get("supported_versions", [Protocol.VERSION])
+		if typeof(result) == TYPE_DICTIONARY
+		else [Protocol.VERSION]
+	)
+
+
+# gdlint: ignore=max-returns
 func _valid_hello(hello: Dictionary) -> bool:
 	if hello.is_empty() or int(hello.get("version", -1)) != Protocol.VERSION:
 		return false
@@ -236,25 +253,25 @@ func _valid_hello(hello: Dictionary) -> bool:
 	if String(hello.get("kind", "")) != "event" or String(hello.get("event", "")) != "hello":
 		return false
 	var result: Variant = hello.get("result", null)
-	if (
-		typeof(result) != TYPE_DICTIONARY
-		or int(result.get("protocol_version", -1)) != Protocol.VERSION
-	):
+	if typeof(result) != TYPE_DICTIONARY:
 		return false
+	return _valid_hello_result(result)
+
+
+func _valid_hello_result(result: Dictionary) -> bool:
+	var valid := int(result.get("protocol_version", -1)) == Protocol.VERSION
 	var raw_generation: Variant = result.get("generation", null)
-	if typeof(raw_generation) != TYPE_STRING or String(raw_generation).is_empty():
-		return false
+	valid = (
+		valid and typeof(raw_generation) == TYPE_STRING and not String(raw_generation).is_empty()
+	)
 	var raw_pid: Variant = result.get("pid", null)
-	if typeof(raw_pid) != TYPE_INT or int(raw_pid) <= 0:
-		return false
+	valid = valid and typeof(raw_pid) == TYPE_INT and int(raw_pid) > 0
 	var raw_started_at: Variant = result.get("started_at", null)
-	if typeof(raw_started_at) != TYPE_INT and typeof(raw_started_at) != TYPE_FLOAT:
-		return false
-	if float(raw_started_at) <= 0.0:
-		return false
+	valid = valid and (typeof(raw_started_at) == TYPE_INT or typeof(raw_started_at) == TYPE_FLOAT)
+	valid = valid and float(raw_started_at) > 0.0
 	var transport := String(result.get("transport", ""))
-	if transport != "file" and transport != "engine_debugger":
-		return false
+	valid = valid and (transport == "file" or transport == "engine_debugger")
+	return valid
 	var broker_generation := ""
 	if _broker != null and _broker.has_method("status"):
 		broker_generation = String(_broker.call("status").get("generation", ""))

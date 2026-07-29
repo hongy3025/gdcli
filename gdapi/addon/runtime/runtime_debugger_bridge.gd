@@ -1,4 +1,5 @@
 ## Testable EngineDebugger bridge shared by the native EditorDebuggerPlugin.
+# gdlint: ignore=max-returns
 ##
 ## This class owns the protocol-facing capture/setup/clear behavior. Keeping
 ## it free of the virtual EditorDebuggerPlugin base makes the behavior testable
@@ -32,29 +33,38 @@ func set_session_override(session_id: int, session: RefCounted) -> void:
 	_sessions[session_id] = session
 
 
+# gdlint: ignore=max-returns
 func capture(message: String, data: Array, session_id: int) -> bool:
 	if message != DEBUGGER_CHANNEL:
 		return false
-	if _broker == null:
-		return true
-	if data.is_empty():
+	if _broker == null or data.is_empty():
 		return true
 	var payload: Variant = data[0]
 	if typeof(payload) != TYPE_DICTIONARY:
 		return false
 	var dict: Dictionary = payload
 	if String(dict.get("event", "")) == "hello":
-		if not _valid_hello(dict):
-			return false
-		var hello_result: Dictionary = dict.get("result", {})
-		if not _attach_to_session(session_id, String(hello_result.get("generation", ""))):
-			return false
-		_active_session_id = session_id
-		_broker.mark_connected()
-		if _broker.has_method("_set_active_transport"):
-			_broker.call("_set_active_transport", "engine_debugger")
-		return true
+		return _capture_hello(dict, session_id)
 	_broker.receive(dict)
+	return true
+
+
+func _capture_hello(dict: Dictionary, session_id: int) -> bool:
+	if not _valid_hello(dict):
+		return false
+	var hello_result: Dictionary = dict.get("result", {})
+	if not _attach_to_session(session_id, String(hello_result.get("generation", ""))):
+		return false
+	if _broker.has_method("negotiate"):
+		var versions: Array = hello_result.get("supported_versions", [Protocol.VERSION])
+		var negotiated := int(_broker.call("negotiate", versions))
+		if negotiated <= 0:
+			_broker.call("detach_engine_debugger", "no common protocol version")
+			return false
+	_active_session_id = session_id
+	_broker.mark_connected()
+	if _broker.has_method("_set_active_transport"):
+		_broker.call("_set_active_transport", "engine_debugger")
 	return true
 
 
@@ -72,6 +82,7 @@ func clear(session_id: int) -> void:
 		_broker.detach("session cleared")
 
 
+# gdlint: ignore=max-returns
 func _valid_hello(payload: Dictionary) -> bool:
 	# Protocol.event(0, "hello", ...) is the existing runtime hello shape;
 	# normal request/reply validation still requires positive ids.
@@ -86,24 +97,23 @@ func _valid_hello(payload: Dictionary) -> bool:
 	var result: Variant = payload.get("result", null)
 	if typeof(result) != TYPE_DICTIONARY:
 		return false
-	if typeof(result.get("protocol_version")) != TYPE_INT:
-		return false
-	if result.has("generation") and typeof(result.get("generation")) != TYPE_STRING:
-		return false
-	if not result.has("generation") or String(result.get("generation", "")).is_empty():
-		return false
+	return _valid_hello_result(result)
+
+
+func _valid_hello_result(result: Dictionary) -> bool:
+	var valid := typeof(result.get("protocol_version")) == TYPE_INT
+	valid = (
+		valid and (not result.has("generation") or typeof(result.get("generation")) == TYPE_STRING)
+	)
+	valid = valid and not String(result.get("generation", "")).is_empty()
 	var raw_pid: Variant = result.get("pid", null)
-	if typeof(raw_pid) != TYPE_INT or int(raw_pid) <= 0:
-		return false
+	valid = valid and typeof(raw_pid) == TYPE_INT and int(raw_pid) > 0
 	var raw_started_at: Variant = result.get("started_at", null)
-	if typeof(raw_started_at) != TYPE_INT and typeof(raw_started_at) != TYPE_FLOAT:
-		return false
-	if float(raw_started_at) <= 0.0:
-		return false
+	valid = valid and (typeof(raw_started_at) == TYPE_INT or typeof(raw_started_at) == TYPE_FLOAT)
+	valid = valid and float(raw_started_at) > 0.0
 	var transport := String(result.get("transport", ""))
-	if transport != "file" and transport != "engine_debugger":
-		return false
-	return int(result.get("protocol_version")) == Protocol.VERSION
+	valid = valid and (transport == "file" or transport == "engine_debugger")
+	return valid and int(result.get("protocol_version")) == Protocol.VERSION
 
 
 func _attach_to_session(session_id: int, generation: String = "") -> bool:
