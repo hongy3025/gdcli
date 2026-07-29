@@ -50,6 +50,9 @@ static func execute(source: String, inputs: Dictionary, policy: Dictionary) -> D
 	var value: Variant = expression.execute(values, null, false)
 	if expression.has_execute_failed():
 		return _error(ErrorCodes.INVALID_PARAM, "expression execution failed")
+	var result_verdict := _validate_result(value)
+	if not result_verdict.ok:
+		return result_verdict
 	return {
 		"ok": true,
 		"value": VariantCodec.from_variant(value),
@@ -60,54 +63,72 @@ static func execute(source: String, inputs: Dictionary, policy: Dictionary) -> D
 
 
 static func _validate_source(source: String, names: Array[String]) -> Dictionary:
-	if (
-		source.strip_edges().is_empty()
-		or source.contains(";")
-		or source.contains("\n")
-		or source.contains("\r")
-	):
-		return _error(ErrorCodes.PERMISSION_DENIED, "statements are not permitted")
-	for token in [
-		"=",
-		"load",
-		"preload",
-		"Engine",
-		"OS",
-		"ProjectSettings",
-		"ClassDB",
-		"get_tree",
-		"while",
-		"for",
-		"func",
-		"await",
-		"yield",
-		"Callable",
-		"Object"
-	]:
-		if source.contains(token):
-			return _error(ErrorCodes.PERMISSION_DENIED, "expression contains a forbidden token")
-	if source.contains("."):
-		return _error(ErrorCodes.PERMISSION_DENIED, "method and property access are not permitted")
-	for global_name in ALLOWED_GLOBALS:
-		if source.contains(global_name + "("):
-			continue
-	# Expression only receives explicitly named inputs; constructors are accepted by parser.
+	if source.strip_edges().is_empty():
+		return _error(ErrorCodes.INVALID_PARAM, "source is required")
+	var allowed_names := {
+		"true": true, "false": true, "null": true, "and": true, "or": true, "not": true
+	}
 	for name in names:
-		if name.contains("."):
+		if not name.is_valid_identifier():
 			return _error(ErrorCodes.INVALID_PARAM, "invalid input name")
+		allowed_names[name] = true
+	for name in ALLOWED_GLOBALS:
+		allowed_names[name] = true
+	var scan := _tokenize_identifiers(source)
+	if not scan.ok:
+		return scan
+	for identifier in scan.identifiers:
+		if not allowed_names.has(identifier):
+			return _error(ErrorCodes.PERMISSION_DENIED, "identifier is not allowed")
+		if scan.calls.has(identifier) and not ALLOWED_GLOBALS.has(identifier):
+			return _error(ErrorCodes.PERMISSION_DENIED, "function is not allowed")
+	return {"ok": true}
+
+
+static func _tokenize_identifiers(source: String) -> Dictionary:
+	var identifiers: Array[String] = []
+	var calls: Dictionary = {}
+	for forbidden in [".", ";", "\n", "\r", "[", "]", "{", "}", ":", "\\"]:
+		if source.contains(forbidden):
+			return _error(
+				ErrorCodes.PERMISSION_DENIED, "statements and member access are not permitted"
+			)
+	var identifier_regex := RegEx.new()
+	identifier_regex.compile("[A-Za-z_][A-Za-z0-9_]*")
+	for match in identifier_regex.search_all(source):
+		identifiers.append(match.get_string())
+	var call_regex := RegEx.new()
+	call_regex.compile("([A-Za-z_][A-Za-z0-9_]*)\\s*\\(")
+	for match in call_regex.search_all(source):
+		calls[match.get_string(1)] = true
+	var assignment_regex := RegEx.new()
+	assignment_regex.compile("(?<![<>=!])=(?!=)")
+	if assignment_regex.search(source) != null:
+		return _error(ErrorCodes.PERMISSION_DENIED, "assignment is not permitted")
+	return {"ok": true, "identifiers": identifiers, "calls": calls}
+
+
+static func _validate_result(value: Variant) -> Dictionary:
+	if _contains_object(value):
+		return _error(ErrorCodes.PERMISSION_DENIED, "expression result is not a permitted Variant")
 	return {"ok": true}
 
 
 static func _contains_object(value: Variant) -> bool:
-	if typeof(value) == TYPE_OBJECT or typeof(value) == TYPE_RID or typeof(value) == TYPE_CALLABLE:
+	if (
+		typeof(value) == TYPE_OBJECT
+		or typeof(value) == TYPE_RID
+		or typeof(value) == TYPE_CALLABLE
+		or typeof(value) == TYPE_SIGNAL
+	):
 		return true
 	if typeof(value) == TYPE_ARRAY:
 		for item in value:
 			if _contains_object(item):
 				return true
 	if typeof(value) == TYPE_DICTIONARY:
-		for item in value.values():
-			if _contains_object(item):
+		for key in value:
+			if _contains_object(key) or _contains_object(value[key]):
 				return true
 	return false
 

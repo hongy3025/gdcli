@@ -28,7 +28,8 @@ func dispatch(
 	res: GdApiResponse,
 	op: String,
 	mutation: bool = false,
-	public_route: String = ""
+	public_route: String = "",
+	version: int = Protocol.VERSION
 ) -> void:
 	if res == null or res.is_sent():
 		return
@@ -49,7 +50,9 @@ func dispatch(
 
 	var payload: Dictionary = payload_variant.duplicate(true)
 	payload["timeout_ms"] = timeout
-	var protocol_verdict := Protocol.validate_request(op, payload)
+	var protocol_verdict := Protocol.validate_message(
+		Protocol.request_for_version(version, 1, op, payload)
+	)
 	if not bool(protocol_verdict.get("ok", false)):
 		_reject(req, res, op, mutation, protocol_verdict)
 		return
@@ -63,18 +66,43 @@ func dispatch(
 			_audit(op, payload, disconnected, false, ErrorCodes.CONFLICT)
 		_send_error(res, disconnected)
 		return
+	var broker_status: Dictionary = broker.status() if broker.has_method("status") else {}
+	if (
+		version >= Protocol.VERSION_V2
+		and (
+			String(broker_status.get("state", "stopped")) != "connected"
+			or int(broker_status.get("protocol_version", 0)) < version
+		)
+	):
+		var unavailable := {
+			"ok": false, "code": ErrorCodes.CONFLICT, "error": "runtime protocol is not negotiated"
+		}
+		if mutation:
+			_audit(op, payload, unavailable, false, ErrorCodes.CONFLICT)
+		_send_error(res, unavailable)
+		return
 
 	var completed := false
-	broker.request(
-		op,
-		payload,
-		broker_timeout,
-		func(reply: Dictionary) -> void:
-			if completed or res.is_sent():
-				return
-			completed = true
-			_complete(res, op, payload, mutation, reply)
-	)
+	var callback := func(reply: Dictionary) -> void:
+		if completed or res.is_sent():
+			return
+		completed = true
+		_complete(res, op, payload, mutation, reply)
+	if version == Protocol.VERSION:
+		broker.request(op, payload, broker_timeout, callback)
+	else:
+		broker.request(op, payload, broker_timeout, callback, version)
+
+
+func dispatch_versioned(
+	req: GdApiRequest,
+	res: GdApiResponse,
+	op: String,
+	version: int,
+	mutation: bool = false,
+	public_route: String = ""
+) -> void:
+	dispatch(req, res, op, mutation, public_route, version)
 
 
 ## Return the validated operation timeout in milliseconds.
@@ -120,6 +148,7 @@ static func redact(value: Variant) -> Variant:
 	return AuditLog.summarize(value)
 
 
+# gdlint: ignore=max-returns
 func _validate_boundary(req: GdApiRequest, op: String, public_route: String = "") -> Dictionary:
 	if req == null:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request is required"}

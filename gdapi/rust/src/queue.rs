@@ -94,6 +94,10 @@ impl PendingMap {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     /// 清空所有待响应请求，向每个通道发送 503 响应。
     ///
     /// 在服务器关闭时调用，确保所有等待中的连接能收到错误响应。

@@ -24,6 +24,7 @@ const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
 const RingBuffer := preload("res://addons/gdapi/runtime/runtime_ring_buffer.gd")
 const FileTransport := preload("res://addons/gdapi/runtime/runtime_transport_file_probe.gd")
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
+const EvalService := preload("res://addons/gdapi/runtime/services/eval_service.gd")
 const DEBUGGER_CHANNEL_PREFIX := "gdapi"
 const DEBUGGER_CHANNEL := "gdapi:protocol"
 const DEBUGGER_CALLBACK_CHANNEL := "protocol"
@@ -51,6 +52,7 @@ var _ring: RefCounted = RingBuffer.new(2000)
 
 ## 文件 transport 实例;非编辑器进程下 _ready() 中创建
 var _file_transport: RefCounted = null
+# gdlint: ignore=class-definitions-order
 var file_transport_last_disconnect_abandoned: int:
 	get:
 		if (
@@ -137,6 +139,7 @@ func _on_hello_timer_timeout() -> void:
 ## 校验后再分发,可以向 reply 中加入业务字段。
 ##
 ## @return true 表示已处理, false 表示忽略
+# gdlint: ignore=max-returns
 func _on_runtime_capture(channel: String, args: Array) -> bool:
 	if channel != DEBUGGER_CALLBACK_CHANNEL:
 		return false
@@ -170,7 +173,8 @@ func _dispatch(request_msg: Dictionary) -> void:
 	var payload: Dictionary = request_msg.get("payload", {})
 	var reply: Dictionary = await _dispatch_async(op, payload)
 	var ok: bool = bool(reply.get("ok", false))
-	var message: Dictionary = Protocol.reply(
+	var message: Dictionary = Protocol.reply_for_version(
+		int(request_msg.get("version", Protocol.VERSION)),
 		id,
 		ok,
 		reply.get("result", {}),
@@ -221,7 +225,7 @@ func _generation_matches(request_msg: Dictionary) -> bool:
 
 
 func _send_request_rejection(request_msg: Dictionary, verdict: Dictionary) -> bool:
-	if int(request_msg.get("version", -1)) != Protocol.VERSION:
+	if not Protocol.SUPPORTED_VERSIONS.has(int(request_msg.get("version", -1))):
 		return false
 	if String(request_msg.get("kind", "")) != "request":
 		return false
@@ -240,8 +244,18 @@ func _send_request_rejection(request_msg: Dictionary, verdict: Dictionary) -> bo
 
 
 ## 把 op 转成对应 reply
+# gdlint: ignore=max-returns
 func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 	match op:
+		"eval":
+			return EvalService.execute(
+				String(payload.get("source", "")),
+				payload.get("inputs", {}),
+				{
+					"max_source_bytes": 16384,
+					"allowed_input_keys": payload.get("allowed_input_keys", [])
+				}
+			)
 		"runtime/status":
 			return _op_status(payload)
 		"runtime/scene/tree":
@@ -442,6 +456,7 @@ func _op_status(_payload: Dictionary) -> Dictionary:
 		"result":
 		{
 			"protocol_version": Protocol.VERSION,
+			"supported_versions": Protocol.SUPPORTED_VERSIONS,
 			"editor_connected": true,
 			"session_started_at": Time.get_unix_time_from_system(),
 		},
@@ -565,6 +580,7 @@ func _send_hello() -> void:
 			"hello",
 			{
 				"protocol_version": Protocol.VERSION,
+				"supported_versions": Protocol.SUPPORTED_VERSIONS,
 				"node": OS.get_processor_name(),
 				"generation":
 				String(_file_transport.generation()) if _file_transport != null else "",

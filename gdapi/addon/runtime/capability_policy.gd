@@ -35,6 +35,7 @@ const CAPABILITY_FIELDS := {
 		"hosts",
 		"ports",
 		"allow_private",
+		"max_redirects",
 		"max_timeout_ms",
 		"max_response_bytes",
 	],
@@ -154,6 +155,9 @@ func _is_valid_capability(name: String, capability: Dictionary) -> bool:
 					return false
 			"allow_private":
 				if typeof(value) != TYPE_BOOL:
+					return false
+			"max_redirects":
+				if not _is_json_integer(value) or int(value) < 0 or int(value) > 5:
 					return false
 	return true
 

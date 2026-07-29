@@ -1,21 +1,7 @@
 """M4 bridge registration is public while M3 runtime routes stay closed."""
 
 from .conftest import command_doc, exec_ok
-
-
-M4_ROUTES = {
-    "animation/create", "animation/delete", "animation/play", "animation/stop",
-    "animation/track/add", "animation/track/remove", "animation/key/add", "animation/key/remove",
-    "animation_tree/state/add", "animation_tree/transition/add", "animation_tree/blend/set",
-    "tilemap/info", "tilemap/cell/get", "tilemap/cell/set", "tilemap/rect/fill", "tilemap/layer/clear", "tilemap/used_cells",
-    "material/create", "material/info", "material/set", "material/assign", "material/duplicate", "material/save",
-    "shader/read", "shader/write", "shader/uniforms", "shader/material/create", "shader/param/set",
-    "audio/bus/list", "audio/bus/add", "audio/bus/remove", "audio/player/create", "audio/play", "audio/stop",
-    "ui/control/set_anchor", "ui/text/set", "ui/layout/build",
-    "theme/create", "theme/color/set", "theme/constant/set", "theme/font_size/set", "theme/stylebox/set",
-    "physics/body/create", "physics/shape/create", "physics/layer/set", "physics/raycast", "physics/joint/create",
-    "navigation/region/list", "navigation/mesh/bake", "navigation/path/get", "navigation/agent/target",
-}
+from e2e.route_manifests import M3_RUNTIME_ROUTES, M4_ROUTES
 
 
 def test_m4_routes_are_exactly_discoverable_and_documented(m4_env):
@@ -39,4 +25,5 @@ def test_m4_bridge_does_not_add_runtime_routes(m4_env):
     """Publishing an M4 bridge under runtime/** would violate the M3 contract."""
     routes = set(exec_ok(m4_env, "gdapi/routes")["routes"])
     runtime_routes = {route for route in routes if route.startswith("runtime/")}
-    assert len(runtime_routes) == 35
+    assert not (M4_ROUTES & runtime_routes)
+    assert runtime_routes == M3_RUNTIME_ROUTES | {"runtime/eval"}

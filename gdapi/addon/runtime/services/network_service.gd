@@ -3,13 +3,14 @@ class_name GdApiNetworkService
 extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
+const TargetGuard := preload("res://addons/gdapi/runtime/services/network_target_guard.gd")
 
 
 static func validate(body: Dictionary, policy: Dictionary) -> Dictionary:
 	var url := String(body.get("url", ""))
 	var parts := url.split("://", true, 1)
-	if parts.size() != 2 or parts[0].to_lower() not in policy.get("schemes", []):
-		return _error(ErrorCodes.PERMISSION_DENIED, "URL scheme is not allowed")
+	if parts.size() != 2:
+		return _error(ErrorCodes.INVALID_PARAM, "URL scheme is required")
 	var authority := parts[1].split("/", true, 1)[0]
 	if authority.contains("@") or url.contains("#"):
 		return _error(ErrorCodes.INVALID_PARAM, "URL credentials and fragments are not allowed")
@@ -19,21 +20,9 @@ static func validate(body: Dictionary, policy: Dictionary) -> Dictionary:
 		var fields := authority.rsplit(":", true, 1)
 		host = fields[0]
 		port = int(fields[1])
-	var hosts: Array = policy.get("hosts", [])
-	var allowed := hosts.has(host)
-	for item in hosts:
-		if (
-			String(item).begins_with("*.")
-			and (
-				host == String(item).trim_prefix("*.")
-				or host.ends_with("." + String(item).trim_prefix("*."))
-			)
-		):
-			allowed = true
-	if not allowed or not policy.get("ports", []).has(port):
-		return _error(ErrorCodes.PERMISSION_DENIED, "network target is not allowed")
-	if not bool(policy.get("allow_private", false)) and _is_private_host(host):
-		return _error(ErrorCodes.PERMISSION_DENIED, "private network target is not allowed")
+	var target := TargetGuard.authorize(url, policy)
+	if not target.ok:
+		return target
 	var method := String(body.get("method", "GET")).to_upper()
 	if method not in ["GET", "HEAD"]:
 		return _error(ErrorCodes.PERMISSION_DENIED, "HTTP method is not allowed")
@@ -48,7 +37,11 @@ static func validate(body: Dictionary, policy: Dictionary) -> Dictionary:
 		return _error(ErrorCodes.INVALID_PARAM, "request limits exceed policy")
 	return {
 		"ok": true,
-		"url": url,
+		"url": target.url,
+		"scheme": target.scheme,
+		"host": target.host,
+		"port": target.port,
+		"addresses": target.addresses,
 		"method": method,
 		"timeout_ms": timeout,
 		"max_response_bytes": cap,
@@ -111,17 +104,6 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 		node.queue_free()
 		return _error(ErrorCodes.GODOT_ERROR, "HTTP request could not start")
 	return {"ok": true, "state": state}
-
-
-static func _is_private_host(host: String) -> bool:
-	return (
-		host == "localhost"
-		or host == "127.0.0.1"
-		or host == "::1"
-		or host.begins_with("10.")
-		or host.begins_with("192.168.")
-		or host.begins_with("172.16.")
-	)
 
 
 static func _error(code: String, message: String) -> Dictionary:

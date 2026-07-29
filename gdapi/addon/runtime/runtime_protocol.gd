@@ -41,11 +41,18 @@ const DENIED_OPS := {
 static func request(
 	id: int, op: String, payload: Variant = null, generation: String = ""
 ) -> Dictionary:
+	return request_for_version(
+		VERSION, id, op, payload if typeof(payload) == TYPE_DICTIONARY else {}, generation
+	)
+
+
+static func request_for_version(
+	version: int, id: int, op: String, payload: Dictionary = {}, generation: String = ""
+) -> Dictionary:
 	var normalized: Dictionary = {}
-	if typeof(payload) == TYPE_DICTIONARY:
-		normalized = payload
+	normalized = payload.duplicate(true)
 	var message := {
-		"version": VERSION,
+		"version": version,
 		"id": int(id),
 		"kind": "request",
 		"op": op,
@@ -72,8 +79,20 @@ static func reply(
 	code: String = "",
 	generation: String = ""
 ) -> Dictionary:
+	return reply_for_version(VERSION, id, ok, result, error, code, generation)
+
+
+static func reply_for_version(
+	version: int,
+	id: int,
+	ok: bool,
+	result: Variant = null,
+	error: String = "",
+	code: String = "",
+	generation: String = ""
+) -> Dictionary:
 	var message: Dictionary = {
-		"version": VERSION,
+		"version": version,
 		"id": int(id),
 		"kind": "reply",
 		"ok": ok,

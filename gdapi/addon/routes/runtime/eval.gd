@@ -1,10 +1,8 @@
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 const Policy := preload("res://addons/gdapi/runtime/capability_policy.gd")
-const Service := preload("res://addons/gdapi/runtime/services/eval_service.gd")
-const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
-const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
+const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 const ROUTE := "runtime/eval"
 
 
@@ -16,19 +14,10 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		)
 		res.error(gate.error, gate.code, ErrorCodes.http_status(gate.code))
 		return
-	var broker = Engine.get_meta("gdapi_runtime_broker", null)
-	if broker == null or not broker.has_method("request"):
-		res.error("runtime is not connected", ErrorCodes.CONFLICT, 409)
-		return
-	var source := String(req.get_body("source", ""))
-	var inputs: Dictionary = req.get_body("inputs", {})
-	var result := Service.execute(source, inputs, Policy.new().settings("runtime_eval"))
-	if not result.ok:
-		AuditLog.record(ROUTE, "dangerous", {"force": true}, false, result.code)
-		res.error(result.error, result.code, ErrorCodes.http_status(result.code))
-		return
-	AuditLog.record(ROUTE, "dangerous", {"force": true, "type": result.type}, true, "")
-	res.json(result)
+	var settings: Dictionary = Policy.new().settings("runtime_eval")
+	if typeof(req.body.get("inputs", {})) == TYPE_DICTIONARY:
+		req.body["allowed_input_keys"] = settings.get("allowed_input_keys", [])
+	dispatch_versioned(req, res, "eval", Protocol.VERSION_V2, true, ROUTE)
 
 
 func doc() -> GdApiRouteDoc:

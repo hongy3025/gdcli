@@ -154,6 +154,7 @@ func _write_hello_file() -> void:
 			"hello",
 			{
 				"protocol_version": Protocol.VERSION,
+				"supported_versions": Protocol.SUPPORTED_VERSIONS,
 				"node": OS.get_processor_name(),
 				"generation": _generation,
 				"pid": OS.get_process_id(),

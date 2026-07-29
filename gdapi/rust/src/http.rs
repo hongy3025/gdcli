@@ -168,7 +168,7 @@ pub fn try_write_response(
     let total_bytes = checked_response_len(header_bytes, body.len())?;
     let mut out = Vec::new();
     out.try_reserve_exact(total_bytes)
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "response allocation failed"))?;
+        .map_err(|_| io::Error::other("response allocation failed"))?;
 
     write!(&mut out, "HTTP/1.1 {} {}\r\n", status, reason)?;
     for (k, v) in headers {

@@ -52,6 +52,7 @@ var _file_sender: Callable = Callable()
 var _file_connected: bool = false
 
 var _active_transport: String = "none"
+var _negotiated_version: int = Protocol.VERSION
 
 
 ## 返回当前 broker 的可观测状态
@@ -67,7 +68,8 @@ func status() -> Dictionary:
 		pending_count += 1
 	return {
 		"state": _state,
-		"protocol_version": Protocol.VERSION,
+		"protocol_version": _negotiated_version,
+		"supported_versions": Protocol.SUPPORTED_VERSIONS,
 		"session_id": _session_id,
 		"pending": pending_count,
 		"broker_registered": Engine.has_meta("gdapi_runtime_broker"),
@@ -138,8 +140,22 @@ func mark_connected() -> void:
 		return
 	if _state == "connecting":
 		_state = "connected"
-	_engine_connected = true
+		_engine_connected = true
 	_select_transport_sender()
+
+
+## Select the highest protocol version shared with the probe.
+func negotiate(probe_versions: Array) -> int:
+	var common: Array[int] = []
+	for version in probe_versions:
+		if typeof(version) == TYPE_INT and Protocol.SUPPORTED_VERSIONS.has(version):
+			common.append(int(version))
+	if common.is_empty():
+		_negotiated_version = 0
+		return 0
+	common.sort()
+	_negotiated_version = common.back()
+	return _negotiated_version
 
 
 ## attach file transport(由 editor 侧文件 transport manager 调用)
@@ -277,6 +293,7 @@ func _clear_transports() -> void:
 	_file_probe_id = ""
 	_active_transport = "none"
 	_state = "stopped"
+	_negotiated_version = Protocol.VERSION
 	_last_attach_accepted = true
 
 
@@ -364,7 +381,13 @@ func _notify_pending_failures(snapshot: Array, reason: String) -> void:
 ## @param timeout_ms 超时毫秒,<=0 时默认 5000
 ## @param on_complete 收到 reply 或失败时调用的 callback(reply:Dictionary)
 ## @return 本次请求的整数 id(失败立即回调时返回的 id 也保留)
-func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Callable) -> int:
+func request(
+	op: String,
+	payload: Dictionary,
+	timeout_ms: int,
+	on_complete: Callable,
+	version: int = Protocol.VERSION
+) -> int:
 	var id: int = _next_id
 	_next_id += 1
 	if _state == "stopped":
@@ -382,7 +405,24 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 			)
 		return id
 	var safe_payload: Dictionary = payload
-	var message: Dictionary = Protocol.request(id, op, safe_payload, _generation)
+	var selected_version := version if version > 0 else _negotiated_version
+	if selected_version > _negotiated_version and _negotiated_version < selected_version:
+		if on_complete.is_valid():
+			(
+				on_complete
+				. call(
+					{
+						"ok": false,
+						"code": "conflict",
+						"error": "protocol version is not negotiated",
+						"request_id": id,
+					}
+				)
+			)
+		return id
+	var message: Dictionary = Protocol.request_for_version(
+		selected_version, id, op, safe_payload, _generation
+	)
 	var verdict: Dictionary = Protocol.validate_message(message)
 	if not bool(verdict.get("ok", false)):
 		if on_complete.is_valid():
@@ -420,13 +460,14 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 ## 处理一条来自 runtime 的回复（reply）或推送（event）
 ##
 ## @param message runtime 推过来的字典
+# gdlint: ignore=max-returns
 func receive(message: Variant) -> void:
 	# The editor broker remains on v1 until a session explicitly negotiates v2.
 	# Protocol.validate_message accepts v2 for the M6 probe boundary, but an
 	# unnegotiated v2 reply must not consume a v1 pending request.
 	if (
 		typeof(message) != TYPE_DICTIONARY
-		or int(Dictionary(message).get("version", -1)) != Protocol.VERSION
+		or int(Dictionary(message).get("version", -1)) != _negotiated_version
 	):
 		return
 	var verdict: Dictionary = Protocol.validate_message(message)
@@ -460,11 +501,12 @@ func receive(message: Variant) -> void:
 ## A size-invalid reply still contains enough bounded envelope metadata to
 ## correlate it with one live request. Complete that request immediately so a
 ## transport boundary cannot turn an explicit bound violation into a timeout.
+# gdlint: ignore=max-returns
 func _complete_oversized_reply(message: Variant, verdict: Dictionary) -> void:
 	if typeof(message) != TYPE_DICTIONARY:
 		return
 	var dict: Dictionary = message
-	if int(dict.get("version", -1)) != Protocol.VERSION:
+	if int(dict.get("version", -1)) != _negotiated_version:
 		return
 	if String(dict.get("kind", "")) != "reply":
 		return

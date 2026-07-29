@@ -168,10 +168,8 @@ pub fn render_command_help(body: &str) -> Cow<'_, str> {
 
     // Returns 部分
     match doc.get("returns") {
-        Some(Value::String(s)) => {
-            if !s.is_empty() {
-                output.push_str(&format!("\nReturns:\n  {}\n", s));
-            }
+        Some(Value::String(s)) if !s.is_empty() => {
+            output.push_str(&format!("\nReturns:\n  {}\n", s));
         }
         Some(Value::Object(obj)) => {
             let returns_desc = obj

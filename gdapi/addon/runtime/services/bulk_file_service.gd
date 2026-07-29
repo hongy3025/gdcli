@@ -40,14 +40,28 @@ static func delete(body: Dictionary) -> Dictionary:
 		):
 			_rollback_manifest(manifest)
 			return _error(ErrorCodes.GODOT_ERROR, "batch delete rolled back")
-		manifest.append({"source": source, "trash": destination})
 		var uid := source + ".uid"
+		var manifest_entry := {
+			"source": source,
+			"trash": destination,
+			"uid_source": uid,
+			"uid_trash": destination + ".uid"
+		}
 		if FileAccess.file_exists(ProjectSettings.globalize_path(uid)):
 			var uid_destination := destination + ".uid"
+			if (
+				DirAccess.rename_absolute(
+					ProjectSettings.globalize_path(uid),
+					ProjectSettings.globalize_path(uid_destination)
+				)
+				!= OK
+			):
+			_rollback_manifest(manifest)
 			DirAccess.rename_absolute(
-				ProjectSettings.globalize_path(uid), ProjectSettings.globalize_path(uid_destination)
+				ProjectSettings.globalize_path(destination), ProjectSettings.globalize_path(source)
 			)
-			manifest.back().uid_trash = uid_destination
+			return _error(ErrorCodes.GODOT_ERROR, "batch delete rolled back")
+		manifest.append(manifest_entry)
 	var mf := FileAccess.open(
 		ProjectSettings.globalize_path(trash + "/manifest.json"), FileAccess.WRITE
 	)
@@ -76,9 +90,8 @@ static func replace(body: Dictionary) -> Dictionary:
 	var replacement := String(body.get("replace", ""))
 	if find_text.is_empty():
 		return _error(ErrorCodes.INVALID_PARAM, "find is required")
-	var regex_mode := bool(body.get("regex", false))
 	var matches: Array = []
-	var scan := _scan_files(checked.path, find_text, replacement, regex_mode, matches)
+	var scan := _scan_files(checked.path, find_text, replacement, matches)
 	if not scan.ok:
 		return scan
 	var plan := {"ok": true, "operations": matches, "plan_hash": _hash_plan(matches)}
@@ -136,10 +149,19 @@ static func recover(operation_id: String) -> Dictionary:
 	file.close()
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return _error(ErrorCodes.GODOT_ERROR, "invalid recovery manifest")
+	if bool(parsed.get("recovered", false)):
+		return _error(ErrorCodes.CONFLICT, "recovery has already completed")
+	var entries: Array = parsed.get("entries", [])
 	var restored := 0
-	for entry in parsed.get("entries", []):
+	for entry in entries:
 		if FileAccess.file_exists(ProjectSettings.globalize_path(entry.source)):
 			return _error(ErrorCodes.CONFLICT, "recovery destination already exists")
+		if (
+			entry.has("uid_source")
+			and FileAccess.file_exists(ProjectSettings.globalize_path(entry.uid_source))
+		):
+			return _error(ErrorCodes.CONFLICT, "recovery destination already exists")
+	for entry in entries:
 		DirAccess.make_dir_recursive_absolute(
 			ProjectSettings.globalize_path(entry.source.get_base_dir())
 		)
@@ -151,7 +173,25 @@ static func recover(operation_id: String) -> Dictionary:
 			!= OK
 		):
 			return _error(ErrorCodes.GODOT_ERROR, "recovery failed")
+		if (
+			entry.has("uid_trash")
+			and FileAccess.file_exists(ProjectSettings.globalize_path(entry.uid_trash))
+		):
+			if (
+				DirAccess.rename_absolute(
+					ProjectSettings.globalize_path(entry.uid_trash),
+					ProjectSettings.globalize_path(entry.uid_source)
+				)
+				!= OK
+			):
+				return _error(ErrorCodes.GODOT_ERROR, "UID recovery failed")
 		restored += 1
+	parsed["recovered"] = true
+	parsed["recovered_at"] = Time.get_unix_time_from_system()
+	var updated := FileAccess.open(ProjectSettings.globalize_path(trash), FileAccess.WRITE)
+	if updated != null:
+		updated.store_string(JSON.stringify(parsed))
+		updated.close()
 	return {"ok": true, "changed": restored > 0, "undoable": false, "restored": restored}
 
 
@@ -174,7 +214,7 @@ static func _delete_plan(paths: Array) -> Dictionary:
 
 
 static func _scan_files(
-	root: String, find_text: String, replacement: String, regex_mode: bool, matches: Array
+	root: String, find_text: String, replacement: String, matches: Array
 ) -> Dictionary:
 	var dir := DirAccess.open(root)
 	if dir == null:
@@ -185,7 +225,7 @@ static func _scan_files(
 		if name != ".godot" and not name.begins_with("."):
 			var path := root.path_join(name)
 			if dir.current_is_dir():
-				var nested := _scan_files(path, find_text, replacement, regex_mode, matches)
+				var nested := _scan_files(path, find_text, replacement, matches)
 				if not nested.ok:
 					return nested
 			else:

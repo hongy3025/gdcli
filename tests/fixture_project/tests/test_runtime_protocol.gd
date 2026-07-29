@@ -14,6 +14,7 @@ var passed := 0
 var failed := 0
 
 
+# gdlint: ignore=max-public-methods
 func _init() -> void:
 	print("Running GdApiRuntimeProtocol tests...\n")
 
@@ -33,6 +34,8 @@ func _init() -> void:
 	test_validate_message_accepts_event()
 	test_request_default_payload_empty_dict()
 	test_generation_metadata_is_preserved()
+	test_v2_eval_request_is_allowed()
+	test_versioned_builders_preserve_version()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	if failed > 0:
@@ -73,7 +76,7 @@ func test_validate_message_accepts_valid_request() -> void:
 
 
 func test_validate_message_rejects_wrong_version() -> void:
-	var msg := {"version": 2, "id": 1, "kind": "request", "op": "x", "payload": {}}
+	var msg := {"version": 99, "id": 1, "kind": "request", "op": "x", "payload": {}}
 	assert_eq(Protocol.validate_message(msg).code, "not_supported", "version mismatch")
 
 
@@ -175,3 +178,16 @@ func test_generation_metadata_is_preserved() -> void:
 	assert_true(Protocol.validate_message(request).ok, "generation request remains v1-valid")
 	assert_true(Protocol.validate_message(reply).ok, "generation reply remains v1-valid")
 	assert_true(Protocol.validate_message(hello).ok, "generation event remains v1-valid")
+
+
+func test_v2_eval_request_is_allowed() -> void:
+	var v1 := Protocol.request_for_version(1, 1, "eval", {"source": "1+1"})
+	var v2 := Protocol.request_for_version(2, 2, "eval", {"source": "1+1"})
+	assert_eq(Protocol.validate_message(v1).code, "permission_denied", "v1 eval denied")
+	assert_true(Protocol.validate_message(v2).ok, "v2 eval accepted")
+
+
+func test_versioned_builders_preserve_version() -> void:
+	var reply := Protocol.reply_for_version(2, 3, true, {"value": 2})
+	assert_eq(reply.version, 2, "v2 reply version")
+	assert_eq(reply.id, 3, "v2 reply id")
