@@ -7,17 +7,20 @@
 //! - `queue`: 请求队列，线程安全地传递 HTTP 请求
 //! - `http`: HTTP 协议解析器
 //! - `server`: HTTP 服务器核心实现
+//! - `process_runner`: shell-free 进程执行器
 //!
 //! GDExtension 集成：
 //! 通过 `#[gdextension]` 宏将 Rust 代码暴露为 Godot 可调用的类 `GdApiServer`。
 //! GDScript 可以直接调用 `GdApiServer.create()`、`start()`、`poll_request()` 等方法。
 
 pub mod http;
+pub mod process_runner;
 pub mod queue;
 pub mod server;
 
 use godot::prelude::*;
 use http::validate_response_header;
+use process_runner::{PollOutcome, ProcessRunnerCore};
 use server::ServerCore;
 
 /// GDExtension 入口标记结构体。
@@ -198,5 +201,95 @@ impl GdApiServer {
         {
             godot_error!("[gdapi] send_response failed: {}", e);
         }
+    }
+}
+
+#[derive(GodotClass)]
+#[class(base=RefCounted, no_init)]
+pub struct GdApiProcessRunner {
+    core: ProcessRunnerCore,
+}
+
+#[godot_api]
+impl GdApiProcessRunner {
+    #[func]
+    fn create() -> Gd<Self> {
+        Gd::from_object(Self {
+            core: ProcessRunnerCore::new(),
+        })
+    }
+
+    #[func]
+    fn start(
+        &mut self,
+        executable: GString,
+        args: PackedStringArray,
+        cwd: GString,
+        timeout_ms: i64,
+        max_output_bytes: i64,
+    ) -> i64 {
+        let executable = executable.to_string();
+        let argv = args
+            .to_vec()
+            .into_iter()
+            .map(|arg| arg.to_string())
+            .collect::<Vec<_>>();
+        let cwd_path = std::path::PathBuf::from(cwd.to_string());
+        match self.core.start(
+            executable.as_str(),
+            &argv,
+            &cwd_path,
+            timeout_ms,
+            max_output_bytes,
+        ) {
+            Ok(id) => id,
+            Err(err) => {
+                godot_error!("[gdapi] process_runner start failed: {}", err);
+                -1
+            }
+        }
+    }
+
+    #[func]
+    fn poll(&mut self, id: i64) -> Dictionary<GString, Variant> {
+        let mut dict = Dictionary::<GString, Variant>::new();
+        if id <= 0 {
+            return dict;
+        }
+
+        match self.core.poll(id) {
+            PollOutcome::Running => {
+                dict.set(&GString::from("done"), &Variant::from(false));
+            }
+            PollOutcome::Done(result) => {
+                dict.set(&GString::from("done"), &Variant::from(true));
+                dict.set(
+                    &GString::from("exit_code"),
+                    &Variant::from(result.exit_code.unwrap_or(-1) as i64),
+                );
+                dict.set(&GString::from("timed_out"), &Variant::from(result.timed_out));
+                dict.set(&GString::from("cancelled"), &Variant::from(result.cancelled));
+                dict.set(
+                    &GString::from("stdout"),
+                    &Variant::from(GString::from(result.stdout.as_str())),
+                );
+                dict.set(
+                    &GString::from("stderr"),
+                    &Variant::from(GString::from(result.stderr.as_str())),
+                );
+                dict.set(&GString::from("truncated"), &Variant::from(result.truncated));
+            }
+            PollOutcome::Missing => {}
+        }
+
+        dict
+    }
+
+    #[func]
+    fn cancel(&mut self, id: i64) -> bool {
+        if id <= 0 {
+            return false;
+        }
+        self.core.cancel(id)
     }
 }
