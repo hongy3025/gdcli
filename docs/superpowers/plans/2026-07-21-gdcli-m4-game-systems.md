@@ -1,639 +1,240 @@
 # gdcli M4 Game Systems Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** execute this plan task-by-task, preserving the current branch and existing user changes. Do not create a worktree.
 
-**Goal:** Add typed authoring and verification routes for Godot's core animation, tile, rendering, audio, UI, physics, and navigation systems.
+**Goal:** Deliver the 51 M4 public game-system routes in the roadmap, with typed editor mutations, runtime verification where required, persisted-artifact evidence, and complete route documentation.
 
-**Architecture:** Each game-system domain gets a focused service and natural route family. Services reuse M2 node/resource editing and M3 runtime assertions; editor-scene mutations use UndoRedo while saved resource and project-bus mutations use force protection, audit, and `undoable:false`. Every domain has an immutable fixture asset and verifies state after save/reopen, not merely the HTTP response.
+**Architecture:** M4 stays on the existing HTTP router and M3 runtime broker. Editor-facing route handlers delegate to domain services under `gdapi/addon/runtime/services/`. The three M4 routes that need a running game use a new generic game-route adapter which maps their public operation to an internal `m4/**` runtime operation; it must share the M3 timeout, cancellation, audit, bounds, and exactly-once response semantics. It must not add routes below `runtime/**`: M3 continues to expose exactly 35 runtime routes.
 
-**Tech Stack:** Godot 4.7 Animation/TileMapLayer/Rendering/Audio/UI/Physics/Navigation APIs, M1–M3 shared contracts, pytest/uv.
+**Tech stack:** Godot 4.7.x, GDScript, gdapi route/runtime infrastructure, Rust CLI transport, pytest/uv E2E fixtures, Godot editor test addon.
 
-## Global Constraints
+## Scope and invariants
 
-- Support only Godot 4.7.x and require completed M1–M3 plans.
-- Use `TileMapLayer` as the Godot 4.7 tile-editing primitive; the public route family remains `tilemap/**`.
-- Use VariantCodec for every typed value and return `invalid_param` before mutation on type mismatch.
-- Scene-node mutations are UndoRedo actions; resource files, shader files, bus layouts, baking, and saved assets are non-undoable.
-- Existing destinations require `force:true`; destructive operations always require `force:true`.
-- Every domain query returns stable sorted arrays and resource paths rather than opaque Object IDs.
-- Runtime play/path/raycast verification uses M3 routes and never adds a second transport.
-- Each domain fixture is copied per test and leaves no imported/generated asset in the source tree.
+- M4 public route total is exactly 51. Existing M1--M3 route names and behavior remain compatible.
+- M4 v1 supports 2D-only physics and navigation. A 3D node, shape, map, or query returns `not_supported` before mutation.
+- Every handler validates typed JSON via `VariantCodec` and returns `invalid_param` before it mutates editor state.
+- Node/scene changes are wrapped in `GdApiEditAction`/`UndoRedo`; file writes, resource replacement, shader writes, bus-layout changes, and navigation baking are explicitly `undoable:false`, protected by `force:true` where overwriting/destructive.
+- Route results use deterministic ordering and resource paths, never Godot object IDs.
+- M4 E2E runs against a private clone of `tests/fixtures/m4_project`; no test alters the checked-in fixture.
 
-## File Structure
+## Shared test interfaces
 
-| File | Responsibility after M4 |
-|---|---|
-| `gdapi/addon/runtime/services/animation_editor.gd` | AnimationLibrary, tracks, keys, and AnimationTree editing |
-| `gdapi/addon/runtime/services/tilemap_editor.gd` | TileMapLayer cells, rectangles, and TileSet inspection |
-| `gdapi/addon/runtime/services/rendering_editor.gd` | Materials, shaders, uniforms, assignment, and persistence |
-| `gdapi/addon/runtime/services/audio_editor.gd` | Audio buses and AudioStreamPlayer nodes |
-| `gdapi/addon/runtime/services/ui_editor.gd` | Control layout and declarative UI tree construction |
-| `gdapi/addon/runtime/services/physics_editor.gd` | Bodies, shapes, layers, raycasts, and joints |
-| `gdapi/addon/runtime/services/navigation_editor.gd` | Regions, baking, paths, and agent targets |
-| `gdapi/addon/routes/{animation,animation_tree,tilemap,material,shader,audio,ui,theme,physics,navigation}/**` | Public game-system routes |
-| `tests/fixtures/m4_project/**` | One independent scene/resource set per domain |
-| `tests/e2e/m4/**` | Domain persistence, typing, safety, and runtime verification |
+Create `tests/e2e/m4/helpers.py` before domain tests. It owns these stable helpers:
 
----
+```python
+def open_domain(env: M4Env, domain: str) -> None: ...
+def run_domain(env: M4Env, domain: str) -> None: ...
+def stop_domain(env: M4Env) -> None: ...
+def exec_ok(env: M4Env, route: str, data: dict | None = None) -> dict: ...
+def exec_error(env: M4Env, route: str, data: dict | None, code: str) -> dict: ...
+def command_doc(env: M4Env, route: str) -> dict: ...
+def save_reopen(env: M4Env, scene_path: str) -> None: ...
+def editor_undo(env: M4Env) -> None: ...
+def editor_redo(env: M4Env) -> None: ...
+def source_digest(path: Path) -> str: ...
+```
 
-### Task 1: Build Domain-Isolated M4 Fixtures and Shared Assertions
+`run_domain` uses `project/run` with the fixture's explicit `scene_path`, waits for the M3 broker connection and one physics frame, and fails rather than skips if the runtime prerequisite cannot be reached. `stop_domain` always calls `project/stop`, waits for disconnect/pending-request cleanup, and runs in fixture teardown.
+
+## Task 1: establish the M4 bridge, fixture, and contract harness
 
 **Files:**
-- Create: `tests/fixtures/m4_project/project.godot`
-- Create: `tests/fixtures/m4_project/scenes/{animation,tilemap,rendering,audio,ui,physics,navigation}.tscn`
-- Create: `tests/fixtures/m4_project/resources/**`
-- Create: `tests/fixtures/m4_project/tests/domain_probe.gd`
-- Create: `tests/fixtures/m4_project/addons/gdapi_test/plugin.cfg`
-- Create: `tests/fixtures/m4_project/addons/gdapi_test/plugin.gd`
-- Create: `tests/e2e/m4/conftest.py`
-- Create: `tests/e2e/m4/test_fixture_domains.py`
 
-**Interfaces:**
-- Produces `m4_editor`, `open_domain(env,name)`, `save_reopen(env)`, `runtime_assert(env,condition)`, `fixture_probe(env,operation,data)`, `animation_snapshot(env,name)`, `editor_undo(env)`, `editor_redo(env)`, and `resource_digest(project,path)`.
-- Domain scenes have roots named `AnimationFixture`, `TileFixture`, `RenderingFixture`, `AudioFixture`, `UiFixture`, `PhysicsFixture`, and `NavigationFixture`.
-
-- [ ] **Step 1: Write fixture independence tests**
-
-```python
-@pytest.mark.parametrize("domain", [
-    "animation", "tilemap", "rendering", "audio", "ui", "physics", "navigation"
-])
-def test_domain_scene_opens_without_import_errors(m4_editor, domain):
-    opened = open_domain(m4_editor, domain)
-    assert opened["path"] == f"res://scenes/{domain}.tscn"
-    assert exec_ok(m4_editor, "scene/tree")["root"]["name"].endswith("Fixture")
-
-
-def test_each_test_uses_private_project(m4_editor):
-    assert m4_editor["project"] != m4_editor["source_fixture"]
-```
-
-- [ ] **Step 2: Run and observe missing fixture errors**
-
-Run: `uv run pytest tests/e2e/m4/test_fixture_domains.py -v`
-
-Expected: ERROR because the M4 fixture and helpers do not exist.
-
-- [ ] **Step 3: Create minimal valid assets and reuse the M2 harness**
-
-Copy the M2 lifecycle and fixture-only undo/redo command plugin, point them at `m4_project`, and create domain scenes using text `.tscn`/`.tres` files that Godot 4.7 imports without warnings. Extend the fixture command plugin with action `probe`; it calls `domain_probe.gd` in the running editor and writes the encoded result through the same atomic result file. `save_reopen` saves, closes, opens the same path, and waits until `scene/current.path` matches. `fixture_probe` submits `{action:"probe",operation,data}` and parses the result; `animation_snapshot` calls its `animation_snapshot` operation.
-
-- [ ] **Step 4: Verify all fixture domains**
-
-Run: `uv run pytest tests/e2e/m4/test_fixture_domains.py -v`
-
-Expected: 8 passed and source fixture digests unchanged.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/fixtures/m4_project tests/e2e/m4
-git commit -m "test: add isolated M4 game-system fixtures"
-```
-
----
-
-### Task 2: Add Animation and AnimationTree Authoring
-
-**Files:**
-- Create: `gdapi/addon/runtime/services/animation_editor.gd`
-- Create: `gdapi/addon/routes/animation/{create,delete,play,stop}.gd`
-- Create: `gdapi/addon/routes/animation/track/{add,remove}.gd`
-- Create: `gdapi/addon/routes/animation/key/{add,remove}.gd`
-- Create: `gdapi/addon/routes/animation_tree/state/add.gd`
-- Create: `gdapi/addon/routes/animation_tree/transition/add.gd`
-- Create: `gdapi/addon/routes/animation_tree/blend/set.gd`
-- Create: `tests/e2e/m4/test_animation.py`
-
-**Interfaces:**
-- Animation bodies identify `{player_path,library,animation}`; tracks add `{type,path,index?}` and keys add `{track,time,value,transition?}`.
-- AnimationTree state/transition routes identify `{tree_path,state_machine_path}` and resource-backed nodes.
-- Create/delete/track/key/state/transition/blend are undoable scene mutations; play/stop are non-undoable editor preview state.
-
-- [ ] **Step 1: Write typed track/key and persistence test**
-
-```python
-def test_animation_track_key_round_trip(m4_editor):
-    open_domain(m4_editor, "animation")
-    exec_ok(m4_editor, "animation/create", {
-        "player_path": "/root/AnimationFixture/AnimationPlayer",
-        "library": "", "animation": "move", "length": 1.0
-    })
-    track = exec_ok(m4_editor, "animation/track/add", {
-        "player_path": "/root/AnimationFixture/AnimationPlayer", "animation": "move",
-        "type": "value", "path": "Sprite2D:position"
-    })
-    exec_ok(m4_editor, "animation/key/add", {
-        "player_path": "/root/AnimationFixture/AnimationPlayer", "animation": "move",
-        "track": track["track"], "time": 0.5,
-        "value": {"type": "Vector2", "value": [40, 20]}
-    })
-    save_reopen(m4_editor)
-    info = animation_snapshot(m4_editor, "move")
-    assert info["tracks"][0]["keys"][0]["value"] == {"type":"Vector2","value":[40.0,20.0]}
-```
-
-Add this exact rejection matrix, then use the shared undo/redo and runtime helpers for the positive paths:
-
-```python
-@pytest.mark.parametrize("route,data,code", [
-    ("animation/create", {"player_path":"/root/AnimationFixture/AnimationPlayer","library":"","animation":"idle"}, "conflict"),
-    ("animation/track/add", {"player_path":"/root/AnimationFixture/AnimationPlayer","animation":"idle","type":"unknown","path":"Sprite2D:position"}, "invalid_param"),
-    ("animation/track/add", {"player_path":"/root/AnimationFixture/AnimationPlayer","animation":"idle","type":"value","path":"Missing:position"}, "not_found"),
-    ("animation/key/add", {"player_path":"/root/AnimationFixture/AnimationPlayer","animation":"idle","track":0,"time":99,"value":1}, "invalid_param"),
-    ("animation_tree/state/add", {"tree_path":"/root/AnimationFixture/AnimationTree","state_machine_path":"parameters/missing","name":"Run","animation":"run"}, "not_found"),
-])
-def test_animation_rejections(m4_editor, route, data, code):
-    open_domain(m4_editor, "animation")
-    before = fixture_probe(m4_editor, "animation_all", {})
-    assert exec_error(m4_editor, route, data)["code"] == code
-    assert fixture_probe(m4_editor, "animation_all", {}) == before
-
-
-def test_animation_undo_redo_and_runtime_play(m4_editor):
-    open_domain(m4_editor, "animation")
-    exec_ok(m4_editor, "animation/create", {"player_path":"/root/AnimationFixture/AnimationPlayer","library":"","animation":"move"})
-    editor_undo(m4_editor)
-    assert "move" not in fixture_probe(m4_editor, "animation_names", {})
-    editor_redo(m4_editor)
-    exec_ok(m4_editor, "animation/play", {"player_path":"/root/AnimationFixture/AnimationPlayer","animation":"move"})
-    assert runtime_assert(m4_editor, {"op":"eq","left":{"node_path":"/root/AnimationFixture/AnimationPlayer","property":"current_animation"},"right":"move"})["passed"]
-```
-
-- [ ] **Step 2: Run animation tests**
-
-Run: `uv run pytest tests/e2e/m4/test_animation.py -v`
-
-Expected: FAIL with route `not_found`.
-
-- [ ] **Step 3: Implement resource-safe Animation APIs**
-
-Resolve `AnimationPlayer`, get/create `AnimationLibrary`, and duplicate edited built-in resources before mutation when `resource_local_to_scene` is false. Map track strings to Godot constants with a fixed dictionary. Store the complete before/after resource snapshots in one UndoRedo action. Use `AnimationNodeStateMachine.add_node/add_transition` and set blend parameters only after property-list validation.
-
-- [ ] **Step 4: Verify persistence and runtime playback**
-
-Run: `uv run pytest tests/e2e/m4/test_animation.py -v`
-
-Expected: PASS, including typed key equality after save/reopen and runtime position change during playback.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add gdapi/addon/runtime/services/animation_editor.gd gdapi/addon/routes/animation gdapi/addon/routes/animation_tree tests/e2e/m4/test_animation.py
-git commit -m "feat: add animation authoring routes"
-```
-
----
-
-### Task 3: Add TileMapLayer and TileSet Operations
-
-**Files:**
-- Create: `gdapi/addon/runtime/services/tilemap_editor.gd`
-- Create: `gdapi/addon/routes/tilemap/info.gd`
-- Create: `gdapi/addon/routes/tilemap/cell/{get,set}.gd`
-- Create: `gdapi/addon/routes/tilemap/rect/fill.gd`
-- Create: `gdapi/addon/routes/tilemap/layer/clear.gd`
-- Create: `gdapi/addon/routes/tilemap/used_cells.gd`
-- Create: `tests/e2e/m4/test_tilemap.py`
-
-**Interfaces:**
-- Tile coordinates use `{x:int,y:int}`; cell identity is `{source_id,atlas_coords:[x,y],alternative_tile}`.
-- Rect fill consumes `{layer_path,rect:{position:[x,y],size:[w,h]},cell,force}` and caps area at 65,536 cells.
-- Cell set is undoable; rect fill and layer clear require force but remain a single undoable editor action.
-
-- [ ] **Step 1: Write exact cell, rectangle, clear, and reopen tests**
-
-```python
-def test_tile_cells_are_exact_and_persistent(m4_editor):
-    open_domain(m4_editor, "tilemap")
-    layer = "/root/TileFixture/Ground"
-    cell = {"source_id": 0, "atlas_coords": [0, 0], "alternative_tile": 0}
-    exec_ok(m4_editor, "tilemap/cell/set", {"layer_path": layer, "coords": [2, 3], "cell": cell})
-    assert exec_ok(m4_editor, "tilemap/cell/get", {
-        "layer_path": layer, "coords": [2, 3]
-    })["cell"] == cell
-    exec_ok(m4_editor, "tilemap/rect/fill", {
-        "layer_path": layer, "rect": {"position":[0,0],"size":[2,2]},
-        "cell": cell, "force": True
-    })
-    save_reopen(m4_editor)
-    assert len(exec_ok(m4_editor, "tilemap/used_cells", {"layer_path": layer})["cells"]) == 5
-```
-
-- [ ] **Step 2: Run tile tests**
-
-Run: `uv run pytest tests/e2e/m4/test_tilemap.py -v`
-
-Expected: FAIL with route `not_found`.
-
-- [ ] **Step 3: Implement Godot 4.7 TileMapLayer editing**
-
-Require the target to be `TileMapLayer`, validate TileSet source and atlas coordinates, snapshot all affected cells before a batch action, then apply `set_cell` or `erase_cell`. Sort used coordinates by y then x. Reject old `TileMap` nodes with `not_supported` and a detail directing callers to `TileMapLayer`.
-
-- [ ] **Step 4: Verify batching, undo, and limits**
-
-Run: `uv run pytest tests/e2e/m4/test_tilemap.py -v`
-
-Expected: PASS; one undo reverses an entire rect/clear operation and an excessive rectangle has no side effect.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add gdapi/addon/runtime/services/tilemap_editor.gd gdapi/addon/routes/tilemap tests/e2e/m4/test_tilemap.py
-git commit -m "feat: add TileMapLayer editing routes"
-```
-
----
-
-### Task 4: Add Material and Shader Workflows
-
-**Files:**
-- Create: `gdapi/addon/runtime/services/rendering_editor.gd`
-- Create: `gdapi/addon/routes/material/{create,info,set,assign,duplicate,save}.gd`
-- Create: `gdapi/addon/routes/shader/{read,write,uniforms}.gd`
-- Create: `gdapi/addon/routes/shader/material/create.gd`
-- Create: `gdapi/addon/routes/shader/param/set.gd`
-- Create: `tests/e2e/m4/test_rendering.py`
-
-**Interfaces:**
-- Material targets are a resource `path` or `{node_path,property}`; assignments to current scene are undoable.
-- Shader write consumes `{path,code,force}` and validates by assigning code to `Shader` before touching disk.
-- Uniform values use VariantCodec and are checked against `Shader.get_shader_uniform_list()`.
-
-- [ ] **Step 1: Write shader uniform and material persistence tests**
-
-```python
-def test_shader_material_typed_uniform(m4_editor):
-    open_domain(m4_editor, "rendering")
-    code = "shader_type canvas_item; uniform vec4 tint : source_color = vec4(1.0);"
-    exec_ok(m4_editor, "shader/write", {
-        "path": "res://resources/generated.gdshader", "code": code
-    })
-    exec_ok(m4_editor, "shader/material/create", {
-        "shader_path": "res://resources/generated.gdshader",
-        "path": "res://resources/generated_material.tres"
-    })
-    exec_ok(m4_editor, "shader/param/set", {
-        "material_path": "res://resources/generated_material.tres",
-        "name": "tint", "value": {"type":"Color","value":[0.2,0.4,0.6,1.0]}, "force": True
-    })
-    assert exec_ok(m4_editor, "material/info", {
-        "path": "res://resources/generated_material.tres"
-    })["parameters"]["tint"] == {"type":"Color","value":[0.2,0.4,0.6,1.0]}
-```
-
-Add exact rendering safety tests:
-
-```python
-def test_rendering_rejections_and_undo(m4_editor):
-    open_domain(m4_editor, "rendering")
-    assert exec_error(m4_editor, "shader/write", {"path":"res://resources/bad.gdshader","code":"shader_type canvas_item; this is invalid"})["code"] == "invalid_param"
-    assert exec_error(m4_editor, "shader/param/set", {"material_path":"res://resources/material.tres","name":"missing","value":1,"force":True})["code"] == "not_found"
-    assert exec_error(m4_editor, "shader/param/set", {"material_path":"res://resources/material.tres","name":"tint","value":{"type":"Vector2","value":[1,2]},"force":True})["code"] == "invalid_param"
-    assert exec_error(m4_editor, "shader/write", {"path":"res://resources/existing.gdshader","code":"shader_type canvas_item;"})["code"] == "unsafe_operation"
-    before = fixture_probe(m4_editor, "node_material", {"node_path":"/root/RenderingFixture/Sprite2D"})
-    exec_ok(m4_editor, "material/assign", {"node_path":"/root/RenderingFixture/Sprite2D","property":"material","path":"res://resources/material.tres"})
-    editor_undo(m4_editor)
-    assert fixture_probe(m4_editor, "node_material", {"node_path":"/root/RenderingFixture/Sprite2D"}) == before
-```
-
-- [ ] **Step 2: Run rendering tests**
-
-Run: `uv run pytest tests/e2e/m4/test_rendering.py -v`
-
-Expected: FAIL with route `not_found`.
-
-- [ ] **Step 3: Implement typed material/shader services**
-
-Support `StandardMaterial3D`, `CanvasItemMaterial`, `ShaderMaterial`, and any instantiable Material subclass. Validate shader code in memory, read uniform `type`/`hint`, and reject mismatches before set. File saves use ResourceSaver and M1 force/audit rules. Node material assignment uses EditAction property commit.
-
-- [ ] **Step 4: Verify rendering persistence and runtime color**
-
-Run: `uv run pytest tests/e2e/m4/test_rendering.py -v`
-
-Expected: PASS and M3 screenshot pixel probe confirms the fixture tint changed.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add gdapi/addon/runtime/services/rendering_editor.gd gdapi/addon/routes/material gdapi/addon/routes/shader tests/e2e/m4/test_rendering.py
-git commit -m "feat: add material and shader workflows"
-```
-
----
-
-### Task 5: Add Audio Bus and Player Operations
-
-**Files:**
-- Create: `gdapi/addon/runtime/services/audio_editor.gd`
-- Create: `gdapi/addon/routes/audio/bus/{list,add,remove}.gd`
-- Create: `gdapi/addon/routes/audio/player/{create,play,stop}.gd`
-- Create: `tests/e2e/m4/test_audio.py`
-
-**Interfaces:**
-- Bus add/remove consumes `{name,index?,force}` and persists `res://default_bus_layout.tres`.
-- Player create consumes `{parent_path,type,stream_path,name,bus}` and is undoable.
-- Preview play/stop is non-undoable and returns the selected player path and playing state.
-
-- [ ] **Step 1: Write bus/player persistence and preview tests**
-
-```python
-def test_audio_bus_and_player(m4_editor):
-    open_domain(m4_editor, "audio")
-    exec_ok(m4_editor, "audio/bus/add", {"name": "SFX", "force": True})
-    assert "SFX" in [bus["name"] for bus in exec_ok(m4_editor, "audio/bus/list")["buses"]]
-    player = exec_ok(m4_editor, "audio/player/create", {
-        "parent_path": "/root/AudioFixture", "type": "AudioStreamPlayer",
-        "stream_path": "res://resources/tone.wav", "name": "Tone", "bus": "SFX"
-    })
-    assert player["undoable"] is True
-    assert exec_ok(m4_editor, "audio/player/play", {"player_path": "/root/AudioFixture/Tone"})["playing"]
-```
-
-- [ ] **Step 2: Run audio tests**
-
-Run: `uv run pytest tests/e2e/m4/test_audio.py -v`
-
-Expected: FAIL with route `not_found`.
-
-- [ ] **Step 3: Implement validated bus layout and player handling**
-
-Protect `Master` from removal, reject duplicate bus names, snapshot bus layout before mutation, save the layout resource, and audit. Allow only `AudioStreamPlayer`, `AudioStreamPlayer2D`, and `AudioStreamPlayer3D`; validate stream and bus before node creation.
-
-- [ ] **Step 4: Verify bus snapshot restoration and runtime playback**
-
-Run: `uv run pytest tests/e2e/m4/test_audio.py -v`
-
-Expected: PASS; teardown restores the original bus-layout digest and runtime reports the player stopped after stop.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add gdapi/addon/runtime/services/audio_editor.gd gdapi/addon/routes/audio tests/e2e/m4/test_audio.py
-git commit -m "feat: add audio authoring routes"
-```
-
----
-
-### Task 6: Add UI Layout and Theme Editing
-
-**Files:**
-- Create: `gdapi/addon/runtime/services/ui_editor.gd`
-- Create: `gdapi/addon/routes/ui/control/set_anchor.gd`
-- Create: `gdapi/addon/routes/ui/text/set.gd`
-- Create: `gdapi/addon/routes/ui/layout/build.gd`
-- Create: `gdapi/addon/routes/theme/create.gd`
-- Create: `gdapi/addon/routes/theme/color/set.gd`
-- Create: `gdapi/addon/routes/theme/constant/set.gd`
-- Create: `gdapi/addon/routes/theme/font_size/set.gd`
-- Create: `gdapi/addon/routes/theme/stylebox/set.gd`
-- Create: `tests/e2e/m4/test_ui_theme.py`
-
-**Interfaces:**
-- Layout build consumes a bounded tree `{type,name,properties,children}` with at most 200 Control nodes.
-- Theme setters consume `{path,theme_type,name,value,force}`; stylebox value is a Resource path.
-- Anchor, text, and layout mutations are undoable; saved Theme resource mutations are non-undoable.
-
-- [ ] **Step 1: Write declarative layout and typed theme tests**
-
-```python
-def test_ui_layout_and_theme(m4_editor):
-    open_domain(m4_editor, "ui")
-    spec = {"type":"VBoxContainer","name":"Menu","children":[
-        {"type":"Label","name":"Title","properties":{"text":"gdcli"},"children":[]},
-        {"type":"Button","name":"Play","properties":{"text":"Play"},"children":[]},
-    ]}
-    result = exec_ok(m4_editor, "ui/layout/build", {
-        "parent_path": "/root/UiFixture", "layout": spec
-    })
-    assert result["created"] == 3 and result["undoable"] is True
-    exec_ok(m4_editor, "theme/color/set", {
-        "path":"res://resources/ui_theme.tres", "theme_type":"Label",
-        "name":"font_color", "value":{"type":"Color","value":[1,0,0,1]}, "force":True
-    })
-```
-
-Add disallowed non-Control type, node cap, invalid anchor preset, unsupported text node, missing theme item, undo, and save/reopen assertions.
-
-- [ ] **Step 2: Run UI/theme tests**
-
-Run: `uv run pytest tests/e2e/m4/test_ui_theme.py -v`
-
-Expected: FAIL with route `not_found`.
-
-- [ ] **Step 3: Implement allowlisted layout construction and Theme APIs**
-
-Allow only Control subclasses, prevalidate the complete tree and decoded properties, then commit one UndoRedo action. Set anchors with `Control.set_anchors_preset`; text only on `Label`, `RichTextLabel`, `Button`, `LineEdit`, and `TextEdit`. Use Theme's typed setters and save only after validating item type/name/value.
-
-- [ ] **Step 4: Verify UI tree and screenshot**
-
-Run: `uv run pytest tests/e2e/m4/test_ui_theme.py -v`
-
-Expected: PASS after save/reopen; M3 screenshot metadata and runtime node text match expected values.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add gdapi/addon/runtime/services/ui_editor.gd gdapi/addon/routes/ui gdapi/addon/routes/theme tests/e2e/m4/test_ui_theme.py
-git commit -m "feat: add UI and theme authoring routes"
-```
-
----
-
-### Task 7: Add Physics Body, Shape, Layer, Raycast, and Joint Operations
-
-**Files:**
-- Create: `gdapi/addon/runtime/services/physics_editor.gd`
-- Create: `gdapi/addon/routes/physics/body/create.gd`
-- Create: `gdapi/addon/routes/physics/shape/create.gd`
-- Create: `gdapi/addon/routes/physics/layer/set.gd`
+- Modify: `gdapi/addon/runtime/runtime_route.gd`
+- Create: `gdapi/addon/runtime/game_route.gd`
+- Modify: `gdapi/addon/runtime/runtime_probe.gd`
 - Create: `gdapi/addon/routes/physics/raycast.gd`
-- Create: `gdapi/addon/routes/physics/joint/create.gd`
-- Create: `tests/e2e/m4/test_physics.py`
-
-**Interfaces:**
-- Body and shape creation are editor UndoRedo operations with 2D/3D dimension consistency checks.
-- Layer set consumes integer `collision_layer` and `collision_mask` in `[0, 2^32-1]`.
-- Raycast is a non-mutating runtime operation routed over M3; joint creation is undoable.
-
-- [ ] **Step 1: Write exact shape/layer/raycast tests**
-
-```python
-def test_physics_shape_layer_and_raycast(m4_editor):
-    open_domain(m4_editor, "physics")
-    body = exec_ok(m4_editor, "physics/body/create", {
-        "parent_path":"/root/PhysicsFixture", "type":"StaticBody2D", "name":"Wall"
-    })
-    exec_ok(m4_editor, "physics/shape/create", {
-        "body_path":body["node_path"], "type":"RectangleShape2D",
-        "properties":{"size":{"type":"Vector2","value":[20,40]}}
-    })
-    exec_ok(m4_editor, "physics/layer/set", {
-        "node_path":body["node_path"], "collision_layer":4, "collision_mask":2
-    })
-    save_reopen(m4_editor)
-    hit = exec_ok(m4_editor, "physics/raycast", {
-        "from":{"type":"Vector2","value":[0,0]}, "to":{"type":"Vector2","value":[100,0]},
-        "collision_mask":4
-    })
-    assert hit["hit"] and hit["collider_path"].endswith("/Wall")
-```
-
-- [ ] **Step 2: Run physics tests**
-
-Run: `uv run pytest tests/e2e/m4/test_physics.py -v`
-
-Expected: FAIL with route `not_found`.
-
-- [ ] **Step 3: Implement dimension-safe physics services**
-
-Allow CharacterBody, StaticBody, RigidBody, Area, CollisionShape, and Joint subclasses for 2D/3D. Validate shape properties through property lists and VariantCodec. Execute raycasts in the running scene using `PhysicsDirectSpaceState2D.intersect_ray` or 3D equivalent, encoding position and normal.
-
-- [ ] **Step 4: Verify persistence, undo, and runtime hit typing**
-
-Run: `uv run pytest tests/e2e/m4/test_physics.py -v`
-
-Expected: PASS; mixing 2D/3D returns `invalid_param` without creating nodes.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add gdapi/addon/runtime/services/physics_editor.gd gdapi/addon/routes/physics tests/e2e/m4/test_physics.py
-git commit -m "feat: add physics authoring and raycast routes"
-```
-
----
-
-### Task 8: Add Navigation Region, Bake, Path, and Agent Operations
-
-**Files:**
-- Create: `gdapi/addon/runtime/services/navigation_editor.gd`
-- Create: `gdapi/addon/routes/navigation/region/list.gd`
-- Create: `gdapi/addon/routes/navigation/mesh/bake.gd`
 - Create: `gdapi/addon/routes/navigation/path/get.gd`
 - Create: `gdapi/addon/routes/navigation/agent/target.gd`
-- Create: `tests/e2e/m4/test_navigation.py`
+- Create: `tests/fixtures/m4_project/project.godot`
+- Create: `tests/fixtures/m4_project/scenes/{animation,tilemap,rendering,audio,ui,physics,navigation}.tscn`
+- Create: `tests/fixtures/m4_project/resources/{tile.svg,tile_set.tres,tone.tres,navigation_polygon.tres}`
+- Create: `tests/fixtures/m4_project/addons/gdapi_test/{plugin.cfg,plugin.gd}`
+- Create: `tests/e2e/m4/{conftest.py,helpers.py,test_m4_contract.py,test_m4_game_bridge.py}`
 
-**Interfaces:**
-- Region list supports 2D and 3D and returns path, enabled, map RID validity, and resource path.
-- Bake consumes `{region_path,save_path?,force}` and is audited/non-undoable.
-- Path and target are runtime operations; points and target values use typed Vector2/Vector3 JSON.
+**Implementation:**
 
-- [ ] **Step 1: Write region, bake, path, and target tests**
+1. Extract the shared broker dispatch lifecycle from `GdApiRuntimeRoute` without changing its public behavior. `GdApiGameRoute` must use that lifecycle and expose a fixed internal operation supplied by its subclass.
+2. `physics/raycast`, `navigation/path/get`, and `navigation/agent/target` map only to `m4/physics/raycast`, `m4/navigation/path/get`, and `m4/navigation/agent/target`. Reject all client-provided operation names.
+3. Extend `GdApiRuntimeProbe` with only those three explicit `m4/**` operations. Keep its M3 operation table intact; unknown operations return the established unsupported-operation error.
+4. Build the source M4 project with a `GdApiRuntimeProbe` autoload, seven selected domain scenes, and fixed resources. The physics scene contains a `World2D`, deterministic static colliders, and a ray target. The navigation scene contains a `NavigationRegion2D`, a baked polygon, and a `NavigationAgent2D` target host. The tile scene has a `TileMapLayer` using the checked-in atlas resource.
+5. The M4 `conftest.py` builds once per session, installs/copies the addon as existing E2E harnesses do, creates a private fixture clone per test, and guarantees editor/process cleanup.
 
-```python
-def test_navigation_bake_and_runtime_path(m4_editor):
-    open_domain(m4_editor, "navigation")
-    regions = exec_ok(m4_editor, "navigation/region/list")
-    assert regions["regions"][0]["path"] == "/root/NavigationFixture/Region"
-    baked = exec_ok(m4_editor, "navigation/mesh/bake", {
-        "region_path":"/root/NavigationFixture/Region",
-        "save_path":"res://resources/baked_navigation.tres", "force":True
-    })
-    assert baked["baked"] and baked["undoable"] is False
-    path = exec_ok(m4_editor, "navigation/path/get", {
-        "map":"default", "from":{"type":"Vector2","value":[8,8]},
-        "to":{"type":"Vector2","value":[120,8]}
-    })
-    assert len(path["points"]) >= 2
-```
+**Tests first:** assert the three routes appear in `command/list`; each has full `command/doc`; M3 runtime route count remains 35; public requests cannot select an arbitrary operation; one successful physics and navigation round trip is observed only after `run_domain`; stopping the scene clears pending runtime state.
 
-- [ ] **Step 2: Run navigation tests**
-
-Run: `uv run pytest tests/e2e/m4/test_navigation.py -v`
-
-Expected: FAIL with route `not_found`.
-
-- [ ] **Step 3: Implement editor baking and runtime NavigationServer queries**
-
-Use region APIs appropriate to NavigationRegion2D/3D; reject mixed dimensions. Bake asynchronously, complete exactly once, save only after successful bake, and remove callbacks on timeout. At runtime query the default map with NavigationServer2D/3D and set NavigationAgent target position after typed validation.
-
-- [ ] **Step 4: Verify baked resource and runtime path**
-
-Run: `uv run pytest tests/e2e/m4/test_navigation.py -v`
-
-Expected: PASS; timeout/failure does not create the save path and leaves no bake callback.
-
-- [ ] **Step 5: Commit**
+**Verify:**
 
 ```bash
-git add gdapi/addon/runtime/services/navigation_editor.gd gdapi/addon/routes/navigation tests/e2e/m4/test_navigation.py
-git commit -m "feat: add navigation authoring and runtime routes"
+uv run pytest tests/e2e/m4/test_m4_contract.py tests/e2e/m4/test_m4_game_bridge.py -v
+uv run pytest tests/e2e/m3/test_m3_contract.py -v
 ```
 
----
+**Commit:** `test(m4): add isolated game-system fixture and runtime bridge`
 
-### Task 9: Lock M4 Route, Documentation, and Persistence Contracts
+## Task 2: animation and animation-tree authoring
 
 **Files:**
-- Create: `tests/e2e/m4/test_m4_contract.py`
+
+- Create: `gdapi/addon/runtime/services/animation_editor.gd`
+- Create: `gdapi/addon/runtime/services/animation_tree_editor.gd`
+- Create: `gdapi/addon/routes/animation/{create,delete,play,stop,track/{add,remove},key/{add,remove}}.gd`
+- Create: `gdapi/addon/routes/animation_tree/{state/add,transition/add,blend/set}.gd`
+- Create: `tests/e2e/m4/test_animation.py`
+
+**Implementation:** use a fixed `AnimationPlayer`/`AnimationTree` selection contract: scene-relative node path plus animation/state identifiers. Create/delete tracks and keys through snapshot/replacement of the scene-local animation resource so UndoRedo can restore the exact resource; never mutate a nested resource in-place outside an action. `play`/`stop` validate state and persist no runtime-only claim. Tree changes target a fixed editable state-machine resource and reject missing/invalid state names before mutation.
+
+**Tests first:** create a named animation, add/remove a value track and key, undo/redo each mutation, save/reopen, and check sorted animation/track output. Create a tree state and transition, set blend position, then cover duplicate name, missing path, invalid key value, and forced replacement safeguards.
+
+**Verify:** `uv run pytest tests/e2e/m4/test_animation.py -v`
+
+**Commit:** `feat(m4): add animation authoring routes`
+
+## Task 3: TileMapLayer queries and cell editing
+
+**Files:**
+
+- Create: `gdapi/addon/runtime/services/tilemap_editor.gd`
+- Create: `gdapi/addon/routes/tilemap/{info,cell/{get,set},rect/fill,layer/clear,used_cells}.gd`
+- Create: `tests/e2e/m4/test_tilemap.py`
+
+**Implementation:** operate exclusively on `TileMapLayer`. Decode coordinates and atlas/source identifiers strictly; reject coordinates outside Godot's signed 16-bit cell range before mutation. Call `update_internals()` only when the route must return freshly computed map data. `rect_fill` has an explicit maximum-cell bound. `layer_clear` requires `force:true`. Results use sorted `Vector2i` coordinate records and fixed source/atlas identifiers.
+
+**Tests first:** get initial atlas cell; set it, undo/redo, save/reopen; fill a rectangle and verify all returned used cells; clear only with force; reject an absent layer/node, malformed coordinates, an out-of-range coordinate, and a rectangle exceeding the bound.
+
+**Verify:** `uv run pytest tests/e2e/m4/test_tilemap.py -v`
+
+**Commit:** `feat(m4): add tilemap layer routes`
+
+## Task 4: material and shader assets
+
+**Files:**
+
+- Create: `gdapi/addon/runtime/services/material_editor.gd`
+- Create: `gdapi/addon/runtime/services/shader_editor.gd`
+- Create: `gdapi/addon/routes/material/{create,info,set,assign,duplicate,save}.gd`
+- Create: `gdapi/addon/routes/shader/{read,write,uniforms,material/create,param/set}.gd`
+- Create: `tests/e2e/m4/test_rendering.py`
+
+**Implementation:** support the roadmap's documented material types only and return a stable whitelist of editable properties. Shader write/create and material save create or overwrite project-local resources only; existing targets require `force:true`, use `PathGuard`, audit the write, and report `undoable:false`. `shader/uniforms` parses the loaded shader and returns stable names/types/defaults; `param/set` validates against that list before material mutation. Duplicate produces a distinct project-local resource path.
+
+**Tests first:** create/configure/assign a material with undo/redo; duplicate and save it; create/read/write a shader, inspect uniforms, create shader material, and set a valid parameter. Verify a reopened scene/resource, destination protection, invalid property/type, missing uniform, and traversal rejection.
+
+**Verify:** `uv run pytest tests/e2e/m4/test_rendering.py -v`
+
+**Commit:** `feat(m4): add material and shader routes`
+
+## Task 5: audio bus and player controls
+
+**Files:**
+
+- Create: `gdapi/addon/runtime/services/audio_editor.gd`
+- Create: `gdapi/addon/routes/audio/{bus/{list,add,remove},player/create,play,stop}.gd`
+- Create: `tests/e2e/m4/test_audio.py`
+
+**Implementation:** manipulate the private fixture's bus layout and fixed `AudioStreamPlayer` node contract. Bus names are unique, sorted, and validate prohibited/default bus operations. Bus layout changes are file-level, audited non-undoable operations; removing a bus needs `force:true`. Player creation is an UndoRedo node change. Playback controls require the selected audio domain running and use the M3 broker only if runtime state must be observed.
+
+**Tests first:** list/add/remove a bus, verify source fixture digest unchanged; create player then undo/redo and save/reopen; play/stop a configured tone while the audio domain is running; cover duplicate/missing/default bus and play-without-running-domain errors.
+
+**Verify:** `uv run pytest tests/e2e/m4/test_audio.py -v`
+
+**Commit:** `feat(m4): add audio system routes`
+
+## Task 6: UI controls and themes
+
+**Files:**
+
+- Create: `gdapi/addon/runtime/services/ui_editor.gd`
+- Create: `gdapi/addon/runtime/services/theme_editor.gd`
+- Create: `gdapi/addon/routes/ui/{control/set_anchor,text/set,layout/build}.gd`
+- Create: `gdapi/addon/routes/theme/{create,color/set,constant/set,font_size/set,stylebox/set}.gd`
+- Create: `tests/e2e/m4/test_ui.py`
+
+**Implementation:** `control/set_anchor` addresses an existing selected Control and accepts only an explicit anchor/offset map; it cannot become arbitrary `set()` access. `text/set` is restricted to a text-capable Control allowlist, and `layout/build` uses a fixed layout allowlist. All scene tree changes use UndoRedo. Theme routes address a project-local Theme resource by controlled type/name/property keys, validate `StyleBox` input using VariantCodec, and persist through an explicit save path requiring force for replacement.
+
+**Tests first:** set approved text/anchors/layout on a fixture Button, undo/redo and save/reopen; reject unsupported control class/property/layout values. Create a theme and set color, constant, font-size and stylebox, reload it, and reject bad theme item/type/value requests.
+
+**Verify:** `uv run pytest tests/e2e/m4/test_ui.py -v`
+
+**Commit:** `feat(m4): add UI and theme routes`
+
+## Task 7: 2D physics construction and raycasts
+
+**Files:**
+
+- Create: `gdapi/addon/runtime/services/physics_editor.gd`
+- Create: `gdapi/addon/routes/physics/{body/create,shape/create,layer/set,joint/create}.gd`
+- Modify: `gdapi/addon/routes/physics/raycast.gd`
+- Create: `tests/e2e/m4/test_physics.py`
+
+**Implementation:** create only `PhysicsBody2D` and supported `CollisionShape2D` shapes, with canonical collision-layer/mask values. `raycast` obtains `World2D.direct_space_state` at runtime and uses `PhysicsRayQueryParameters2D`; it must never instantiate a direct space state. It returns deterministic hit fields (collider scene path, position, normal, rid-free metadata). Joints use a supported 2D joint whitelist. Any 3D node/shape/query is rejected with `not_supported`.
+
+**Tests first:** create body/shape/layers/joint with undo/redo and reopen evidence; run the physics fixture and verify deterministic ray hit/miss; assert invalid layer range, missing body, and all 3D requests fail before mutation.
+
+**Verify:** `uv run pytest tests/e2e/m4/test_physics.py -v`
+
+**Commit:** `feat(m4): add 2D physics routes`
+
+## Task 8: 2D navigation region, bake, path, and agent target
+
+**Files:**
+
+- Create: `gdapi/addon/runtime/services/navigation_editor.gd`
+- Create: `gdapi/addon/routes/navigation/{region/list,mesh/bake}.gd`
+- Modify: `gdapi/addon/routes/navigation/{path/get,agent/target}.gd`
+- Create: `tests/e2e/m4/test_navigation.py`
+
+**Implementation:** enumerate `NavigationRegion2D` deterministically and use the selected region's actual navigation-map RID internally, never a global `"default"` map label. Baking writes only an explicit project-local target, is bounded by the broker timeout/cleanup policy, requires force when replacing output, and is audited non-undoable. `path/get` and `agent/target` run through the Task 1 adapter and accept only 2D vectors and selected fixture node paths.
+
+**Tests first:** list fixture regions; bake to a private target and reopen it; run the domain, get a non-empty path and set/read the agent target; assert navigation is unavailable after stop, path errors are typed, replacement needs force, and 3D requests return `not_supported`.
+
+**Verify:** `uv run pytest tests/e2e/m4/test_navigation.py -v`
+
+**Commit:** `feat(m4): add 2D navigation routes`
+
+## Task 9: documentation, count lock, and milestone evidence
+
+**Files:**
+
 - Modify: `README.md`
 - Modify: `docs/superpowers/specs/2026-06-27-gdcli-full-capability-roadmap-design.md`
+- Modify: `docs/superpowers/plans/2026-07-21-gdcli-m4-game-systems.md`
+- Create: `docs/reports/YYYY-MM-DD-gdcli-m4-game-systems-closure.md`
+- Modify: `tests/e2e/m4/test_m4_contract.py`
 
-**Interfaces:**
-- M4 exposes exactly the route files named in Tasks 2–8; no `manage` route or alias is added.
-- Each domain test verifies create/query/modify/save/reopen and either UndoRedo or explicit non-undoability.
+**Implementation:** document route parameters, response schema, mutation/force/undo semantics, and the M4 2D boundary. Lock the exact M4 public set in the contract test:
 
-- [ ] **Step 1: Add cross-domain contract checks**
+- `animation/{create,delete,play,stop,track/add,track/remove,key/add,key/remove}` (8)
+- `animation_tree/{state/add,transition/add,blend/set}` (3)
+- `tilemap/{info,cell/get,cell/set,rect/fill,layer/clear,used_cells}` (6)
+- `material/{create,info,set,assign,duplicate,save}` (6)
+- `shader/{read,write,uniforms,material/create,param/set}` (5)
+- `audio/{bus/list,bus/add,bus/remove,player/create,play,stop}` (6)
+- `ui/{control/set_anchor,text/set,layout/build}` (3)
+- `theme/{create,color/set,constant/set,font_size/set,stylebox/set}` (5)
+- `physics/{body/create,shape/create,layer/set,raycast,joint/create}` (5)
+- `navigation/{region/list,mesh/bake,path/get,agent/target}` (4)
 
-```python
-DOMAIN_PREFIXES = [
-    "animation/", "animation_tree/", "tilemap/", "material/", "shader/",
-    "audio/", "ui/", "theme/", "physics/", "navigation/",
-]
+The closure report records commands, pass counts, fixture isolation evidence, and explicit confirmation that M3 still exposes 35 `runtime/**` routes.
 
-EXPECTED_M4_ROUTES = {
-    *{f"animation/{name}" for name in ["create","delete","play","stop","track/add","track/remove","key/add","key/remove"]},
-    *{f"animation_tree/{name}" for name in ["state/add","transition/add","blend/set"]},
-    *{f"tilemap/{name}" for name in ["info","cell/get","cell/set","rect/fill","layer/clear","used_cells"]},
-    *{f"material/{name}" for name in ["create","info","set","assign","duplicate","save"]},
-    *{f"shader/{name}" for name in ["read","write","uniforms","material/create","param/set"]},
-    *{f"audio/{name}" for name in ["bus/list","bus/add","bus/remove","player/create","player/play","player/stop"]},
-    *{f"ui/{name}" for name in ["control/set_anchor","text/set","layout/build"]},
-    *{f"theme/{name}" for name in ["create","color/set","constant/set","font_size/set","stylebox/set"]},
-    *{f"physics/{name}" for name in ["body/create","shape/create","layer/set","raycast","joint/create"]},
-    *{f"navigation/{name}" for name in ["region/list","mesh/bake","path/get","agent/target"]},
-}
+**Tests first:** compare the `command/list` M4 subset to the 51-name set, fetch `command/doc` for every name, and verify no M4 route is exposed under `runtime/**`.
 
-
-def test_every_m4_route_has_complete_docs_and_mutation_contract(m4_editor):
-    routes = exec_ok(m4_editor, "gdapi/routes")["routes"]
-    selected = {route for route in routes if any(route.startswith(p) for p in DOMAIN_PREFIXES)}
-    assert selected == EXPECTED_M4_ROUTES
-    for route in sorted(selected):
-        doc = command_doc(m4_editor, route)
-        assert doc["summary"] and doc["returns"]["fields"]
-        if doc["params"]:
-            assert doc["examples"]
-```
-
-- [ ] **Step 2: Run the complete M4 suite**
-
-Run: `uv run pytest tests/e2e/m4 -v`
-
-Expected: PASS with all seven source-fixture domain digests unchanged.
-
-- [ ] **Step 3: Document domain schemas and Godot 4.7 TileMapLayer decision**
-
-Add command examples for typed animation keys, tile cells, shader uniforms, Theme values, physics vectors, and navigation points. Record why public `tilemap/**` maps to `TileMapLayer` only.
-
-- [ ] **Step 4: Run repository verification**
-
-Run:
+**Verify:**
 
 ```bash
 cargo fmt --check
 cargo clippy --workspace
 cargo test --workspace
+uv run pytest tests/e2e/m4 -v
+uv run pytest tests/e2e/m3/test_m3_contract.py -v
 uv run pytest tests/e2e/ -v
 git diff --check
 ```
 
-Expected: all commands exit 0 on Godot 4.7.x.
+**Commit:** `docs(m4): close game systems milestone`
 
-- [ ] **Step 5: Commit**
+## Plan self-review
 
-```bash
-git add tests/e2e/m4 README.md docs/superpowers/specs/2026-06-27-gdcli-full-capability-roadmap-design.md
-git commit -m "docs: complete M4 game systems milestone"
-```
+- The route inventory is 51: 8 + 3 + 6 + 6 + 5 + 6 + 3 + 5 + 5 + 4.
+- The three runtime-dependent public routes are bridged through internal `m4/**` operations, so M3's 35-route runtime contract is unchanged.
+- Every domain has a fixture, success path, validation failure, persistence or runtime evidence, and cleanup path.
+- The plan intentionally excludes CI gating, 3D physics/navigation, arbitrary editor property setting, and shared-fixture mutation.
