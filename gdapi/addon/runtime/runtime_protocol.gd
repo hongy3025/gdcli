@@ -15,6 +15,9 @@ extends RefCounted
 
 ## 协议主版本号。客户端与服务端必须匹配。
 const VERSION := 1
+## M6 negotiation keeps v1 wire compatibility while allowing the restricted eval op in v2.
+const VERSION_V2 := 2
+const SUPPORTED_VERSIONS := [VERSION, VERSION_V2]
 
 ## 单条消息序列化后最大字节数；超出后 validate_message 返回 invalid_param。
 ## 4 MiB 涵盖当前所有 payload（含 base64 screenshot/frames）。
@@ -117,7 +120,8 @@ static func validate_message(value: Variant) -> Dictionary:
 
 	var dict: Dictionary = value
 
-	if int(dict.get("version", -1)) != VERSION:
+	var message_version := int(dict.get("version", -1))
+	if not SUPPORTED_VERSIONS.has(message_version):
 		return _error("not_supported", "runtime protocol version is unsupported")
 
 	var raw_id: Variant = dict.get("id", null)
@@ -140,7 +144,7 @@ static func validate_message(value: Variant) -> Dictionary:
 		var op: String = String(dict.get("op", ""))
 		if op.is_empty():
 			return _error("invalid_param", "runtime request op is required")
-		if DENIED_OPS.has(op):
+		if DENIED_OPS.has(op) and message_version < VERSION_V2:
 			return _error("permission_denied", "operation is unavailable in runtime protocol v1")
 
 	var payload: Variant = dict.get("payload", null)

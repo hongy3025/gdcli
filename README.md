@@ -402,10 +402,7 @@ M3 增补 35 个 runtime 路由（以 `runtime/` 为前缀），这些路由需�
 
 所有 runtime 请求默认 5 秒超时，可被 broker.tick 清理；stop/disconnect 会同步失败所有 pending 让 await/call 收到 `conflict`。
 
-不支持的能力（含 op 名单）：
-
-- `eval`、`process/run`、`network/http_request` — protocol v1 拒绝
-- 断点 mutation、任意表达式 — 计划在 M6 才开放
+M6 高风险能力默认关闭：`editor/eval`、`runtime/eval`、`process/run`、`network/http_request`、`filesystem/batch/delete`、`filesystem/batch/replace`、`filesystem/batch/recover` 和 `export/android/deploy_many` 只有在 `.godot/gdapi-policy.json` 显式启用并携带 `force:true` 后才会执行。策略格式、最小权限示例和审计脱敏边界见 [`docs/security/high-risk-capabilities.md`](docs/security/high-risk-capabilities.md)。
 
 ---
 

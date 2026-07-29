@@ -15,6 +15,7 @@ const RuntimeDebuggerRegistration := preload(
 	"res://addons/gdapi/runtime/runtime_debugger_registration.gd"
 )
 const RuntimeProbe := preload("res://addons/gdapi/runtime/runtime_probe.gd")
+const DeferredTaskRegistry := preload("res://addons/gdapi/runtime/deferred_task_registry.gd")
 ## 元数据文件路径，用于存储服务器连接信息
 const META_PATH := "res://.godot/gdapi.json"
 ## 默认端口号，实际使用时会尝试从该端口开始绑定
@@ -43,6 +44,8 @@ var _runtime_debugger_plugin: RefCounted = null
 var _runtime_debugger_registration: RefCounted = null
 ## M3.1 runtime file transport (editor 侧 fallback transport manager)
 var _runtime_file_transport: RefCounted = null
+## Deferred high-risk route work.  It is ticked before accepting new requests.
+var _deferred_task_registry: RefCounted = null
 ## 日志缓冲区，存储最近的日志条目用于远程查询
 
 var _log_buffer: Array = []
@@ -70,6 +73,7 @@ var _audit_seq: int = 0
 func _enter_tree() -> void:
 	# 注册自身到 Engine meta，供路由访问
 	Engine.set_meta("gdapi_plugin", self)
+	_deferred_task_registry = DeferredTaskRegistry.new()
 
 	_server = GdApiServer.create()
 	var token := _generate_token()
@@ -137,6 +141,9 @@ func _on_filesystem_changed() -> void:
 ## 5. M3: 关闭 runtime broker,移除 autoload,移除 debugger plugin
 func _exit_tree() -> void:
 	set_process(false)
+	if _deferred_task_registry != null:
+		_deferred_task_registry.cancel_all("plugin exiting")
+		_deferred_task_registry = null
 	if _server and _server.is_running():
 		_server.stop()
 	# M3.1: 停止文件 transport manager,把 pending 同步失败回 callback
@@ -168,6 +175,8 @@ func _exit_tree() -> void:
 func _process(_dt: float) -> void:
 	if _server == null or not _server.is_running():
 		return
+	if _deferred_task_registry != null:
+		_deferred_task_registry.tick(Time.get_ticks_msec())
 	if _runtime_broker != null:
 		_runtime_broker.tick(Time.get_ticks_msec())
 	# M3.1: 文件 transport manager 扫描 hello/outbox、处理 timeout
@@ -178,6 +187,10 @@ func _process(_dt: float) -> void:
 		if req == null:
 			break
 		_router.dispatch(req, _server)
+
+
+func register_deferred_task(task: Dictionary) -> bool:
+	return _deferred_task_registry != null and _deferred_task_registry.register(task)
 
 
 ## 添加日志条目到缓冲区

@@ -148,6 +148,13 @@ static func _is_sensitive_key(key: String) -> bool:
 	):
 		return true
 	for alias in [
+		"source",
+		"stdout",
+		"stderr",
+		"environment",
+		"env",
+		"headers",
+		"header",
 		"token",
 		"password",
 		"passwd",

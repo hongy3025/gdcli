@@ -4,7 +4,7 @@
 
 **Goal:** Add explicitly gated eval, process, network, and bulk mutation capabilities with enforceable target/timeout/output limits and complete redacted audit evidence.
 
-**Architecture:** A deny-by-default policy file under `.godot` is loaded independently of route bodies, so a caller cannot enable its own privileges. Every high-risk route passes through one policy gate before touching its domain service. Process execution is implemented in Rust for reliable argv-only spawning, output caps, timeout, and child termination; network and batch services remain in GDScript but use validated targets, rollback/recovery manifests, and bounded asynchronous completion.
+**Architecture:** A deny-by-default policy file under `.godot` is loaded independently of route bodies, so a caller cannot enable its own privileges. Every high-risk route passes through one policy gate before touching its domain service. The editor plugin owns a deferred-task registry: a route may retain its `GdApiResponse`, register one bounded task, and the plugin polls that task from `_process()` until it sends exactly one terminal response. Process execution is implemented in Rust for reliable argv-only spawning, output caps, timeout, and child termination; network requests run through an `HTTPRequest` node owned by that registry. File operations remain synchronous but use verified plans, reversible staging, and bounded work.
 
 **Tech Stack:** Godot 4.7 Expression/HTTPRequest APIs, Rust std::process GDExtension runner, M1–M5 audit/path/runtime/export contracts, pytest/uv.
 
@@ -18,7 +18,7 @@
 - Every high-risk route requires `force:true`, including expressions intended to be read-only.
 - Never invoke a shell. Process input is executable plus argv; metacharacters have no special meaning.
 - Process timeout defaults to 5 seconds, policy maximum is at most 60 seconds, combined output maximum is at most 1 MiB, and killed children are reaped.
-- Network permits HTTPS by default, validates every redirect, rejects credentials in URLs, blocks loopback/link-local/private/multicast/unspecified destinations unless explicitly allowlisted, and caps response at 4 MiB.
+- Network has no implicit scheme or host access: the enabled policy explicitly lists allowed schemes, hosts, and ports; every redirect is revalidated. It rejects credentials in URLs and blocks loopback/link-local/private/multicast/unspecified destinations unless the enabled policy explicitly allows the resolved target. Response cap is at most 4 MiB.
 - Eval source is at most 16 KiB, uses Godot `Expression`, exposes a fixed data dictionary, and never binds arbitrary Object instances.
 - Bulk file operations require a dry-run plan hash; apply must present the same hash and fails if any source digest changed.
 - Batch delete moves files to `.godot/gdapi-trash/<operation-id>` and returns a recovery manifest.
@@ -29,14 +29,14 @@
 | File | Responsibility after M6 |
 |---|---|
 | `gdapi/addon/runtime/capability_policy.gd` | Parse/cache strict project policy and authorize route requests |
-| `gdapi/addon/runtime/audit_redactor.gd` | Central recursive redaction and bounded audit summaries |
+| `gdapi/addon/runtime/deferred_task_registry.gd` | Plugin-owned polling/lifecycle for routes that respond after `handle()` returns |
 | `gdapi/rust/src/process_runner.rs` | Shell-free bounded child process lifecycle |
 | `gdapi/addon/runtime/services/eval_service.gd` | Restricted editor/runtime Expression execution |
 | `gdapi/addon/runtime/services/network_service.gd` | URL/DNS/redirect validation and bounded HTTPRequest |
 | `gdapi/addon/runtime/services/bulk_file_service.gd` | Dry-run hashes, atomic replace, trash manifests, rollback |
 | `gdapi/addon/runtime/services/bulk_deploy_service.gd` | Confirmed multi-device deployment orchestration |
 | `gdapi/addon/routes/{editor,runtime,process,network,filesystem,export}/**` | Public M6 routes |
-| `tests/fixtures/m6_project/**` | Policy variants and controlled executable/network/file targets |
+| `tests/fixtures/m6_project/**` | Isolated fixture project plus controlled executable/network/file targets |
 | `tests/e2e/m6/**` | Default-deny, sandbox-boundary, timeout, rollback, and audit acceptance |
 
 ---
@@ -45,18 +45,21 @@
 
 **Files:**
 - Create: `gdapi/addon/runtime/capability_policy.gd`
-- Create: `gdapi/addon/runtime/audit_redactor.gd`
+- Create: `gdapi/addon/runtime/deferred_task_registry.gd`
 - Modify: `gdapi/addon/runtime/audit_log.gd`
+- Modify: `gdapi/addon/plugin.gd`
 - Create: `tests/fixtures/m6_project/project.godot`
 - Create: `tests/fixtures/m6_project/bulk/{a,b}.txt`
 - Create: `tests/e2e/m6/conftest.py`
 - Create: `tests/fixture_project/tests/test_capability_policy.gd`
-- Create: `tests/fixture_project/tests/test_audit_redactor.gd`
+- Create: `tests/fixture_project/tests/test_deferred_task_registry.gd`
+- Modify: `tests/e2e/test_gdscript_units.py`
 
 **Interfaces:**
 - Produces `authorize(capability:String,route:String,body:Dictionary) -> Dictionary`.
 - Policy schema is `{version:1,capabilities:{name:{enabled:bool}}}` plus the exact capability-specific limit fields defined in Tasks 3–7.
-- Produces `redact(value:Variant,key:String="") -> Variant` and `summarize(route,body,target) -> Dictionary`.
+- Extends the existing `GdApiAuditLog.summarize()` redaction contract; no parallel redactor is introduced.
+- Produces `register(task)`, `tick(now_ms)`, and `cancel_all(reason)` for plugin-owned deferred tasks. A task owns its retained response and must emit one terminal response or be failed on timeout/plugin shutdown.
 - Produces isolated pytest fixtures `m6_editor_denied`, `m6_editor_process`, `m6_editor_eval`, `m6_editor_network`, `m6_editor_bulk`, and `m6_editor_bulk_deploy`; each writes its policy directly to the copied project's `.godot/gdapi-policy.json` before addon startup.
 - Produces `local_http_server` with `/ok`, `/large`, `/delay`, and controlled redirect endpoints bound to loopback; only the network-enabled test policy may allow that exact host and port.
 - Produces test helpers `bulk_replace_plan`, `apply_bulk_replace`, `wait_for_audit`, `latest_audit`, and `contains_secret` used by later M6 tasks.
@@ -74,31 +77,31 @@ func test_force_and_capability_are_both_required() -> void:
 	assert_eq(policy.authorize("process", "process/run", {}).code, "unsafe_operation")
 	assert_true(policy.authorize("process", "process/run", {"force":true}).ok)
 
-func test_redactor_removes_nested_secrets() -> void:
-	var clean := Redactor.redact({"Authorization":"Bearer secret","nested":{"token":"abc"},"safe":"value"})
+func test_audit_log_removes_nested_secrets() -> void:
+	var clean := GdApiAuditLog.summarize({"Authorization":"Bearer secret","nested":{"token":"abc"},"safe":"value"})
 	assert_eq(clean, {"Authorization":"[REDACTED]","nested":{"token":"[REDACTED]"},"safe":"value"})
 ```
 
 - [ ] **Step 2: Run policy/redactor units**
 
-Run: `uv run pytest tests/e2e/test_gdscript_units.py -v -k "capability_policy or audit_redactor"`
+Run: `uv run pytest tests/e2e/test_gdscript_units.py -v -k "capability_policy or deferred_task_registry"`
 
-Expected: FAIL because both runtime files are absent.
+Expected: FAIL because the policy and task registry are absent.
 
 - [ ] **Step 3: Implement strict schema, canonicalization, and redaction**
 
-Reject unknown top-level keys, unknown capability names, non-boolean enabled values, negative limits, and policy files outside `.godot/gdapi-policy.json`. Cache by mtime but retain the last denial state on parse failure. Redact case-insensitive keys matching `authorization`, `cookie`, `token`, `secret`, `password`, `key`, `env`, `source`, `stdout`, or `stderr`; truncate strings at 256 characters and arrays at 20 items. Implement the pytest fixtures by copying `m6_project`, writing one exact least-privilege policy before Godot startup, and asserting teardown leaves no editor, child process, or temporary operation directory. Start the controlled HTTP server in a Python thread and shut it down in fixture finalization.
+Reject unknown top-level keys, unknown capability names, non-boolean enabled values, negative limits, and policy files outside `.godot/gdapi-policy.json`. Cache by mtime but retain the last denial state on parse failure. Extend the existing audit summarizer only where necessary: it must redact `source`, `stdout`, `stderr`, environment fields, and nested header values without weakening its current token/cookie protection. The plugin creates the registry in `_enter_tree`, ticks it before polling new HTTP requests, and cancels every pending task in `_exit_tree`. Implement the pytest fixtures by copying `m6_project`, writing one exact least-privilege policy before Godot startup, and asserting teardown leaves no editor, child process, pending task, or temporary operation directory. Start the controlled HTTP server in a Python thread and shut it down in fixture finalization.
 
 - [ ] **Step 4: Verify policy reload and audit path identity**
 
-Run: `uv run pytest tests/e2e/test_gdscript_units.py -v -k "capability_policy or audit_redactor"`
+Run: `uv run pytest tests/e2e/test_gdscript_units.py -v -k "capability_policy or deferred_task_registry"`
 
 Expected: PASS; changing policy mtime reloads it and malformed replacement denies all capabilities.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gdapi/addon/runtime/capability_policy.gd gdapi/addon/runtime/audit_redactor.gd gdapi/addon/runtime/audit_log.gd tests/fixtures/m6_project tests/e2e/m6/conftest.py tests/fixture_project/tests
+git add gdapi/addon/runtime/capability_policy.gd gdapi/addon/runtime/deferred_task_registry.gd gdapi/addon/runtime/audit_log.gd gdapi/addon/plugin.gd tests/fixtures/m6_project tests/e2e/m6/conftest.py tests/fixture_project/tests tests/e2e/test_gdscript_units.py
 git commit -m "feat: add high-risk capability policy"
 ```
 
@@ -174,6 +177,7 @@ git commit -m "feat: add bounded shell-free process runner"
 **Files:**
 - Create: `gdapi/addon/runtime/services/process_service.gd`
 - Create: `gdapi/addon/routes/process/run.gd`
+- Modify: `gdapi/addon/plugin.gd`
 - Create: `tests/e2e/m6/test_process_run.py`
 
 **Interfaces:**
@@ -218,7 +222,7 @@ Expected: default-deny passes after Task 1; enabled cases FAIL because route/ser
 
 - [ ] **Step 3: Implement policy intersection and asynchronous polling**
 
-Canonicalize executable, require exact policy membership, normalize cwd through PathGuard/read, and require it under one configured root. Clamp requested limits downward to policy limits. Start the Rust runner and poll from the editor process loop; send the HTTP response once. Map spawn failure to `godot_error`, timeout to `timeout`, policy/force failures to their standard codes, and nonzero process exit to a successful transport result with `ok:true` and the actual exit code.
+Canonicalize executable, require exact policy membership, normalize cwd through PathGuard/read, and require it under one configured root. Clamp requested limits downward to policy limits. Start the Rust runner and register a process task with the plugin-owned deferred-task registry; the registry polls it from the editor process loop and sends exactly one response. Map spawn failure to `godot_error`, timeout to `timeout`, policy/force failures to their standard codes, and nonzero process exit to a successful transport result with `ok:true` and the actual exit code. Plugin shutdown cancels the job and responds only if the HTTP connection remains live.
 
 - [ ] **Step 4: Verify all process boundaries and audit redaction**
 
@@ -229,7 +233,7 @@ Expected: PASS; executable prefix tricks, parent cwd, oversized limits, environm
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gdapi/addon/runtime/services/process_service.gd gdapi/addon/routes/process/run.gd tests/e2e/m6/test_process_run.py
+git add gdapi/addon/runtime/services/process_service.gd gdapi/addon/routes/process/run.gd gdapi/addon/plugin.gd tests/e2e/m6/test_process_run.py
 git commit -m "feat: add policy-gated process execution"
 ```
 
@@ -242,6 +246,8 @@ git commit -m "feat: add policy-gated process execution"
 - Create: `gdapi/addon/routes/editor/eval.gd`
 - Create: `gdapi/addon/routes/runtime/eval.gd`
 - Modify: `tests/e2e/m2/test_m2_contract.py`
+- Modify: `gdapi/addon/runtime/runtime_protocol.gd`
+- Modify: `gdapi/addon/runtime/runtime_probe.gd`
 - Create: `tests/fixture_project/tests/test_eval_service.gd`
 - Create: `tests/e2e/m6/test_eval.py`
 
@@ -281,14 +287,14 @@ Expected: FAIL because eval service/routes are absent.
 
 - [ ] **Step 3: Implement fixed-input Expression execution**
 
-Token-scan and reject statement delimiters, assignment, object/global identifiers, preload/load, function/lambda syntax, and method calls; permit arithmetic, comparisons, boolean operators, literals, constructors supported by VariantCodec, and the provided input names. Parse with `Expression.parse(source,input_names)`, execute with input values and `base_instance=null`, and treat execution failure as `invalid_param`. Runtime eval delegates the same source/inputs to M3 probe and uses the same service code.
+Token-scan and reject statement delimiters, assignment, object/global identifiers, preload/load, function/lambda syntax, and method calls; permit arithmetic, comparisons, boolean operators, literals, constructors supported by VariantCodec, and the provided input names. Parse with `Expression.parse(source,input_names)`, execute with input values and `base_instance=null`, and treat execution failure as `invalid_param`. Runtime eval delegates the same source/inputs to the M3 probe and uses the same evaluator. Because protocol v1 explicitly denies `eval`, first introduce protocol v2: preserve v1 message validation for existing operations, advertise the negotiated version in the broker/probe handshake, and allow only the new `eval` operation in v2.
 
-Extend the M2 exact route contract with `POST_M2_EDITOR_ROUTES = {"editor/eval"}` and assert editor-prefixed routes equal the M2 editor routes union that set; do not relabel eval as an M2 capability.
+Extend the M2 inventory test with `POST_M2_EDITOR_ROUTES = {"editor/eval"}` and assert the selected editor-prefixed route subset equals the existing M2 editor subset plus that set; do not relabel eval as an M2 capability. Do not replace the current global baseline/missing-route assertions with an exact all-route assertion, because M3–M6 legitimately add routes.
 
 ```python
 POST_M2_EDITOR_ROUTES = {"editor/eval"}
-# In test_m2_route_families_and_docs:
-assert selected == M2_ROUTES | POST_M2_EDITOR_ROUTES
+# In a new editor-family subset assertion in test_m2_contract.py:
+assert selected == M2_EDITOR_ROUTES | POST_M2_EDITOR_ROUTES
 ```
 
 - [ ] **Step 4: Verify policy, force, typing, size, and audit**
@@ -300,7 +306,7 @@ Expected: PASS; source never appears in audit, and runtime disconnect returns `c
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gdapi/addon/runtime/services/eval_service.gd gdapi/addon/routes/editor/eval.gd gdapi/addon/routes/runtime/eval.gd tests/e2e/m2/test_m2_contract.py tests/fixture_project/tests/test_eval_service.gd tests/e2e/m6/test_eval.py
+git add gdapi/addon/runtime/services/eval_service.gd gdapi/addon/routes/editor/eval.gd gdapi/addon/routes/runtime/eval.gd gdapi/addon/runtime/runtime_protocol.gd gdapi/addon/runtime/runtime_probe.gd tests/e2e/m2/test_m2_contract.py tests/fixture_project/tests/test_eval_service.gd tests/e2e/m6/test_eval.py
 git commit -m "feat: add restricted editor and runtime eval"
 ```
 
@@ -311,6 +317,7 @@ git commit -m "feat: add restricted editor and runtime eval"
 **Files:**
 - Create: `gdapi/addon/runtime/services/network_service.gd`
 - Create: `gdapi/addon/routes/network/http_request.gd`
+- Modify: `gdapi/addon/plugin.gd`
 - Create: `tests/e2e/m6/test_network_request.py`
 
 **Interfaces:**
@@ -369,7 +376,7 @@ Expected: default-deny passes; enabled cases FAIL because the network route is a
 
 - [ ] **Step 3: Implement validation before every HTTPRequest**
 
-Parse URL, reject userinfo/fragments, match exact host or `*.` suffix policy on label boundaries, resolve DNS, and classify every returned IPv4/IPv6 address. Set `HTTPRequest.timeout`, `body_size_limit`, `max_redirects=0`, and TLS validation. Follow at most five redirects manually by resolving Location and repeating all checks. Permit only GET/HEAD by default; other policy-allowed methods require force and bounded body. Strip hop-by-hop response headers and encode bytes.
+Parse URL, reject userinfo/fragments, match exact host or `*.` suffix policy on label boundaries, resolve DNS, and classify every returned IPv4/IPv6 address. The network service creates an `HTTPRequest` node under the plugin, configures its timeout/body cap/TLS validation with redirects disabled, and registers the request with the deferred-task registry. Follow at most five redirects manually by resolving `Location` and repeating every policy/DNS check. Permit only GET/HEAD by default; other policy-allowed methods require force and bounded body. Strip hop-by-hop response headers and encode bytes. The task always frees its `HTTPRequest` node on completion, timeout, cancellation, or plugin exit.
 
 - [ ] **Step 4: Verify SSRF, redirect, timeout, and output limits**
 
@@ -380,7 +387,7 @@ Expected: PASS; all rejected requests leave the controlled server hit counter un
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gdapi/addon/runtime/services/network_service.gd gdapi/addon/routes/network/http_request.gd tests/e2e/m6/test_network_request.py
+git add gdapi/addon/runtime/services/network_service.gd gdapi/addon/routes/network/http_request.gd gdapi/addon/plugin.gd tests/e2e/m6/test_network_request.py
 git commit -m "feat: add policy-gated network requests"
 ```
 
@@ -434,16 +441,16 @@ Expected: FAIL because batch routes are absent.
 
 - [ ] **Step 3: Implement canonical planning and rollback**
 
-Normalize/sort paths, include each source digest and operation parameters in canonical JSON, and hash it. Recompute immediately before apply. Delete moves each file plus `.uid`/import metadata to a unique trash directory and writes `manifest.json`; on any failure move completed entries back. Replace writes sibling temporary files, fsync/close, then swaps sequentially while retaining originals in the operation directory; rollback every prior swap on failure. Recover rejects destination conflicts rather than overwriting.
+Normalize/sort paths, include each source digest and operation parameters in canonical JSON, and hash it. Recompute immediately before apply. Delete moves each file plus a sibling `.uid` when present to a unique trash directory and writes `manifest.json`; on any failure move completed entries back. Do not move Godot's derived `.godot/imported` cache. Replace writes sibling temporary files, closes them, then swaps sequentially while retaining originals in the operation directory; rollback every prior swap on failure. GDScript exposes no portable `fsync`, so the contract promises close-before-rename and recoverable rollback rather than durability across power loss. Recover rejects destination conflicts rather than overwriting.
 
-Extend the M2 exact route contract with `POST_M2_FILESYSTEM_ROUTES = {"filesystem/batch/delete","filesystem/batch/replace","filesystem/batch/recover"}` so the historical M2 suite remains exact after M6.
+Extend the M2 inventory test with `POST_M2_FILESYSTEM_ROUTES = {"filesystem/batch/delete","filesystem/batch/replace","filesystem/batch/recover"}` and assert the selected filesystem-prefixed route subset equals the existing M2 filesystem subset plus this set. Preserve the historical baseline/missing-route assertions rather than treating the entire repository route table as M2-only.
 
 ```python
 POST_M2_FILESYSTEM_ROUTES = {
     "filesystem/batch/delete", "filesystem/batch/replace", "filesystem/batch/recover",
 }
-# Preserve POST_M2_EDITOR_ROUTES from Task 4:
-assert selected == M2_ROUTES | POST_M2_EDITOR_ROUTES | POST_M2_FILESYSTEM_ROUTES
+# Preserve POST_M2_EDITOR_ROUTES from Task 4 and compare only the selected family:
+assert selected == M2_FILESYSTEM_ROUTES | POST_M2_FILESYSTEM_ROUTES
 ```
 
 - [ ] **Step 4: Verify caps, rollback, recovery, and audit**
@@ -466,7 +473,7 @@ git commit -m "feat: add recoverable bulk file operations"
 **Files:**
 - Create: `gdapi/addon/runtime/services/bulk_deploy_service.gd`
 - Create: `gdapi/addon/routes/export/android/deploy_many.gd`
-- Modify: `tests/e2e/m5/test_m5_contract.py`
+- Modify: `tests/e2e/m5/test_m5_smoke.py`
 - Create: `tests/e2e/m6/test_bulk_deploy.py`
 
 **Interfaces:**
@@ -502,14 +509,14 @@ Expected: FAIL because service/route are absent.
 
 - [ ] **Step 3: Implement sequential confirmed deployment**
 
-Reuse the M5 fixed Android bridge, require every serial currently online and unique, include APK digest in the plan hash, and deploy in sorted serial order. Continue after a device-specific failure so every selected device gets a terminal result, but return overall `changed` only when at least one install succeeded. Audit one parent operation plus one redacted child event per serial.
+Extend the existing Android bridge with a narrowly scoped command-execution seam used only by tests; production keeps resolving the configured Android SDK ADB path. Require every serial currently online and unique, include APK digest in the plan hash, and deploy in sorted serial order. Continue after a device-specific failure so every selected device gets a terminal result, but return overall `changed` only when at least one install succeeded. Audit one parent operation plus one redacted child event per serial.
 
-Extend the M5 exact route contract with `POST_M5_EXPORT_ROUTES = {"export/android/deploy_many"}` and compare export-prefixed routes with the M5 union M6 set.
+Extend `tests/e2e/m5/test_m5_smoke.py` with `POST_M5_EXPORT_ROUTES = {"export/android/deploy_many"}` and assert the selected export-prefixed route subset equals the existing M5 export subset plus that set. Preserve the existing M5 smoke/inclusion assertions for all other families.
 
 ```python
 POST_M5_EXPORT_ROUTES = {"export/android/deploy_many"}
-# In test_m5_routes_docs_and_clean_snapshot:
-assert selected == M5_ROUTES | POST_M5_EXPORT_ROUTES
+# In test_m5_route_families_are_registered:
+assert selected == M5_EXPORT_ROUTES | POST_M5_EXPORT_ROUTES
 ```
 
 - [ ] **Step 4: Verify stale artifact/device list and default denial**
@@ -521,7 +528,7 @@ Expected: PASS; a changed APK, missing device, duplicate serial, or disabled pol
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gdapi/addon/runtime/services/bulk_deploy_service.gd gdapi/addon/routes/export/android/deploy_many.gd tests/e2e/m5/test_m5_contract.py tests/e2e/m6/test_bulk_deploy.py
+git add gdapi/addon/runtime/services/android_bridge.gd gdapi/addon/runtime/services/bulk_deploy_service.gd gdapi/addon/routes/export/android/deploy_many.gd tests/e2e/m5/test_m5_smoke.py tests/e2e/m6/test_bulk_deploy.py
 git commit -m "feat: add confirmed bulk Android deployment"
 ```
 
@@ -536,7 +543,7 @@ git commit -m "feat: add confirmed bulk Android deployment"
 - Modify: `docs/superpowers/specs/2026-06-27-gdcli-full-capability-roadmap-design.md`
 
 **Interfaces:**
-- M6 adds exactly `editor/eval`, `runtime/eval`, `process/run`, `network/http_request`, three filesystem batch routes, and `export/android/deploy_many`.
+- M6 adds the following high-risk routes: `editor/eval`, `runtime/eval`, `process/run`, `network/http_request`, three filesystem batch routes, and `export/android/deploy_many`. The M6 contract asserts this selected set and does not reinterpret prior-milestone route inventories as a global exact set.
 - Security documentation contains a minimal deny policy and separate least-privilege examples for each capability.
 
 - [ ] **Step 1: Add a cross-capability default-deny/audit matrix**

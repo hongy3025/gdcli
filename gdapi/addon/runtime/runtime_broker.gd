@@ -421,6 +421,11 @@ func request(op: String, payload: Dictionary, timeout_ms: int, on_complete: Call
 ##
 ## @param message runtime 推过来的字典
 func receive(message: Variant) -> void:
+	# The editor broker remains on v1 until a session explicitly negotiates v2.
+	# Protocol.validate_message accepts v2 for the M6 probe boundary, but an
+	# unnegotiated v2 reply must not consume a v1 pending request.
+	if typeof(message) != TYPE_DICTIONARY or int(Dictionary(message).get("version", -1)) != Protocol.VERSION:
+		return
 	var verdict: Dictionary = Protocol.validate_message(message)
 	if not bool(verdict.get("ok", false)):
 		if Protocol.message_exceeds_limit(message):

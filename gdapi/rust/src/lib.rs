@@ -267,8 +267,14 @@ impl GdApiProcessRunner {
                     &GString::from("exit_code"),
                     &Variant::from(result.exit_code.unwrap_or(-1) as i64),
                 );
-                dict.set(&GString::from("timed_out"), &Variant::from(result.timed_out));
-                dict.set(&GString::from("cancelled"), &Variant::from(result.cancelled));
+                dict.set(
+                    &GString::from("timed_out"),
+                    &Variant::from(result.timed_out),
+                );
+                dict.set(
+                    &GString::from("cancelled"),
+                    &Variant::from(result.cancelled),
+                );
                 dict.set(
                     &GString::from("stdout"),
                     &Variant::from(GString::from(result.stdout.as_str())),
@@ -277,7 +283,10 @@ impl GdApiProcessRunner {
                     &GString::from("stderr"),
                     &Variant::from(GString::from(result.stderr.as_str())),
                 );
-                dict.set(&GString::from("truncated"), &Variant::from(result.truncated));
+                dict.set(
+                    &GString::from("truncated"),
+                    &Variant::from(result.truncated),
+                );
             }
             PollOutcome::Missing => {}
         }
