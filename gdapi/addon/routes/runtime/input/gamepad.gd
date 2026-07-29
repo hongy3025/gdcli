@@ -1,19 +1,10 @@
 ## runtime/input/gamepad — 注入 joypad button 或 axis motion
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var ops := load("res://addons/gdapi/runtime/runtime_input_ops.gd")
-	var result: Dictionary = ops.gamepad(req.body)
-	if not bool(result.get("ok", false)):
-		res.error(String(result.get("error", "gamepad failed")), String(result.get("code", "godot_error")), 500)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/input/gamepad", true)
 
 func doc() -> GdApiRouteDoc:
 	return (

@@ -3,19 +3,10 @@
 ## events 最多 100 项,每项 {after_ms, route, data};累计 after_ms <= 10000ms。
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var ops := load("res://addons/gdapi/runtime/runtime_input_ops.gd")
-	var result: Dictionary = await ops.sequence(req.body)
-	if not bool(result.get("ok", false)):
-		res.error(String(result.get("error", "sequence failed")), String(result.get("code", "godot_error")), 500)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/input/sequence", true)
 
 func doc() -> GdApiRouteDoc:
 	return (
