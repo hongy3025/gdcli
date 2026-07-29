@@ -55,7 +55,7 @@ func read(after_cursor: int, limit: int = 100) -> Dictionary:
 	if _items.is_empty():
 		return {
 			"items": results,
-			"next_cursor": _next_cursor - 1,
+			"next_cursor": int(after_cursor),
 			"dropped": 0,
 		}
 	for entry in _items:

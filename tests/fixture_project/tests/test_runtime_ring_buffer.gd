@@ -16,6 +16,7 @@ func _init() -> void:
 	test_init_default_capacity()
 	test_append_assigns_unique_cursors()
 	test_empty_read()
+	test_empty_read_preserves_ahead_cursor()
 	test_wraparound_drops_oldest()
 	test_eviction_reports_exact_dropped_count()
 	test_partial_eviction_reports_exact_dropped_count()
@@ -59,6 +60,13 @@ func test_empty_read() -> void:
 	assert_eq(page.items, [], "empty read has no items")
 	assert_eq(page.next_cursor, 0, "empty read cursor remains zero")
 	assert_eq(page.dropped, 0, "empty read reports no dropped entries")
+
+func test_empty_read_preserves_ahead_cursor() -> void:
+	var buf := RingBuffer.new(3)
+	var page := buf.read(41, 10)
+	assert_eq(page.items, [], "ahead cursor read has no items")
+	assert_eq(page.next_cursor, 41, "ahead cursor remains stable on empty read")
+	assert_eq(page.dropped, 0, "ahead cursor read reports no dropped entries")
 
 func test_wraparound_drops_oldest() -> void:
 	var buf := RingBuffer.new(3)

@@ -50,7 +50,8 @@ def test_input_routes_are_adapter_backed_mutations(name):
 def test_fixture_reset_releases_action_edge_state():
     source = fixture_script_source("probe_input_action.gd")
     assert "func reset_fixture()" in source
-    assert "func _input(" in source
+    assert "func _process(" in source
+    assert "Input.is_action_pressed(\"ui_accept\")" in source
     assert "_previous_pressed = false" in source
     assert 'Input.action_release("ui_accept")' in source
 
@@ -105,7 +106,7 @@ def test_zero_delay_action_sequence_observes_release_press_edge(m3_running):
         ],
     })
     assert result["events"] == 3
-    assert get_counter(m3_running, "input_actions") == before + 2
+    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 2, timeout=2.0)
 
 
 @pytest.mark.parametrize("route,payload", [

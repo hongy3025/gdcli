@@ -265,6 +265,26 @@ def test_runtime_node_mutations_reject_unsafe_targets_without_mutation(m3_runnin
     assert exec_ok(m3_running, "runtime/node/info", {"node_path": source})["node_path"] == source
 
 
+def test_runtime_reparent_rejects_descendant_cycle_after_game_dispatch(m3_running):
+    parent = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain", "type": "Node", "name": "Task15CycleParent",
+    })["node_path"]
+    child = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain", "type": "Node", "name": "Task15CycleChild",
+    })["node_path"]
+    nested = exec_ok(m3_running, "runtime/node/reparent", {
+        "node_path": child, "new_parent": parent,
+    })
+    child = nested["new_parent"] + "/Task15CycleChild"
+    before = exec_ok(m3_running, "runtime/scene/tree", {"max_depth": 4})
+    error = exec_error(m3_running, "runtime/node/reparent", {
+        "node_path": parent, "new_parent": child,
+    })
+    assert error["code"] == "conflict"
+    after = exec_ok(m3_running, "runtime/scene/tree", {"max_depth": 4})
+    assert after == before
+
+
 def test_runtime_infrastructure_nodes_reject_mutations(m3_running):
     infrastructure_nodes = ["ProbeInput", "ProbeInputAction", "ProbeFinishedSignal"]
     cases = []

@@ -16,6 +16,7 @@ from conftest import run_godot_script
         "res://tests/test_runtime_protocol.gd",
         "res://tests/test_runtime_broker.gd",
         "res://tests/test_runtime_ring_buffer.gd",
+        "res://tests/test_runtime_reparent.gd",
         "res://tests/test_runtime_transport_file_probe.gd",
         "res://tests/test_runtime_transport_file_editor.gd",
         "res://tests/test_runtime_transport_integration.gd",

@@ -46,8 +46,8 @@ func emit_known_logs() -> Dictionary:
 	var runtime_probe := get_tree().root.get_node_or_null("GdApiRuntimeProbe")
 	if runtime_probe == null or not runtime_probe.has_method("record_log"):
 		return {"ok": false, "error": "runtime probe log recorder is unavailable"}
-	runtime_probe.call("record_log", "info", "known-info")
-	runtime_probe.call("record_log", "error", "known-error")
+	runtime_probe.call("record_log", "info", "known-info", {"source": "runtime-fixture"})
+	runtime_probe.call("record_log", "error", "known-error", {"source": "runtime-fixture"})
 	return {"ok": true}
 
 func prepare_capture_fixture(mode: String) -> Dictionary:

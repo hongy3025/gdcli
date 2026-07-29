@@ -42,7 +42,8 @@ def test_runtime_log_read_returns_initial_empty(m3_running):
 
 
 def test_runtime_log_read_returns_known_game_logs(m3_running):
-    emit_known_logs(m3_running)
+    call = emit_known_logs(m3_running)
+    assert call["changed"] is True
     first = exec_ok(m3_running, "runtime/log/read", {"after_cursor": 0})
     known = [
         (item["level"], item["message"])

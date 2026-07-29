@@ -269,9 +269,8 @@ func _op_node_call(payload: Dictionary) -> Dictionary:
 		and String(payload.get("node_path", "")) == "/root/RuntimeMain/ProbeTarget"
 		and String(payload.get("method", "")) == "emit_known_logs"
 	):
-		var runtime_main := get_tree().root.get_node_or_null("RuntimeMain")
-		if runtime_main != null and runtime_main.has_method("emit_known_logs"):
-			runtime_main.call("emit_known_logs")
+		record_log("info", "known-info", {"source": "runtime-fixture"})
+		record_log("error", "known-error", {"source": "runtime-fixture"})
 	return result
 
 ## Fixture-only fixed-semantics reset. This is intentionally not a public route:

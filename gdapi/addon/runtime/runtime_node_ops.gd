@@ -172,7 +172,7 @@ static func reparent(payload: Dictionary) -> Dictionary:
 		return {"ok": false, "code": "permission_denied", "error": "node is not a reparentable fixture node"}
 	if new_parent != _scene_root() and not _is_dedicated_target(new_parent):
 		return {"ok": false, "code": "permission_denied", "error": "new parent is not a dedicated runtime target"}
-	if node == new_parent or _is_descendant_of(new_parent, node, false):
+	if _would_create_reparent_cycle(node, new_parent):
 		return {"ok": false, "code": "conflict", "error": "reparent would create a cycle"}
 	node.get_parent().remove_child(node)
 	new_parent.add_child(node)
@@ -688,6 +688,10 @@ static func _is_descendant_of(candidate: Node, root: Node, include_self: bool) -
 			return true
 		p = p.get_parent()
 	return false
+
+## Reparent must never detach a node before rejecting self/descendant cycles.
+static func _would_create_reparent_cycle(node: Node, new_parent: Node) -> bool:
+	return node == new_parent or _is_descendant_of(new_parent, node, false)
 
 ## 简单等价（Vector/Color/int/float 都由 compare 决定）
 static func _variants_equal(a: Variant, b: Variant) -> bool:
