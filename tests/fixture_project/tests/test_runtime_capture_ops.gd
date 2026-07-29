@@ -4,6 +4,27 @@ extends SceneTree
 const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
+class FakeTexture:
+	extends RefCounted
+
+	var width: int
+	var height: int
+	var readback_count := 0
+
+	func _init(p_width: int, p_height: int) -> void:
+		width = p_width
+		height = p_height
+
+	func get_width() -> int:
+		return width
+
+	func get_height() -> int:
+		return height
+
+	func get_image() -> Image:
+		readback_count += 1
+		return Image.create(width, height, false, Image.FORMAT_RGBA8)
+
 var passed := 0
 var failed := 0
 
@@ -13,6 +34,7 @@ func _init() -> void:
 	test_camera_path_validation_is_strict()
 	test_fit_dimensions_use_1920_by_1080()
 	test_encoded_result_counts_protocol_envelope()
+	test_oversized_texture_is_rejected_before_readback()
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -79,3 +101,9 @@ func test_encoded_result_counts_protocol_envelope() -> void:
 	assert_true(CaptureOps.protocol_result_fits(small), "small protocol result fits")
 	var oversized := {"data_base64": "x".repeat(Protocol.MAX_MESSAGE_BYTES)}
 	assert_eq(CaptureOps.protocol_result_fits(oversized), false, "protocol envelope overflow rejected")
+
+func test_oversized_texture_is_rejected_before_readback() -> void:
+	var texture := FakeTexture.new(3840, 2160)
+	var result: Dictionary = CaptureOps.capture_texture(texture, {})
+	assert_invalid(result, "oversized source texture")
+	assert_eq(texture.readback_count, 0, "oversized source performs no CPU readback")

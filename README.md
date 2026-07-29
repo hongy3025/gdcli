@@ -379,7 +379,7 @@ M3 增补 35 个 runtime 路由（以 `runtime/` 为前缀），这些路由需�
 | `runtime/status` `runtime/scene/tree` | 2 | 状态、场景树 |
 | `runtime/node/info\|get\|set\|call\|find\|remove\|reparent` | 7 | 节点增删改查，方法调用需要在节点元数据 `gdapi_callable_methods` allowlist 中 |
 | `runtime/input/key\|mouse\|gamepad\|touch\|action\|sequence` | 6 | 输入模拟；sequence 最多 100 项、累计 ≤ 10 秒 |
-| `runtime/screenshot/viewport\|camera\|frames` | 3 | PNG 截图，尺寸限制 1920x1080，单响应 ≤ 4 MiB |
+| `runtime/screenshot/viewport\|camera\|frames` | 3 | PNG 截图，尺寸限制 1920x1080（超限源在 CPU readback 前拒绝），单响应 ≤ 4 MiB |
 | `runtime/log/read\|clear` `runtime/debug/performance\|monitors\|errors\|breakpoints` | 6 | 游标读取 + 性能监控 |
 | `runtime/assert/condition\|node_exists\|property_equals\|signal_received` | 4 | 等待 / 断言，使用固定 json grammar，不调用 Expression/eval |
 | `runtime/signal/connect\|disconnect\|emit\|await` | 4 | 信号连接 / 等待 |

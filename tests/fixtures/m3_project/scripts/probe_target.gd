@@ -9,6 +9,7 @@ var input_mouse: int = 0
 var input_gamepad: int = 0
 var input_touch: int = 0
 var input_actions: int = 0
+var capture_readbacks: int = 0
 var _reset_epoch: int = 0
 var _pending_timers: Array[Dictionary] = []
 
@@ -20,7 +21,7 @@ func _init() -> void:
 	set_meta("gdapi_callable_methods", PackedStringArray([
 		"increment", "increment_later", "emit_finished", "emit_known_logs",
 		"add_keys", "add_mouse", "add_gamepad", "add_touch", "add_action",
-		"reset_shared_fixture",
+		"reset_shared_fixture", "prepare_capture_fixture",
 	]))
 
 func increment(amount: int) -> int:
@@ -56,6 +57,7 @@ func reset_fixture() -> void:
 	input_gamepad = 0
 	input_touch = 0
 	input_actions = 0
+	capture_readbacks = 0
 	_disconnect_signal_connections(&"counted")
 	_disconnect_signal_connections(&"finished")
 	for sibling in get_parent().get_children():
@@ -73,6 +75,12 @@ func reset_shared_fixture() -> Dictionary:
 			"error": "fixture runtime probe reset helper is unavailable",
 		}
 	return runtime_probe.call("reset_shared_fixture")
+
+func prepare_capture_fixture(mode: String) -> Dictionary:
+	var runtime_main := get_parent()
+	if runtime_main == null or not runtime_main.has_method("prepare_capture_fixture"):
+		return {"ok": false, "error": "capture fixture is unavailable"}
+	return runtime_main.call("prepare_capture_fixture", mode)
 
 func _cancel_pending_timers() -> void:
 	for entry in _pending_timers:

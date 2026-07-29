@@ -230,6 +230,8 @@ screenshot、frames、sequence、condition 和 signal await 必须覆盖真实 s
 
 - request 和 reply 最大 4 MiB；
 - viewport/camera 最大 1920×1080；
+- capture 在 CPU readback 前检查源纹理尺寸；超限源返回结构化
+  `invalid_param`，不先分配完整 Image 再缩放；
 - frames 最大 60；
 - input sequence 最大 100 events / 10 秒。
 

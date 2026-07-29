@@ -30,7 +30,7 @@ static func viewport(payload: Dictionary) -> Dictionary:
 	await RenderingServer.frame_post_draw
 	if _deadline_reached(deadline_msec):
 		return _failure("timeout", "viewport capture timed out")
-	return _capture_viewport(tree.root, {})
+	return await _capture_viewport(tree.root, {}, {}, deadline_msec)
 
 static func camera(payload: Dictionary) -> Dictionary:
 	var validated := validate_camera_payload(payload)
@@ -43,7 +43,8 @@ static func camera(payload: Dictionary) -> Dictionary:
 	await RenderingServer.frame_post_draw
 	if _deadline_reached(deadline_msec):
 		return _failure("timeout", "camera capture timed out")
-	return _capture_viewport(resolved.viewport, {"camera": validated.node_path})
+	return await _capture_viewport(resolved.viewport, {"camera": validated.node_path}, {},
+		deadline_msec)
 
 static func frames(payload: Dictionary) -> Dictionary:
 	var validated := validate_frames_payload(payload)
@@ -69,10 +70,10 @@ static func frames(payload: Dictionary) -> Dictionary:
 		await RenderingServer.frame_post_draw
 		if _deadline_reached(deadline_msec):
 			return _failure("timeout", "frame capture timed out")
-		var captured := _capture_viewport(source, {"index": i}, {
+		var captured := await _capture_viewport(source, {"index": i}, {
 			"frames": frames_arr,
 			"count": frames_arr.size(),
-		})
+		}, deadline_msec)
 		if not bool(captured.get("ok", false)):
 			return captured
 		var frame: Dictionary = captured.result
@@ -172,26 +173,48 @@ static func _resolve_camera(node_path: String) -> Dictionary:
 		return _failure("not_found", "camera viewport is unavailable")
 	return {"ok": true, "viewport": viewport}
 
-## GPU readback cannot be avoided for a screenshot. Texture dimensions are checked
-## first, then the returned Image is resized before PNG/base64 allocation.
+## Reject an oversized source before CPU readback. This deliberately does not
+## resize a full-size Image after allocation: callers must provide a bounded
+## viewport/render target when they need a smaller capture.
 static func _capture_viewport(viewport_node: Viewport, metadata: Dictionary,
-		current_result: Dictionary = {}) -> Dictionary:
+		current_result: Dictionary = {}, deadline_msec: int = -1) -> Dictionary:
 	if viewport_node == null:
 		return _failure("not_found", "viewport is unavailable")
+	if bool(viewport_node.get_meta("gdapi_capture_fixture_delay", false)):
+		await viewport_node.get_tree().create_timer(0.25).timeout
+		if deadline_msec >= 0 and _deadline_reached(deadline_msec):
+			return _failure("timeout", "capture timed out before readback")
 	var texture := viewport_node.get_texture()
 	if texture == null:
 		return _failure("godot_error", "viewport texture is unavailable")
-	var texture_size := fit_dimensions(texture.get_width(), texture.get_height())
-	if texture_size == Vector2i.ZERO:
+	var fixture_image: Variant = viewport_node.get_meta("gdapi_capture_fixture_image", null)
+	var result := capture_texture(texture, metadata, current_result, fixture_image,
+		viewport_node)
+	return result
+
+## Public test seam around the allocation boundary. A fake texture can prove
+## get_image() is never reached for an oversized source.
+static func capture_texture(texture: Variant, metadata: Dictionary,
+		current_result: Dictionary = {}, fixture_image: Variant = null,
+		viewport_node: Viewport = null) -> Dictionary:
+	if texture == null:
+		return _failure("godot_error", "viewport texture is unavailable")
+	var source_width := int(texture.get_width())
+	var source_height := int(texture.get_height())
+	if source_width <= 0 or source_height <= 0:
 		return _failure("godot_error", "viewport texture has invalid dimensions")
-	var image := texture.get_image()
+	if source_width > MAX_WIDTH or source_height > MAX_HEIGHT:
+		return _failure("invalid_param",
+			"capture source exceeds the 1920x1080 pre-readback limit")
+	_mark_fixture_readback(viewport_node)
+	var image: Image = fixture_image if fixture_image is Image else texture.get_image()
 	if image == null or image.is_empty():
 		return _failure("godot_error", "viewport image is unavailable")
-	var target_size := fit_dimensions(image.get_width(), image.get_height())
-	if target_size == Vector2i.ZERO:
+	if image.get_width() <= 0 or image.get_height() <= 0:
 		return _failure("godot_error", "viewport image has invalid dimensions")
-	if image.get_width() != target_size.x or image.get_height() != target_size.y:
-		image.resize(target_size.x, target_size.y, Image.INTERPOLATE_BILINEAR)
+	if image.get_width() > MAX_WIDTH or image.get_height() > MAX_HEIGHT:
+		return _failure("invalid_param",
+			"capture image exceeds the 1920x1080 allocation limit")
 	var png_bytes := image.save_png_to_buffer()
 	if png_bytes.is_empty():
 		return _failure("godot_error", "viewport PNG encoding failed")
@@ -213,6 +236,20 @@ static func _capture_viewport(viewport_node: Viewport, metadata: Dictionary,
 	}):
 		return _failure("invalid_param", "encoded capture reply exceeds 4 MiB")
 	return {"ok": true, "result": item}
+
+static func _mark_fixture_readback(viewport_node: Viewport) -> void:
+	if viewport_node == null:
+		return
+	var raw_path: Variant = viewport_node.get_meta("gdapi_capture_readback_counter_path", null)
+	if not (raw_path is NodePath):
+		return
+	var tree := Engine.get_main_loop() as SceneTree
+	var counter_node := tree.root.get_node_or_null(raw_path) if tree != null else null
+	if counter_node == null:
+		return
+	var current: Variant = counter_node.get("capture_readbacks")
+	if typeof(current) == TYPE_INT:
+		counter_node.set("capture_readbacks", int(current) + 1)
 
 static func _protocol_size(result: Variant) -> int:
 	var envelope := Protocol.reply(9_223_372_036_854_775_807, true, result, "", "",

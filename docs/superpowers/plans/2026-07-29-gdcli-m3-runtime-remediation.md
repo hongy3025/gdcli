@@ -498,7 +498,7 @@
 - Modify: `tests/fixture_project/tests/test_runtime_route.gd`
 
 **Interfaces:**
-- Produces: adapter-backed viewport/camera/frames routes; game-process PNG capture with width/height and SHA-256; max 1920×1080, 60 frames, 4 MiB encoded reply.
+- Produces: adapter-backed viewport/camera/frames routes; game-process PNG capture with width/height and SHA-256; max 1920×1080 enforced before CPU readback (oversized sources return `invalid_param`), 60 frames, 4 MiB encoded reply.
 
 - [ ] **Step 1: Add RED tests.** Assert valid viewport PNG signature/hash, invalid camera node returns `invalid_param`, count 61 is rejected before capture, and frames waits/resumes through file transport.
 
