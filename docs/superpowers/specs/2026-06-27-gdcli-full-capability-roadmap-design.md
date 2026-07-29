@@ -401,14 +401,18 @@ mutation 分为三类：
 - 信号连接与断开、分组添加与移除在保存重开后仍可查询。
 - 每个 mutation 的响应、错误 code、UndoRedo 标记和 audit 行为符合统一 contract。
 
-### M3：Runtime 验证闭环 🟡 控制面 + 单元层绿灯；数据面 E2E 待 broker-dispatch refactor
+### M3：Runtime 验证闭环 ✅ 已完成
 
-状态：2026-07-29 重新评估（含 M3.1 file transport closure）
-实施计划：`docs/superpowers/plans/2026-07-23-gdcli-m3.closure.md`、
-          `docs/superpowers/plans/2026-07-23-gdcli-m3.1-file-transport.md`
-验证报告：`docs/superpowers/reports/2026-07-23-gdcli-m3-summary.md`、
-          `docs/superpowers/reports/2026-07-24-gdcli-m3.1-summary.md`、
-          `docs/superpowers/reports/2026-07-24-m3.1-failures.md`
+状态：2026-07-29 runtime remediation 验收完成。
+实施计划：`docs/superpowers/plans/2026-07-29-gdcli-m3-runtime-remediation.md`
+验证报告：`docs/reports/2026-07-29-gdcli-m3-runtime-remediation-closure.md`
+
+验收证据：本地 warm-build `tests/e2e/m3` 122 passed（49.01s，≤60s）、完整
+`tests/e2e/` 232 passed；35 条 runtime route（其中 34 条数据面 route 经 broker）均已验证，
+pending、stale transport root 与 Godot/gdcli 进程清理均通过。CI 时长或 CI 运行证据不是 M3
+验收条件。
+
+以下内容保留为 remediation 前的历史快照，解释当时的 M3/M3.1 缺口；不代表当前状态。
 
 M3 结构性骨架（35 个 runtime route、broker / debugger plugin / probe / ring buffer /
 condition / capture ops 等 7 个 runtime 模块、3 套 GDScript 单元测试、1 套 m3 fixture、

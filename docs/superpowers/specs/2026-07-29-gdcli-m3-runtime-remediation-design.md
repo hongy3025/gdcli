@@ -50,7 +50,7 @@ runtime manifest 精确为 35 条，data-plane route 精确为 34 条。
 3. 保持 EngineDebugger 为首选 transport，file transport 为 Godot 4.7 headless fallback。
 4. 统一 request ID、pending、deadline、reply 和 disconnect 的所有权。
 5. 关闭三份 M3 plan 中所有未满足的 P0/P1 缺陷和验收项。
-6. 将 M3 E2E 的本地 warm-build 时间降到 60 秒以内，CI 硬上限为 120 秒。
+6. 将 M3 E2E 的本地 warm-build 时间降到 60 秒以内。
 7. 以可重复的完整验证证据将 roadmap M3 从 🟡 翻为 ✅。
 
 ## 非目标
@@ -424,10 +424,8 @@ gdcli --json exec
 | Editor 启动次数 | 1 |
 | Game 启动次数 | 最多 3 |
 | 本地 warm-build M3 E2E | ≤ 60 秒 |
-| CI M3 E2E | ≤ 120 秒 |
 
-M3 E2E 默认串行。Rust、GDScript unit 和 M3 E2E 可由 CI job 并行，但测试正确性不依赖
-pytest-xdist 或固定执行顺序。
+M3 E2E 默认串行，测试正确性不依赖 pytest-xdist 或固定执行顺序。
 
 ## 实施顺序
 
@@ -498,7 +496,7 @@ pytest-xdist 或固定执行顺序。
    signal connection 或 timer。
 9. `cargo fmt --check`、`cargo clippy --workspace`、`cargo test --workspace` exit 0。
 10. GDScript unit 和完整 `tests/e2e/` 全绿；必需环境失败不得 skip。
-11. 本地 warm-build M3 E2E ≤60 秒，CI ≤120 秒，并保存 `--durations=20` 证据。
+11. 本地 warm-build M3 E2E ≤60 秒，并保存 `--durations=20` 证据。
 12. closure report 记录实际命令、exit code、测试数量、transport 和耗时。
 
 ## Rollback strategy

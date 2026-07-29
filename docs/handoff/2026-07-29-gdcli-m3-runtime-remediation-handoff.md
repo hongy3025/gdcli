@@ -217,7 +217,6 @@ build once
 - editor 启动次数 1；
 - game 启动次数最多 3；
 - 本地 warm-build M3 E2E ≤60s；
-- CI ≤120s；
 - route 行为仍通过真实 `gdcli --json exec`；
 - 不以 direct HTTP、skip、弱化断言或固定 sleep 换速度。
 

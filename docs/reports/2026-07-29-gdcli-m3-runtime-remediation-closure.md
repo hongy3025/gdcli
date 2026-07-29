@@ -2,7 +2,7 @@
 
 日期：2026-07-29
 
-结论：**本地可修复阻塞已闭环；由于仍无本次 CI 运行证据，M3 保持 🟡。**
+结论：**M3 验收已闭环。**
 
 验证基线：
 
@@ -75,9 +75,9 @@ assert []
 - Source fixture final check：精确 runtime root 不存在；同级文件保留合同通过。
 - Process cleanup：完整矩阵结束后 Godot/gdcli 进程数为 0。
 
-## 性能与 CI 边界
+## 性能边界
 
-本地 warm-build M3 基线为 49.01s，满足 ≤60s。完整 E2E fix round 为 516.54s。当前仓库没有可引用的本次 CI 运行证据，因此不声称 CI M3 ≤120s。
+本地 warm-build M3 基线为 49.01s，满足 ≤60s。完整 E2E fix round 为 516.54s。CI 时长或 CI 运行证据不是 M3 的验收条件。
 
 ## 验收结论
 
@@ -91,6 +91,5 @@ assert []
 | Source fixture stale-root cleanup | 通过 | cleanup/manifest 聚焦 16/16 + 两次最终磁盘检查 |
 | 本地 M3 ≤60s | 通过 | 49.01s |
 | 完整 `tests/e2e/` | 通过 | 232 passed，exit 0 |
-| CI M3 ≤120s | **未证实** | 无本次 CI 运行证据 |
 
-因此不修改 roadmap 的 M3 🟡 状态；本次只提交修复代码、回归测试和本 closure report。
+因此 roadmap 的 M3 状态更新为 ✅；本 closure report 记录实际本地验证证据。

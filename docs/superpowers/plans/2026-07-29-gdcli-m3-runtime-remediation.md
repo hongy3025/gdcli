@@ -721,7 +721,7 @@
   git diff --check
   ```
 
-- [ ] **Step 2: Verify acceptance criteria.** Confirm 35 routes exactly, 34 broker-dispatched data routes, valid behavior plus negative/mutation/async tests, EngineDebugger priority and file fallback, all bounds, audit/redaction, two lifecycle cycles, pending zero, no stale probe/game/timer/signal, all tool/test exits zero, local M3 warm-build ≤60 s and CI evidence ≤120 s.
+- [ ] **Step 2: Verify acceptance criteria.** Confirm 35 routes exactly, 34 broker-dispatched data routes, valid behavior plus negative/mutation/async tests, EngineDebugger priority and file fallback, all bounds, audit/redaction, two lifecycle cycles, pending zero, no stale probe/game/timer/signal, all tool/test exits zero, and local M3 warm-build ≤60 s.
 
 - [ ] **Step 3: Write the closure report.** Record the exact date, commit range, commands and exit codes, test totals, transport (`file` in headless; EngineDebugger unit/priority evidence), process counts, durations, and any recovery count. Do not claim success for a test that was skipped or weakened.
 

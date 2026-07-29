@@ -1,22 +1,22 @@
-[gd_scene load_steps=5 format=3 uid="uid://bm3runtimemain"]
+[gd_scene format=3 uid="uid://pvfk5hll6rfh"]
 
-[ext_resource type="Script" path="res://scripts/runtime_main.gd" id="1_main"]
-[ext_resource type="Script" path="res://scripts/probe_target.gd" id="2_target"]
-[ext_resource type="Script" path="res://scripts/probe_input.gd" id="3_input"]
-[ext_resource type="Script" path="res://scripts/probe_input_action.gd" id="4_input_action"]
-[ext_resource type="Script" path="res://scripts/probe_finished_signal.gd" id="5_finished_signal"]
+[ext_resource type="Script" uid="uid://btth5fknslbog" path="res://scripts/runtime_main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://dflkc8n31uhi1" path="res://scripts/probe_target.gd" id="2_target"]
+[ext_resource type="Script" uid="uid://b4dhp1diruxrp" path="res://scripts/probe_input.gd" id="3_input"]
+[ext_resource type="Script" uid="uid://bfi1tws4bwhje" path="res://scripts/probe_input_action.gd" id="4_input_action"]
+[ext_resource type="Script" uid="uid://hh86eclv3cvg" path="res://scripts/probe_finished_signal.gd" id="5_finished_signal"]
 
-[node name="RuntimeMain" type="Node2D"]
+[node name="RuntimeMain" type="Node2D" unique_id=447033441]
 script = ExtResource("1_main")
 
-[node name="ProbeTarget" type="Node2D" parent="."]
+[node name="ProbeTarget" type="Node2D" parent="." unique_id=1761300712]
 script = ExtResource("2_target")
 
-[node name="ProbeInput" type="Node" parent="."]
+[node name="ProbeInput" type="Node" parent="." unique_id=1795375151]
 script = ExtResource("3_input")
 
-[node name="ProbeInputAction" type="Node" parent="."]
+[node name="ProbeInputAction" type="Node" parent="." unique_id=938169303]
 script = ExtResource("4_input_action")
 
-[node name="ProbeFinishedSignal" type="Node" parent="."]
+[node name="ProbeFinishedSignal" type="Node" parent="." unique_id=617709400]
 script = ExtResource("5_finished_signal")

@@ -18,6 +18,10 @@ config/name="gdapi_e2e_fixture"
 run/main_scene="uid://cmk3k8sc02roh"
 config/features=PackedStringArray("4.7")
 
+[autoload]
+
+GdApiRuntimeProbe="*uid://bkkn7w1cus0gi"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/gdapi/plugin.cfg", "res://addons/gdapi_test/plugin.cfg")
