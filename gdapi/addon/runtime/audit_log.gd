@@ -103,6 +103,12 @@ static func _unclassified_summary(value: Variant) -> Dictionary:
 
 static func _is_sensitive_key(key: String) -> bool:
 	var normalized := key.replace("-", "_").replace(".", "_")
+	var compact := normalized.replace("_", "")
+	var segments := normalized.split("_", false)
+	if normalized == "auth" or segments.has("auth"):
+		return true
+	if compact == "authheader" or compact.begins_with("authheader") or compact.ends_with("authheader"):
+		return true
 	for alias in [
 		"token", "password", "passwd", "secret", "authorization", "cookie",
 		"api_key", "apikey", "private_key", "credential", "credentials", "passphrase",

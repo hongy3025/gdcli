@@ -24,6 +24,7 @@ func _init() -> void:
 	test_attach_transitions_to_connecting()
 	test_first_request_transitions_to_connected()
 	test_detach_completes_pending_with_conflict()
+	test_detach_clears_transport_before_reentrant_callback()
 	test_detach_is_idempotent()
 	test_status_returns_pending_count()
 	test_request_timeout_completes_with_timeout()
@@ -42,6 +43,8 @@ func _init() -> void:
 	test_set_active_transport_keeps_priority_selection()
 	test_detach_file_transport_returns_to_none()
 	test_begin_generation_replaces_pending_and_binds_requests()
+	test_begin_generation_clears_transport_before_reentrant_callback()
+	test_new_session_clears_old_transport_before_reentrant_callback()
 	test_stale_generation_reply_is_ignored()
 	test_stale_transport_generation_cannot_attach()
 
@@ -117,6 +120,33 @@ func test_detach_completes_pending_with_conflict() -> void:
 	assert_eq(received.size(), 1, "callback fired exactly once")
 	assert_eq(received[0]["code"], "conflict", "failure code")
 	assert_eq(received[0]["ok"], false, "failure ok=false")
+
+func test_detach_clears_transport_before_reentrant_callback() -> void:
+	var b: RefCounted = Broker.new()
+	var transport_sent: Array = []
+	var callback_replies: Array = []
+	var reentrant_replies: Array = []
+	b.attach(3, func(message: Dictionary) -> bool:
+		transport_sent.append(message.duplicate(true))
+		return true
+	)
+	b.request("op/original", {}, 5000, func(reply: Dictionary) -> void:
+		callback_replies.append(reply)
+		b.request("op/reentrant", {}, 5000, func(reentrant_reply: Dictionary) -> void:
+			reentrant_replies.append(reentrant_reply)
+		)
+	)
+	assert_eq(transport_sent.size(), 1, "original detach request is sent once")
+	b.detach("shutdown")
+	assert_eq(callback_replies.size(), 1, "detach completes original callback once")
+	assert_eq(reentrant_replies.size(), 1, "detach reentrant request fails synchronously")
+	if reentrant_replies.size() == 1:
+		assert_eq(reentrant_replies[0].get("code", ""), "conflict",
+			"detach reentrant request sees stopped broker")
+	assert_eq(transport_sent.size(), 1, "detach reentry cannot use old sender")
+	assert_eq(b.status().pending, 0, "detach reentry leaves no pending request")
+	assert_eq(b.status().state, "stopped", "detach callback observes stopped state")
+	assert_eq(b.status().transport, "none", "detach callback observes no transport")
 
 func test_detach_is_idempotent() -> void:
 	var b: RefCounted = Broker.new()
@@ -365,6 +395,66 @@ func test_begin_generation_replaces_pending_and_binds_requests() -> void:
 	b.request("runtime/status", {}, 5000, func(_reply: Dictionary) -> void: pass)
 	assert_eq(sent.back().get("generation"), generation_b, "request binds current generation")
 	assert_eq(b.status().generation, generation_b, "status exposes current generation")
+
+func test_begin_generation_clears_transport_before_reentrant_callback() -> void:
+	var b: RefCounted = Broker.new()
+	var transport_sent: Array = []
+	var callback_replies: Array = []
+	var reentrant_replies: Array = []
+	b.attach(7, func(message: Dictionary) -> bool:
+		transport_sent.append(message.duplicate(true))
+		return true
+	)
+	b.request("op/original", {}, 5000, func(reply: Dictionary) -> void:
+		callback_replies.append(reply)
+		b.request("op/reentrant", {}, 5000, func(reentrant_reply: Dictionary) -> void:
+			reentrant_replies.append(reentrant_reply)
+		)
+	)
+	assert_eq(transport_sent.size(), 1, "original generation request is sent once")
+	b.begin_generation()
+	assert_eq(callback_replies.size(), 1, "generation replacement completes original callback")
+	assert_eq(reentrant_replies.size(), 1, "generation reentrant request fails synchronously")
+	if reentrant_replies.size() == 1:
+		assert_eq(reentrant_replies[0].get("code", ""), "conflict",
+			"generation reentrant request sees stopped broker")
+	assert_eq(transport_sent.size(), 1, "generation reentry cannot use old sender")
+	assert_eq(b.status().pending, 0, "generation reentry leaves no pending request")
+	assert_eq(b.status().state, "stopped", "generation callback observes stopped state")
+	assert_eq(b.status().transport, "none", "generation callback observes no transport")
+
+func test_new_session_clears_old_transport_before_reentrant_callback() -> void:
+	var b: RefCounted = Broker.new()
+	var old_transport_sent: Array = []
+	var new_transport_sent: Array = []
+	var callback_replies: Array = []
+	var reentrant_replies: Array = []
+	b.attach(7, func(message: Dictionary) -> bool:
+		old_transport_sent.append(message.duplicate(true))
+		return true
+	)
+	b.request("op/original", {}, 5000, func(reply: Dictionary) -> void:
+		callback_replies.append(reply)
+		b.request("op/reentrant", {}, 5000, func(reentrant_reply: Dictionary) -> void:
+			reentrant_replies.append(reentrant_reply)
+		)
+	)
+	assert_eq(old_transport_sent.size(), 1, "old session request is sent once")
+	b.attach(8, func(message: Dictionary) -> bool:
+		new_transport_sent.append(message.duplicate(true))
+		return true
+	)
+	assert_eq(callback_replies.size(), 1, "session replacement completes original callback")
+	assert_eq(reentrant_replies.size(), 1, "session reentrant request fails synchronously")
+	if reentrant_replies.size() == 1:
+		assert_eq(reentrant_replies[0].get("code", ""), "conflict",
+			"session reentrant request sees invalidated broker")
+	assert_eq(old_transport_sent.size(), 1, "session reentry cannot use old sender")
+	assert_eq(new_transport_sent.size(), 0, "session callback runs before new sender is bound")
+	assert_eq(b.status().pending, 0, "session reentry leaves no pending request")
+	assert_eq(b.status().state, "connecting", "new session is bound after callback cleanup")
+	b.request("op/new-session", {}, 5000, func(_reply: Dictionary) -> void: pass)
+	assert_eq(new_transport_sent.size(), 1, "subsequent request uses new session sender")
 
 func test_stale_generation_reply_is_ignored() -> void:
 	var b: RefCounted = Broker.new()

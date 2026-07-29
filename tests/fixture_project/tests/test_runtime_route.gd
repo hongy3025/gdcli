@@ -68,6 +68,7 @@ func _init() -> void:
 	test_mutation_success_adds_contract_fields_and_audits()
 	test_mutation_rejection_is_audited_with_redacted_payload()
 	test_redact_recurses_through_nested_values()
+	test_redact_covers_auth_key_variants_and_short_values()
 	test_redact_summarizes_base64_and_large_arrays()
 	test_audit_summary_redacts_aliases_and_bounds_unclassified_values()
 	test_redact_bounds_keys_and_unclassified_variants()
@@ -340,6 +341,25 @@ func test_redact_recurses_through_nested_values() -> void:
 	var redacted: Variant = RuntimeRoute.new().redact(value)
 	assert_eq(redacted.headers[0].Authorization, "[REDACTED]", "redacts secrets in arrays")
 	assert_eq(redacted.data.cookie, "[REDACTED]", "redacts secrets in dictionaries")
+
+func test_redact_covers_auth_key_variants_and_short_values() -> void:
+	var bearer := "Bearer task16-auth-secret"
+	var short_secret := "Q7"
+	var redacted: Dictionary = RuntimeRoute.new().redact({
+		"auth": bearer,
+		"nested": [
+			{"AUTH_HEADER": short_secret},
+			{"Auth-Header": bearer},
+			{"auth.header": short_secret},
+			{"AuthHeader": bearer},
+		],
+	})
+	assert_eq(redacted.auth, "[REDACTED]", "auth is redacted")
+	for entry in redacted.nested:
+		assert_eq(entry.values()[0], "[REDACTED]", "auth header spelling is redacted")
+	var serialized := JSON.stringify(redacted)
+	assert_false(serialized.contains(bearer), "Bearer value does not appear in audit summary")
+	assert_false(serialized.contains(short_secret), "short auth value does not appear in audit summary")
 
 func test_redact_summarizes_base64_and_large_arrays() -> void:
 	var items: Array = []

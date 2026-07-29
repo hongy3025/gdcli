@@ -7,7 +7,7 @@
 ## 设计原则：
 ## - 不直接依赖 EditorDebuggerSession / EngineDebugger，由 transport 注入 send；
 ## - pending 由整数 id 唯一索引，避免 op 字符串歧义；
-## - detach 必须把所有 pending 同步失败回 callback，再清状态；
+## - detach/session replacement 必须先清 pending 与 transport/state，再同步失败 callback；
 ## - tick() 由外部每帧调用一次，可单测。
 ##
 ## Reply shape: {"ok":bool, "code"?:String, "error"?:String, ...}
@@ -114,12 +114,13 @@ func begin_connect(generation: String = "") -> String:
 ## 开始新的运行世代，并原子地失效旧 transport/pending。
 ## 返回值会同时被 editor 与 probe 写入 hello/request metadata。
 func begin_generation() -> String:
-	_fail_pending("runtime generation replaced")
+	var pending_snapshot := _drain_pending()
 	_clear_transports()
 	cleanup_runtime_root()
 	_generation = "%d-%d-%d" % [OS.get_process_id(), Time.get_ticks_usec(), randi()]
 	_state = "stopped"
 	_write_generation_marker()
+	_notify_pending_failures(pending_snapshot, "runtime generation replaced")
 	return _generation
 
 ## 把 broker 标记为 connected（probe hello 已到达）
@@ -297,15 +298,25 @@ func _write_generation_marker() -> void:
 func detach(reason: String = "runtime detached") -> void:
 	if _state == "stopped" and _pending.is_empty():
 		return
-	_fail_pending(reason)
+	var pending_snapshot := _drain_pending()
 	_clear_transports()
 	cleanup_runtime_root()
+	_notify_pending_failures(pending_snapshot, reason)
 
 func _fail_pending(reason: String) -> void:
+	var snapshot := _drain_pending()
+	_notify_pending_failures(snapshot, reason)
+
+## Snapshot and erase every pending request without invoking user code.
+## Session teardown must finish before callbacks can re-enter request().
+func _drain_pending() -> Array:
 	var snapshot: Array = []
 	for id in _pending.keys():
 		snapshot.append([id, _pending[id].callback])
 	_pending.clear()
+	return snapshot
+
+func _notify_pending_failures(snapshot: Array, reason: String) -> void:
 	for entry in snapshot:
 		var cb: Callable = entry[1]
 		var id: int = entry[0]
@@ -474,18 +485,9 @@ func _take_pending(id: int) -> Dictionary:
 func _prepare_new_session(reason: String) -> void:
 	if _state == "stopped" and _pending.is_empty():
 		return
-	var snapshot: Array = []
-	for id in _pending.keys():
-		snapshot.append([id, _pending[id].callback])
-	_pending.clear()
-	for entry in snapshot:
-		var cb: Callable = entry[1]
-		if cb.is_valid():
-			cb.call({
-				"ok": false,
-				"code": "conflict",
-				"error": reason,
-			})
+	var pending_snapshot := _drain_pending()
+	_clear_transports()
+	_notify_pending_failures(pending_snapshot, reason)
 
 ## 暴露测试用的"instance" static 方法供 plugin/route 通过 Engine meta 访问
 ##
