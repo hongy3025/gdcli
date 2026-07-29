@@ -29,6 +29,8 @@ const Codec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const Condition := preload("res://addons/gdapi/runtime/runtime_condition.gd")
 const ALLOWED_CREATE_TYPES := ["Node", "Node2D", "Control", "Marker2D"]
 const DEDICATED_NODE_META := &"gdapi_runtime_dedicated"
+const TEMPORARY_WAIT_GROUP := &"gdapi_runtime_wait_timer"
+const TEMPORARY_WAIT_TIMER_NAME := &"GdApiRuntimeWaitTimer"
 const DEDICATED_FIXTURE_NODE_NAMES := ["ProbeTarget"]
 const INFRASTRUCTURE_NODE_NAMES := ["ProbeInput", "ProbeInputAction", "ProbeFinishedSignal"]
 const MUTABLE_PROPERTIES := [
@@ -273,21 +275,26 @@ static func rename(payload: Dictionary) -> Dictionary:
 
 ## 实现 runtime/assert/condition
 ##
-## poll_ms 间隔检查条件是否满足;满足则返回 ok;超时返回 code=timeout。
+## poll_ms 间隔检查条件是否满足;满足则返回 ok;超时返回 code=conflict。
 static func assert_condition(payload: Dictionary) -> Dictionary:
 	var condition: Variant = payload.get("condition", null)
 	if typeof(condition) != TYPE_DICTIONARY:
 		return {"ok": false, "code": "invalid_param", "error": "condition must be an object"}
 	var timeout_ms: int = clampi(int(payload.get("timeout_ms", 1000)), 1, 30000)
 	var poll_ms: int = clampi(int(payload.get("poll_ms", 20)), 5, 1000)
+	var started_at: int = Time.get_ticks_msec()
 	var deadline: int = Time.get_ticks_msec() + timeout_ms
 	while Time.get_ticks_msec() < deadline:
 		var verdict: Dictionary = Condition.evaluate(condition)
 		if bool(verdict.get("ok", false)):
-			var elapsed_ms: int = Time.get_ticks_msec() - (deadline - timeout_ms)
-			return {"ok": true, "result": {"passed": true, "elapsed_ms": elapsed_ms}}
-		var t: SceneTreeTimer = (Engine.get_main_loop() as SceneTree).create_timer(poll_ms / 1000.0)
-		await t.timeout
+			if bool(verdict.get("value", false)):
+				return {"ok": true, "result": {
+					"passed": true,
+					"elapsed_ms": Time.get_ticks_msec() - started_at,
+				}}
+		elif String(verdict.get("code", "")) != "not_found":
+			return verdict
+		await _wait_interval(mini(poll_ms, maxi(deadline - Time.get_ticks_msec(), 1)))
 	return {"ok": false, "code": "conflict", "error": "condition did not become true within timeout", "request_id": -1}
 
 ## 实现 runtime/assert/node_exists
@@ -299,8 +306,9 @@ static func assert_node_exists(payload: Dictionary) -> Dictionary:
 		var lookup: Dictionary = _resolve(node_path)
 		if bool(lookup.get("ok", false)):
 			return {"ok": true, "result": {"passed": true, "node": String(lookup.node_path)}}
-		var t: SceneTreeTimer = (Engine.get_main_loop() as SceneTree).create_timer(0.01)
-		await t.timeout
+		if String(lookup.get("code", "")) != "not_found":
+			return lookup
+		await _wait_interval(mini(10, maxi(deadline - Time.get_ticks_msec(), 1)))
 	return {"ok": false, "code": "conflict", "error": "node did not appear within timeout"}
 
 ## 实现 runtime/assert/property_equals
@@ -316,37 +324,21 @@ static func assert_property_equals(payload: Dictionary) -> Dictionary:
 			var got: Variant = lookup.node.get(property)
 			if _variants_equal(got, expected):
 				return {"ok": true, "result": {"passed": true, "value": got}}
-		var t: SceneTreeTimer = (Engine.get_main_loop() as SceneTree).create_timer(0.01)
-		await t.timeout
+		elif String(lookup.get("code", "")) != "not_found":
+			return lookup
+		await _wait_interval(mini(10, maxi(deadline - Time.get_ticks_msec(), 1)))
 	return {"ok": false, "code": "conflict", "error": "property never matched expected value"}
 
 ## 实现 runtime/assert/signal_received
 ##
 ## 通过 _connect_pending_signal 记录已发出次数,count 达到则通过。
 static func assert_signal_received(payload: Dictionary) -> Dictionary:
-	var node_path: String = String(payload.get("node_path", ""))
-	var signal_name: String = String(payload.get("signal", ""))
-	var timeout_ms: int = clampi(int(payload.get("timeout_ms", 1000)), 1, 30000)
-	var lookup: Dictionary = _resolve(node_path)
-	if not bool(lookup.get("ok", false)):
-		return lookup
-	if signal_name.is_empty() or not _has_signal(lookup.node, signal_name):
-		return {"ok": false, "code": "not_found", "error": "signal not declared: %s" % signal_name}
-	var counter := [0]
-	var proxy := func() -> void:
-		counter[0] += 1
-	lookup.node.connect(signal_name, proxy)
-	var deadline: int = Time.get_ticks_msec() + timeout_ms
-	while Time.get_ticks_msec() < deadline:
-		if counter[0] >= 1:
-			break
-		var t: SceneTreeTimer = (Engine.get_main_loop() as SceneTree).create_timer(0.01)
-		await t.timeout
-	if lookup.node.is_connected(signal_name, proxy):
-		lookup.node.disconnect(signal_name, proxy)
-	if counter[0] >= 1:
-		return {"ok": true, "result": {"passed": true, "count": counter[0]}}
-	return {"ok": false, "code": "conflict", "error": "signal was not emitted within timeout"}
+	var waited := await _wait_for_signal(payload)
+	if bool(waited.get("ok", false)):
+		return {"ok": true, "result": {"passed": true, "count": 1}}
+	if String(waited.get("code", "")) == "timeout":
+		return {"ok": false, "code": "conflict", "error": "signal was not emitted within timeout"}
+	return waited
 
 ## 实现 runtime/signal/connect
 static func signal_connect(payload: Dictionary) -> Dictionary:
@@ -366,7 +358,7 @@ static func signal_connect(payload: Dictionary) -> Dictionary:
 	var allowlist: Variant = target_lookup.node.get_meta("gdapi_callable_methods", PackedStringArray())
 	if not (allowlist is PackedStringArray) or not (target_method in allowlist):
 		return {"ok": false, "code": "permission_denied", "error": "target method not in allowlist"}
-	var bound: Callable = target_lookup.node.call.bind(target_method) if false else Callable(target_lookup.node, target_method)
+	var bound := Callable(target_lookup.node, target_method)
 	var err: int = node.connect(signal_name, bound)
 	if err != OK:
 		return {"ok": false, "code": "godot_error", "error": "connect failed with code %d" % err}
@@ -401,7 +393,10 @@ static func signal_emit(payload: Dictionary) -> Dictionary:
 	var signal_name: String = String(payload.get("signal", ""))
 	if not _has_signal(node, signal_name):
 		return {"ok": false, "code": "not_found", "error": "signal not declared"}
-	var args: Array = payload.get("args", [])
+	var raw_args: Variant = payload.get("args", [])
+	if typeof(raw_args) != TYPE_ARRAY:
+		return {"ok": false, "code": "invalid_param", "error": "args must be an array"}
+	var args: Array = raw_args
 	if args.is_empty():
 		node.emit_signal(signal_name)
 	elif args.size() == 1:
@@ -420,6 +415,15 @@ static func signal_emit(payload: Dictionary) -> Dictionary:
 ##
 ## 一次性等待下次 emit,timeout_ms 超时则返回 code=timeout.
 static func signal_await(payload: Dictionary) -> Dictionary:
+	var waited := await _wait_for_signal(payload)
+	if not bool(waited.get("ok", false)):
+		return waited
+	return {"ok": true, "result": {"signal": String(waited.get("signal", ""))}}
+
+## Wait for one signal emission with one owned Timer and one temporary connection.
+## Every completion path uses the same cleanup block; reset-driven disconnection is
+## reported as conflict instead of leaving the HTTP request suspended.
+static func _wait_for_signal(payload: Dictionary) -> Dictionary:
 	var lookup: Dictionary = _resolve(String(payload.get("node_path", "")))
 	if not bool(lookup.get("ok", false)):
 		return lookup
@@ -428,21 +432,68 @@ static func signal_await(payload: Dictionary) -> Dictionary:
 	var timeout_ms: int = clampi(int(payload.get("timeout_ms", 1000)), 1, 30000)
 	if not _has_signal(node, signal_name):
 		return {"ok": false, "code": "not_found", "error": "signal not declared"}
-	var bucket: Array = []
+	var completion := {"state": "pending"}
 	var proxy: Callable = func(_a0=null, _a1=null, _a2=null, _a3=null) -> void:
-		bucket.append(1)
-	var deadline: int = Time.get_ticks_msec() + timeout_ms
-	node.connect(signal_name, proxy)
-	while Time.get_ticks_msec() < deadline:
-		if bucket.size() >= 1:
-			break
-		var t: SceneTreeTimer = (Engine.get_main_loop() as SceneTree).create_timer(0.01)
-		await t.timeout
-	if node.is_connected(signal_name, proxy):
+		if String(completion.state) == "pending":
+			completion["state"] = "signal"
+	var connect_error := node.connect(signal_name, proxy)
+	if connect_error != OK:
+		return {"ok": false, "code": "godot_error", "error": "temporary signal connection failed"}
+	var timer := _create_wait_timer(timeout_ms)
+	if timer == null:
 		node.disconnect(signal_name, proxy)
-	if bucket.is_empty():
-		return {"ok": false, "code": "timeout", "error": "signal was not emitted within timeout"}
-	return {"ok": true, "result": {"signal": signal_name}}
+		return {"ok": false, "code": "conflict", "error": "scene tree is unavailable"}
+	var timeout_callback: Callable = func() -> void:
+		if String(completion.state) == "pending":
+			completion["state"] = "timeout"
+	timer.timeout.connect(timeout_callback)
+	var tree := Engine.get_main_loop() as SceneTree
+	while String(completion.state) == "pending":
+		if not is_instance_valid(node) or not node.is_connected(signal_name, proxy):
+			completion["state"] = "disconnected"
+			break
+		await tree.process_frame
+	if is_instance_valid(node) and node.is_connected(signal_name, proxy):
+		node.disconnect(signal_name, proxy)
+	if is_instance_valid(timer) and timer.timeout.is_connected(timeout_callback):
+		timer.timeout.disconnect(timeout_callback)
+	_dispose_wait_timer(timer)
+	match String(completion.state):
+		"signal":
+			return {"ok": true, "signal": signal_name}
+		"timeout":
+			return {"ok": false, "code": "timeout", "error": "signal was not emitted within timeout"}
+		_:
+			return {"ok": false, "code": "conflict", "error": "signal wait was disconnected"}
+
+static func _wait_interval(wait_ms: int) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+	var timer := tree.create_timer(maxf(float(wait_ms) / 1000.0, 0.001))
+	await timer.timeout
+
+static func _create_wait_timer(wait_ms: int) -> Timer:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null or tree.root == null:
+		return null
+	var timer := Timer.new()
+	timer.name = TEMPORARY_WAIT_TIMER_NAME
+	timer.one_shot = true
+	timer.wait_time = maxf(float(wait_ms) / 1000.0, 0.001)
+	timer.add_to_group(TEMPORARY_WAIT_GROUP)
+	tree.root.add_child(timer)
+	timer.start()
+	return timer
+
+static func _dispose_wait_timer(timer: Timer) -> void:
+	if not is_instance_valid(timer):
+		return
+	timer.stop()
+	var parent := timer.get_parent()
+	if parent != null:
+		parent.remove_child(timer)
+	timer.free()
 
 ## 在 tree 中按 name/type/group 查找
 static func _walk_find(node: Node, name: String, type_filter: String, group: String, out: Array, limit: int) -> void:
@@ -596,6 +647,11 @@ static func _is_descendant_of(candidate: Node, root: Node, include_self: bool) -
 
 ## 简单等价（Vector/Color/int/float 都由 compare 决定）
 static func _variants_equal(a: Variant, b: Variant) -> bool:
+	if (
+		(typeof(a) == TYPE_INT or typeof(a) == TYPE_FLOAT)
+		and (typeof(b) == TYPE_INT or typeof(b) == TYPE_FLOAT)
+	):
+		return is_equal_approx(float(a), float(b))
 	if typeof(a) != typeof(b):
 		return false
 	if a is Vector2 and b is Vector2:

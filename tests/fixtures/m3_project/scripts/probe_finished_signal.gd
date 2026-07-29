@@ -5,6 +5,19 @@ extends Node
 var _target: Node = null
 var _on_finished: Callable = Callable()
 var event_count: int = 0
+var temporary_finished_connections: int:
+	get:
+		if _target == null:
+			return 0
+		var count := 0
+		for connection in _target.get_signal_connection_list(&"finished"):
+			var callback: Variant = connection.get("callable", Callable())
+			if typeof(callback) == TYPE_CALLABLE and callback != _on_finished:
+				count += 1
+		return count
+var runtime_wait_timer_count: int:
+	get:
+		return get_tree().get_nodes_in_group(&"gdapi_runtime_wait_timer").size()
 
 func _ready() -> void:
 	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")

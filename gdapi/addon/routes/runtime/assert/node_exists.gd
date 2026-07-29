@@ -1,20 +1,10 @@
 ## runtime/assert/node_exists — 等指定路径的节点出现
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var payload: Dictionary = req.body
-	var ops := load("res://addons/gdapi/runtime/runtime_node_ops.gd")
-	var result: Dictionary = await ops.assert_node_exists(payload)
-	if not bool(result.get("ok", false)):
-		res.error(String(result.get("error", "assert/node_exists failed")), String(result.get("code", "conflict")), 409)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/assert/node_exists", false)
 
 func doc() -> GdApiRouteDoc:
 	return (

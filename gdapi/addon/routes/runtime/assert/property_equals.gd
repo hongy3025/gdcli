@@ -1,20 +1,10 @@
 ## runtime/assert/property_equals — 等节点属性等于期望值
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var payload: Dictionary = req.body
-	var ops := load("res://addons/gdapi/runtime/runtime_node_ops.gd")
-	var result: Dictionary = await ops.assert_property_equals(payload)
-	if not bool(result.get("ok", false)):
-		res.error(String(result.get("error", "assert/property_equals failed")), String(result.get("code", "conflict")), 409)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/assert/property_equals", false)
 
 func doc() -> GdApiRouteDoc:
 	return (

@@ -1,23 +1,10 @@
 ## runtime/assert/condition — 通过条件 grammar 等待节点属性满足
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var payload: Dictionary = req.body
-	var ops := load("res://addons/gdapi/runtime/runtime_node_ops.gd")
-	var result: Dictionary = await ops.assert_condition(payload)
-	if not bool(result.get("ok", false)):
-		if String(result.get("code", "")) == "conflict":
-			res.error(String(result.get("error", "condition did not become true")), "conflict", 409)
-			return
-		res.error(String(result.get("error", "assert/condition failed")), String(result.get("code", "godot_error")), 500)
-		return
-	var inner := result.get("result", {})
-	if typeof(inner) != TYPE_DICTIONARY:
-		inner = {"value": inner}
-	inner["ok"] = true
-	res.json(inner)
+	dispatch(req, res, "runtime/assert/condition", false)
 
 func doc() -> GdApiRouteDoc:
 	return (

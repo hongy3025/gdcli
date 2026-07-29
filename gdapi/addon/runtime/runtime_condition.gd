@@ -67,6 +67,8 @@ static func _eval_logical(dict: Dictionary, op: String) -> Dictionary:
 
 ## 评估比较 op,左右可以是 literal 或 {node_path, property}
 static func _eval_compare(dict: Dictionary, op: String) -> Dictionary:
+	if not dict.has("left") or not dict.has("right"):
+		return {"ok": false, "code": "invalid_param", "error": "%s requires left and right" % op}
 	var left: Variant = dict.get("left")
 	var right: Variant = dict.get("right")
 	var left_value: Dictionary = _resolve_value(left)
@@ -102,17 +104,27 @@ static func _resolve_value(value: Variant) -> Dictionary:
 			var node_path: String = String(dict.node_path)
 			var property: String = String(dict.property)
 			var tree := Engine.get_main_loop() as SceneTree
+			if tree == null:
+				return {"ok": false, "code": "conflict", "error": "scene tree is unavailable"}
 			var node: Node = tree.root.get_node_or_null(NodePath(node_path))
 			if node == null:
 				return {"ok": false, "code": "not_found", "error": "node not found: %s" % node_path}
+			if property.is_empty() or not _has_property(node, property):
+				return {"ok": false, "code": "not_found", "error": "property does not exist: %s" % property}
 			return {"ok": true, "value": node.get(property)}
 	return {"ok": true, "value": value}
 
+static func _has_property(node: Node, property: String) -> bool:
+	for info in node.get_property_list():
+		if String(info.name) == property:
+			return true
+	return false
+
 static func _variants_equal(a: Variant, b: Variant) -> bool:
+	if _is_numeric(a) and _is_numeric(b):
+		return is_equal_approx(float(a), float(b))
 	if typeof(a) != typeof(b):
-		var sa := str(a)
-		var sb := str(b)
-		return sa == sb
+		return false
 	if a is Vector2 and b is Vector2:
 		return (a - b).length() < 0.001
 	if a is Vector3 and b is Vector3:
@@ -120,6 +132,8 @@ static func _variants_equal(a: Variant, b: Variant) -> bool:
 	return a == b
 
 static func _variants_less(a: Variant, b: Variant) -> bool:
+	if _is_numeric(a) and _is_numeric(b):
+		return float(a) < float(b) and not is_equal_approx(float(a), float(b))
 	if typeof(a) != typeof(b):
 		return str(a) < str(b)
 	if a is Vector2 and b is Vector2:
@@ -140,3 +154,6 @@ static func _contains(container: Variant, target: Variant) -> bool:
 	if container is Dictionary:
 		return container.has(target)
 	return false
+
+static func _is_numeric(value: Variant) -> bool:
+	return typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT
