@@ -63,6 +63,37 @@ def _run_gdcli(*args: str) -> subprocess.CompletedProcess:
     )
 
 
+def _fixture_runtime_root(fixture: Path) -> Path:
+    fixture = fixture.resolve()
+    godot_dir = (fixture / ".godot").resolve()
+    if godot_dir.parent != fixture or godot_dir.name != ".godot":
+        raise RuntimeError(f"unexpected fixture metadata root: {godot_dir}")
+    runtime_root = (godot_dir / "gdapi_runtime").resolve()
+    if runtime_root.parent != godot_dir or runtime_root.name != "gdapi_runtime":
+        raise RuntimeError(f"unexpected fixture runtime root: {runtime_root}")
+    return runtime_root
+
+
+def _cleanup_fixture_runtime(fixture: Path) -> None:
+    """Remove only the source fixture's known runtime transport root."""
+    runtime_root = _fixture_runtime_root(fixture)
+    if runtime_root.exists():
+        shutil.rmtree(runtime_root)
+
+
+def _teardown_godot_fixture(godot: subprocess.Popen, fixture: Path) -> None:
+    """Stop the fixture editor before removing its exact runtime transport root."""
+    try:
+        godot.terminate()
+        try:
+            godot.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            godot.kill()
+            godot.wait(timeout=10)
+    finally:
+        _cleanup_fixture_runtime(fixture)
+
+
 @pytest.fixture(scope="session")
 def godot_env():
     """Build, install addon, start Godot headless, yield metadata, stop Godot.
@@ -107,8 +138,9 @@ def godot_env():
         dest_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(gdapi_lib, dest_dir / gdapi_lib.name)
 
-    # Remove stale meta
+    # Remove stale metadata and the exact file-transport root before startup.
     meta.unlink(missing_ok=True)
+    _cleanup_fixture_runtime(fixture)
 
     # Start Godot
     godot = subprocess.Popen(
@@ -126,8 +158,7 @@ def godot_env():
         time.sleep(1)
 
     if not ready:
-        godot.terminate()
-        godot.wait(timeout=10)
+        _teardown_godot_fixture(godot, fixture)
         pytest.skip("gdapi.json never appeared within 45s")
 
     meta_data = json.loads(meta.read_text(encoding="utf-8"))
@@ -141,8 +172,7 @@ def godot_env():
         "gdcli": _gdcli_bin(),
     }
 
-    godot.terminate()
-    godot.wait(timeout=10)
+    _teardown_godot_fixture(godot, fixture)
 
 
 def gdcli_json(env: dict, *args: str) -> dict:

@@ -52,4 +52,5 @@ func doc() -> GdApiRouteDoc:
 			"source_path": "String",
 			"signal": "String",
 		})
+		.example("{\"source_path\":\"/root/Main/Player\",\"signal\":\"tree_exiting\",\"arguments\":[]}")
 	)
