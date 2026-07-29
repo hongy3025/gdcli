@@ -36,7 +36,11 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		res.error("command not found: " + command, ErrorCodes.NOT_FOUND, 404)
 		return
 
-	var handler = _routes[command].new()
+	var handler_script: Script = _routes[command] as Script
+	if handler_script == null:
+		res.error("command handler is invalid: " + command, ErrorCodes.GODOT_ERROR, 500)
+		return
+	var handler = handler_script.new()
 	var detail: Dictionary = handler.doc().to_dict()
 	detail["path"] = command
 	res.json({"ok": true, "doc": detail})

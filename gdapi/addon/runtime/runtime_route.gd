@@ -22,10 +22,16 @@ const MAX_BROKER_TIMEOUT := 26000
 ##
 ## req.body 中的 timeout_ms 属于 operation 本身；broker deadline 额外保留固定
 ## grace，避免 operation 刚完成时 transport deadline 先到。
-func dispatch(req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool = false) -> void:
+func dispatch(
+		req: GdApiRequest,
+		res: GdApiResponse,
+		op: String,
+		mutation: bool = false,
+		public_route: String = ""
+) -> void:
 	if res == null or res.is_sent():
 		return
-	var boundary := _validate_boundary(req, op)
+	var boundary := _validate_boundary(req, op, public_route)
 	if not bool(boundary.get("ok", false)):
 		_reject(req, res, op, mutation, boundary)
 		return
@@ -92,13 +98,18 @@ static func http_status(code: String) -> int:
 static func redact(value: Variant) -> Variant:
 	return AuditLog.summarize(value)
 
-func _validate_boundary(req: GdApiRequest, op: String) -> Dictionary:
+func _validate_boundary(req: GdApiRequest, op: String, public_route: String = "") -> Dictionary:
 	if req == null:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request is required"}
-	if op.is_empty() or not op.begins_with("runtime/") or op.trim_prefix("runtime/").is_empty() or op.contains("..") or op.contains("//"):
+	if op.is_empty() or op.contains("..") or op.contains("//"):
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid internal operation"}
+	if public_route.is_empty() and (not op.begins_with("runtime/") or op.trim_prefix("runtime/").is_empty()):
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid runtime operation"}
-	if req.path.is_empty() or not req.path.begins_with("/") or req.path != "/" + op:
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request path does not match runtime operation"}
+	var expected_route := public_route if not public_route.is_empty() else op
+	if expected_route.is_empty() or expected_route.contains("..") or expected_route.contains("//"):
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid public route"}
+	if req.path.is_empty() or not req.path.begins_with("/") or req.path != "/" + expected_route:
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request path does not match public route"}
 	if typeof(req.params) != TYPE_DICTIONARY:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "request params must be an object"}
 	if not req.params.is_empty():

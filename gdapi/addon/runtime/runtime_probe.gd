@@ -23,6 +23,7 @@ const InputOps := preload("res://addons/gdapi/runtime/runtime_input_ops.gd")
 const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
 const RingBuffer := preload("res://addons/gdapi/runtime/runtime_ring_buffer.gd")
 const FileTransport := preload("res://addons/gdapi/runtime/runtime_transport_file_probe.gd")
+const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const DEBUGGER_CHANNEL_PREFIX := "gdapi"
 const DEBUGGER_CHANNEL := "gdapi:protocol"
 const DEBUGGER_CALLBACK_CHANNEL := "protocol"
@@ -285,12 +286,91 @@ func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 			return NodeOps.signal_emit(payload)
 		"runtime/signal/await":
 			return await NodeOps.signal_await(payload)
+		"m4/physics/raycast":
+			return _m4_physics_raycast(payload)
+		"m4/navigation/path/get":
+			return _m4_navigation_path(payload)
+		"m4/navigation/agent/target":
+			return _m4_navigation_agent_target(payload)
 		_:
 			return {
 				"ok": false,
 				"code": "not_supported",
 				"error": "unknown runtime op: %s" % op,
 			}
+
+func _m4_vector2(payload: Dictionary, key: String) -> Variant:
+	var raw: Variant = payload.get(key, null)
+	if typeof(raw) != TYPE_DICTIONARY:
+		return null
+	var value: Dictionary = raw
+	var x: Variant = value.get("x", null)
+	var y: Variant = value.get("y", null)
+	if (typeof(x) != TYPE_INT and typeof(x) != TYPE_FLOAT) or (typeof(y) != TYPE_INT and typeof(y) != TYPE_FLOAT):
+		return null
+	return Vector2(float(x), float(y))
+
+func _m4_physics_raycast(payload: Dictionary) -> Dictionary:
+	var from: Variant = _m4_vector2(payload, "from")
+	var to: Variant = _m4_vector2(payload, "to")
+	if from == null or to == null:
+		return {"ok": false, "code": "invalid_param", "error": "from and to must be Vector2 objects"}
+	var world := get_viewport().world_2d
+	if world == null:
+		return {"ok": false, "code": "not_supported", "error": "World2D is unavailable"}
+	var query := PhysicsRayQueryParameters2D.create(from, to)
+	query.collision_mask = int(payload.get("collision_mask", 0x7fffffff))
+	var hit: Dictionary = world.direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return {"ok": true, "result": {"hit": false}}
+	var collider: Variant = hit.get("collider", null)
+	var collider_path := ""
+	if collider is Node:
+		collider_path = String((collider as Node).get_path())
+	return {"ok": true, "result": {
+		"hit": true,
+		"position": VariantCodec.from_variant(hit.get("position")),
+		"normal": VariantCodec.from_variant(hit.get("normal")),
+		"collider_path": collider_path,
+	}}
+
+func _m4_navigation_path(payload: Dictionary) -> Dictionary:
+	var region_path := String(payload.get("region_path", ""))
+	if _m4_has_3d_vector(payload, "from") or _m4_has_3d_vector(payload, "to"):
+		return {"ok": false, "code": "not_supported", "error": "only Vector2 navigation points are supported"}
+	var from: Variant = _m4_vector2(payload, "from")
+	var to: Variant = _m4_vector2(payload, "to")
+	if region_path.is_empty() or from == null or to == null:
+		return {"ok": false, "code": "invalid_param", "error": "region_path, from and to are required"}
+	var region := get_node_or_null(NodePath(region_path))
+	if region == null:
+		return {"ok": false, "code": "not_found", "error": "navigation region not found"}
+	if not region is NavigationRegion2D:
+		return {"ok": false, "code": "not_supported", "error": "only NavigationRegion2D is supported"}
+	var points := NavigationServer2D.map_get_path((region as NavigationRegion2D).get_navigation_map(), from, to, true)
+	var encoded_points: Array = []
+	for point in points:
+		encoded_points.append(VariantCodec.from_variant(point))
+	return {"ok": true, "result": {"region_path": region_path, "points": encoded_points}}
+
+func _m4_navigation_agent_target(payload: Dictionary) -> Dictionary:
+	var agent_path := String(payload.get("agent_path", ""))
+	if _m4_has_3d_vector(payload, "target"):
+		return {"ok": false, "code": "not_supported", "error": "only Vector2 navigation targets are supported"}
+	var target: Variant = _m4_vector2(payload, "target")
+	if agent_path.is_empty() or target == null:
+		return {"ok": false, "code": "invalid_param", "error": "agent_path and target are required"}
+	var agent := get_node_or_null(NodePath(agent_path))
+	if agent == null:
+		return {"ok": false, "code": "not_found", "error": "navigation agent not found"}
+	if not agent is NavigationAgent2D:
+		return {"ok": false, "code": "not_supported", "error": "only NavigationAgent2D is supported"}
+	(agent as NavigationAgent2D).target_position = target
+	return {"ok": true, "result": {"changed": true, "agent_path": agent_path, "target": VariantCodec.from_variant(target)}}
+
+func _m4_has_3d_vector(payload: Dictionary, key: String) -> bool:
+	var raw: Variant = payload.get(key, null)
+	return typeof(raw) == TYPE_DICTIONARY and (raw as Dictionary).has("z")
 
 ## 实现 runtime/status
 func _op_status(_payload: Dictionary) -> Dictionary:

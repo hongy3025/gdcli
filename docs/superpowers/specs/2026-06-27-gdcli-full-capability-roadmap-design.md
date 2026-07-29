@@ -495,7 +495,7 @@ report 列出的 Godot 4.7 headless `EngineDebugger` 限制被 file transport �
 - runtime log/error 可按游标增量读取，不重复、不漏掉 fixture 生成的已知事件。
 - 停止游戏或 probe 断开后，待处理 await/call 可预测地失败并完成清理。
 
-### M4：游戏系统域
+### M4：游戏系统域 ✅ 已完成
 
 内容：
 
@@ -512,6 +512,8 @@ report 列出的 Godot 4.7 headless `EngineDebugger` 限制被 file transport �
 - 每个领域使用独立 fixture 数据，至少覆盖创建、查询、修改、保存和重开验证。
 - 动画 track/key、TileMap cell、Shader uniform、Audio bus、Theme 属性、Physics shape 和 Navigation path 均有类型精确断言。
 - 支持 UndoRedo 的 editor mutation 可撤销；资源写入明确不可撤销并遵守覆盖保护。
+
+实现证据：`tests/e2e/m4/` 锁定 51 条 public route，并覆盖各领域的类型断言、UndoRedo、保存重开、force 防护和运行期 2D navigation/physics 验证；收口报告见 `docs/reports/2026-07-29-gdcli-m4-game-systems-closure.md`。
 
 ### M5：项目、诊断与发布
 

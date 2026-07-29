@@ -360,6 +360,14 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 | `editor/selection/set` | 设置选中节点 `{node_paths, clear?}` |
 | `editor/main_screen/set` | 切换主编辑器 Tab `{screen: "2D"|"3D"|"Script"|"AssetLib"}` |
 
+### M4 游戏系统域
+
+M4 提供 51 条游戏系统路由，覆盖 Animation/AnimationTree、TileMap、Material/Shader、Audio、UI/Theme、2D Physics 与 2D Navigation。编辑器节点和属性修改返回 `undoable:true` 并接入 UndoRedo；资源、shader、Audio bus layout 与导航 bake 文件写入返回 `undoable:false`，覆盖已有目标必须显式传 `force:true`。
+
+Physics 与 Navigation 当前只支持 2D。3D 节点、形状、地图或查询在 mutation 前返回 `not_supported`。`physics/raycast`、`navigation/path/get` 和 `navigation/agent/target` 通过运行中的游戏 probe 执行；停止游戏后请求会按 broker 清理语义失败。
+
+完整路由集合及每条参数/返回文档可通过 `gdcli command list` 和 `gdcli command doc <route>` 查询。
+
 ### Mutation 模型
 
 | 类型 | UndoRedo | 覆盖保护 |
