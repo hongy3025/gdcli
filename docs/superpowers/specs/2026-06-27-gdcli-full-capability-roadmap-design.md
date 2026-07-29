@@ -515,7 +515,7 @@ report 列出的 Godot 4.7 headless `EngineDebugger` 限制被 file transport �
 
 实现证据：`tests/e2e/m4/` 锁定 51 条 public route，并覆盖各领域的类型断言、UndoRedo、保存重开、force 防护和运行期 2D navigation/physics 验证；收口报告见 `docs/reports/2026-07-29-gdcli-m4-game-systems-closure.md`。
 
-### M5：项目、诊断与发布
+### M5：项目、诊断与发布 ✅ 已完成
 
 内容：
 
@@ -533,6 +533,8 @@ report 列出的 Godot 4.7 headless `EngineDebugger` 限制被 file transport �
 - diagnostics 能准确报告 fixture 中刻意制造的问题。
 - export 使用最小 preset，验证产物；缺少模板时返回明确 `not_supported` 或环境错误，而不是静默 skip。
 - Android 无设备时返回稳定错误；只有显式选择设备并确认后才部署。
+
+实现证据：`gdapi/addon/runtime/services/{project_config,classdb_query,uid_repair,diagnostics,export_service,android_bridge}.gd`、`gdapi/addon/routes/{project,classdb,uid,diagnostics,export}/` 和 `tests/e2e/m5/`。M5 fixture 覆盖快照恢复、刻意未使用资源、依赖环、脚本语法错误、PCK/Android 导出预设及 Android parser；`tests/e2e/m5/test_m5_smoke.py` 锁定路由、安全拒绝和只读查询合同。
 
 ### M6：高风险能力
 

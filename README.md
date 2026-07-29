@@ -368,6 +368,14 @@ Physics 与 Navigation 当前只支持 2D。3D 节点、形状、地图或查询
 
 完整路由集合及每条参数/返回文档可通过 `gdcli command list` 和 `gdcli command doc <route>` 查询。
 
+### M5 项目、诊断与发布
+
+M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项目诊断和受控导出路由。配置变更使用隔离 fixture 快照验证，持久化 mutation 返回 `undoable:false`，删除/修复/覆盖操作要求 `force:true`。
+
+诊断路由 `diagnostics/health`、`unused_resources`、`cycle_deps` 和 `script_errors` 返回稳定的 `{severity,code,message,path?,line?,details?}` finding，并支持 `roots`、`offset`、`limit` 分页。`uid/repair` 默认 dry-run。
+
+`export/presets` 从 `export_presets.cfg` 发现预设，`export/run` 只使用固定 Godot 导出参数并校验项目内目标路径；缺少模板返回 `not_supported`。Android 只允许编辑器配置的 ADB、精确 serial 和固定的 `devices -l`/安装/启动命令，输出会去敏。
+
 ### Mutation 模型
 
 | 类型 | UndoRedo | 覆盖保护 |

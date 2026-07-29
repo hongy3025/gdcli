@@ -1,0 +1,21 @@
+; M5 project configuration, diagnostics, and export fixture.
+config_version=5
+
+[application]
+
+config/name="gdcli_m5_fixture"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+M5FixtureState="*res://fixtures/state.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdapi/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+

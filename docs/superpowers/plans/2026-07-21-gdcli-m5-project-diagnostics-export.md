@@ -2,21 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add snapshot-restorable project configuration, stable engine introspection, actionable diagnostics, UID repair, controlled export, and explicitly confirmed single-device Android deployment.
+**Goal:** Add snapshot-restorable project configuration, stable engine introspection, actionable diagnostics, UID repair, controlled export, and explicitly confirmed single-device Android deployment on the already-landed M1–M4 baseline.
 
-**Architecture:** Project configuration mutations operate on a private test snapshot and persist through Godot APIs. Diagnostics are read-only analyzers with machine-stable findings. Because Godot 4.7 does not expose an editor singleton for enumerating every built-in export platform, export presets are read through `ConfigFile` and executed by a fixed Godot CLI bridge using only `OS.get_executable_path()` and documented export arguments; Android discovery/deployment uses a second fixed-command bridge for the editor-configured ADB executable.
+**Architecture:** Project configuration mutations operate on a private test-project copy and persist through Godot APIs. Diagnostics are read-only analyzers with machine-stable findings; script validation reuses the existing `GDScript.reload()` contract and does not promise parser locations that Godot does not expose. Because Godot 4.7 does not expose an editor singleton for enumerating every built-in export platform, export presets are read through `ConfigFile` and executed by a fixed Godot CLI bridge using only `OS.get_executable_path()` and documented export arguments; Android discovery/deployment uses a second fixed-command bridge for the editor-configured ADB executable.
 
 **Tech Stack:** Godot 4.7 ProjectSettings/InputMap/ClassDB/ResourceUID/ConfigFile/OS pipe APIs, fixed Godot export and ADB bridges, M1–M4 safety contracts, pytest/uv.
 
 ## Global Constraints
 
-- Support only Godot 4.7.x and require completed M1–M4 plans.
+- Support only Godot 4.7.x. M1–M4 are implemented in the current checkout; M3 runtime data-plane limitations remain outside M5 scope and M5 must not depend on undocumented runtime-node behavior.
 - Snapshot `project.godot`, `export_presets.cfg`, bus layout, and autoload scripts before every configuration test and restore them in teardown.
 - Project mutations are non-undoable persistent operations and always return `undoable:false`.
 - Removing settings, actions, events, autoloads, repairing UIDs, exporting, and deploying requires `force:true`.
 - ClassDB and diagnostics results are sorted, filterable, and paginated with default limit 100 and maximum 500.
-- Export destinations stay inside the isolated project or an explicitly configured export root.
-- Missing export templates are an explicit `not_supported` response with platform details; tests do not silently skip.
+- Export destinations stay inside the isolated project or an explicitly configured export root; `export/run` rejects an unknown preset with `not_found` before spawning Godot.
+- Missing export templates are an explicit `not_supported` response with platform details; an unknown preset is `not_found`; tests do not silently skip.
 - Android deploy selects one exact serial, requires `force:true`, and rejects ambiguous/offline/unauthorized devices.
 - The ADB bridge exposes only `devices -l`, `install -r <validated-apk>`, and `shell am start -n <validated-package/activity>`.
 - Every persistent or external mutation is audited; keystore paths/passwords, device secrets, and environment values are redacted.
@@ -35,6 +35,15 @@
 | `tests/fixtures/m5_project/**` | Snapshot-safe diagnostics and export fixture |
 | `tests/e2e/m5/**` | Configuration, diagnosis, export, and optional-device acceptance |
 
+## Current-checkout review decisions
+
+- Do not create or modify M4 routes, services, or fixtures: the current checkout already contains the 51 M4 routes and its closure report records 31 passing M4 tests.
+- Reuse the M3 harness helpers (`attach_editor`, `detach_editor`, `exec_ok`, `exec_error`, `command_doc`, `require_godot_47`) as M4 does; do not invent a second CLI protocol or a new Godot-version fallback.
+- Keep the M5 fixture under `tests/fixtures/m5_project`. The Android parser unit belongs under that fixture, not under `tests/fixture_project`; Task 1 must add a fixture-local runner or invoke it through the existing `run_godot_script` helper.
+- `GDScript.reload()` only yields an error status in the existing `script/validate` service. M5 `script_errors` therefore returns stable `line:0` and `column:0` unless a future Godot API provides locations; tests assert the path, validity, and message/code rather than an invented line number.
+- The fixture must contain two named export presets: a runnable `M5 PCK` pack preset and a deliberately non-runnable Android preset with a known platform. The missing-template test targets the latter; it must not call a nonexistent preset and expect `not_supported`.
+- `OS.execute_with_pipe(..., false)` returns `{stdio, stderr, pid}`. Every export/ADB path must close both pipe handles, drain them without blocking, enforce its output cap, and kill the child before cleanup on timeout.
+
 ---
 
 ### Task 1: Add Snapshot-Safe M5 Fixture Infrastructure
@@ -44,12 +53,14 @@
 - Create: `tests/fixtures/m5_project/export_presets.cfg`
 - Create: `tests/fixtures/m5_project/fixtures/{unused.tres,cycle_a.tres,cycle_b.tres,broken.gd}`
 - Create: `tests/fixtures/m5_project/fixtures/state.gd`
+- Create: `tests/fixtures/m5_project/tests/test_android_bridge.gd`
 - Create: `tests/e2e/m5/conftest.py`
 - Create: `tests/e2e/m5/test_snapshot_restore.py`
 
 **Interfaces:**
-- Produces `m5_editor`, `read_only_project_file`, `project_snapshot(env) -> dict[path,sha256]`, `restore_snapshot(env)`, `assert_snapshot_restored(env,before)`, `tree_digest(path) -> str`, `restart_editor(env)`, and positional `command_doc(env,route)`.
-- Optional Android tests consume `ANDROID_TEST_SERIAL`; absence skips only the real-device deploy positive case, never device-list or error-contract tests.
+- Produces `m5_editor`, `read_only_project_file`, `project_snapshot(env) -> dict[str,str]`, `restore_snapshot(env)`, `assert_snapshot_restored(env,before)`, `tree_digest(path) -> str`, `restart_editor(env)`, `run_m5_gdscript(env, script)`, and positional `command_doc(env,route)`. `m5_editor["initial_snapshot"]` is the snapshot captured before the editor starts.
+- `read_only_project_file` makes only the copied `project.godot` read-only for the duration of its test and restores the original file mode in teardown; it never changes a checked-in fixture.
+- Optional Android tests consume `ANDROID_TEST_SERIAL` and `ANDROID_TEST_APK`; absence skips only the real-device deploy positive case, never device-list or error-contract tests.
 
 - [ ] **Step 1: Write restoration tests**
 
@@ -74,7 +85,9 @@ Expected: ERROR because `m5_editor` and snapshot helpers do not exist.
 
 - [ ] **Step 3: Implement per-test copied project and byte snapshots**
 
-Copy the immutable fixture, capture every tracked configuration file as bytes, and restore with atomic temporary-file replacement. After restore, trigger filesystem rescan and restart the editor when project settings/autoloads changed.
+Copy the immutable fixture, capture every tracked configuration file as bytes, and restore with atomic temporary-file replacement. Track `project.godot`, `export_presets.cfg`, `default_bus_layout.tres` when present, every fixture autoload script, and any generated `.uid` sidecar under the copied project. After restore, trigger filesystem rescan and restart the editor when project settings/autoloads changed. Add the fixture-local `test_android_bridge.gd` to the M5 GDScript runner; it tests only the pure `parse_devices` function.
+
+The fixture must also be self-contained: `project.godot` declares the main scene and `application/config/name`; `export_presets.cfg` contains the exact named presets `M5 PCK` (pack, runnable) and `M5 Android Missing Template` (Android, deliberately unavailable on machines without Android export templates); `cycle_a.tres` references `cycle_b.tres`, `cycle_b.tres` references `cycle_a.tres`, `unused.tres` is not referenced by the main scene/autoload/export filters, and `broken.gd` contains a deterministic syntax error. These are checked-in text resources, not files generated by the tests.
 
 - [ ] **Step 4: Verify restoration and stale metadata cleanup**
 
@@ -103,7 +116,7 @@ git commit -m "test: add snapshot-safe M5 fixture"
 - Create: `tests/e2e/m5/test_project_config.py`
 
 **Interfaces:**
-- Setting values use VariantCodec; set body `{name,value}` and reset body `{name,force}`.
+- Setting values use VariantCodec; get/set/list use `{name?,filter?,offset?,limit?}`, set body `{name,value}`, and reset body `{name,force}`. The service receives the live plugin instance through `EditAction.plugin()` when it must add/remove an autoload.
 - Input events use tagged dictionaries for key, mouse button, joypad button/motion, and action deadzone.
 - Autoload add consumes `{name,path,singleton}` and remove consumes `{name,force}`.
 
@@ -165,7 +178,7 @@ Expected: FAIL with route `not_found`.
 
 - [ ] **Step 3: Implement atomic project configuration mutations**
 
-Validate names against `ProjectSettings.get_property_list()`, set/reset with `ProjectSettings.set_setting`, and persist with `ProjectSettings.save()`. Encode InputEvents through a fixed type mapping and call InputMap APIs before `ProjectSettings.save()`. Add/remove autoload through `EditorPlugin.add_autoload_singleton`/`remove_autoload_singleton`; require script paths under `res://` and outside protected addon internals. On save failure restore the previous in-memory value/event/autoload before replying.
+Validate names against `ProjectSettings.get_property_list()`, use `ProjectSettings.set_setting`/`clear`, and persist with `ProjectSettings.save()`. Encode InputEvents through a fixed type mapping and call InputMap APIs before `ProjectSettings.save()`. Add/remove autoload through the `EditorPlugin` returned by `EditAction.plugin()`; require script paths under `res://` and outside protected addon internals. Snapshot the exact prior setting/event/autoload state, and on save failure restore that state in memory before replying. Do not claim a transaction across an OS-level write failure; the response must report `godot_error` and the test must verify the in-memory rollback.
 
 - [ ] **Step 4: Verify persistence, audit, and teardown restoration**
 
@@ -191,7 +204,7 @@ git commit -m "feat: add project configuration routes"
 
 **Interfaces:**
 - Produces routes `classdb/classes`, `classdb/class`, `classdb/methods`, `classdb/properties`, `classdb/signals`, and `classdb/inheriters`.
-- All list routes consume `{class?,filter?,inherited?,offset?,limit?}`.
+- `classdb/classes` consumes `{filter?,offset?,limit?}`; `classdb/class` consumes `{class}`; `methods`, `properties`, and `signals` consume `{class,filter?,inherited?,offset?,limit?}`; `classdb/inheriters` consumes `{class,offset?,limit?}`.
 - Class response contains `{name,parent,instantiable,exposed,enum_names}`.
 - Methods/properties/signals normalize Godot dictionaries to stable name/type/flags/default structures and sort by name.
 
@@ -316,7 +329,8 @@ def test_fixture_diagnostics_are_exact(m5_editor):
     ]
     errors = exec_ok(m5_editor, "diagnostics/script_errors", {"roots":["res://fixtures"]})
     assert errors["items"][0]["path"] == "res://fixtures/broken.gd"
-    assert errors["items"][0]["line"] == 3
+    assert errors["items"][0]["line"] == 0
+    assert errors["items"][0]["column"] == 0
 ```
 
 - [ ] **Step 2: Run diagnostics tests**
@@ -327,7 +341,7 @@ Expected: FAIL with route `not_found`.
 
 - [ ] **Step 3: Implement graph and parser analyzers**
 
-Build a directed dependency graph from ResourceLoader dependencies, mark reachability from project main scene, autoloads, export filters, and `.tscn`/`.tres` references, then report unreferenced resources. Detect cycles with a recursion stack and canonicalize each cycle by rotating to its lexicographically smallest path. Validate GDScript in memory and extract parser line/column/message. Health includes Godot version, route count, filesystem scan state, runtime state, and finding counts.
+Build a directed dependency graph from `ResourceLoader.get_dependencies`, mark reachability from the project main scene, autoloads, export filters, and `.tscn`/`.tres` references, then report unreferenced resources. Detect cycles with a recursion stack and canonicalize each cycle by rotating to its lexicographically smallest path. Validate GDScript in memory with the same `GDScript.new(); source_code = ...; reload()` behavior as `script/validate`; emit `line:0`, `column:0`, and the stable reload error code because Godot does not expose parser coordinates through this API. Health includes Godot version, route count, filesystem scan state, runtime state, and finding counts.
 
 - [ ] **Step 4: Verify findings, pagination, and read-only behavior**
 
@@ -354,7 +368,7 @@ git commit -m "feat: add project diagnostics routes"
 **Interfaces:**
 - `export/presets {}` returns name, platform, runnable, export path, and template availability.
 - `export/run {preset,path,debug=false,force,timeout_ms=120000}` returns artifact path/size/hash and normalized export messages.
-- Uses `ConfigFile` for `export_presets.cfg` and invokes only `OS.get_executable_path()` with fixed `--headless --path <project> --export-* <preset> <path>` argument shapes.
+- Uses `ConfigFile` for `export_presets.cfg` and invokes only `OS.get_executable_path()` with fixed `--headless --path <absolute-project> --export-* <preset> <absolute-output>` argument shapes. The route never accepts a caller-provided executable or arbitrary flags.
 
 - [ ] **Step 1: Write preset, artifact, conflict, and missing-template tests**
 
@@ -371,7 +385,7 @@ def test_minimal_pck_export(m5_editor):
 
 def test_missing_template_is_explicit(m5_editor):
     error = exec_error(m5_editor, "export/run", {
-        "preset":"Missing Template", "path":"res://build/missing.bin", "force":True
+        "preset":"M5 Android Missing Template", "path":"res://build/missing.apk", "force":True
     })
     assert error["code"] == "not_supported"
     assert "platform" in error["details"]
@@ -385,7 +399,7 @@ Expected: FAIL with route `not_found`.
 
 - [ ] **Step 3: Implement export service with explicit template validation**
 
-Load every `preset.N` section from `export_presets.cfg`, find the exact name, and reject duplicates. Select only one fixed flag from `--export-pack`, `--export-debug`, or `--export-release`; callers cannot provide flags. Start `OS.execute_with_pipe(OS.get_executable_path(), args, false)`, drain `stdio` and `stderr` with a combined 256 KiB cap, poll `OS.is_process_running(pid)`, kill on deadline, and read `OS.get_process_exit_code(pid)`. Map missing-template output to `not_supported`, other nonzero exits to `godot_error`, compute artifact SHA-256 through `FileAccess.get_sha256(path)`, and remove partial output on failure. Enforce destination PathGuard and overwrite force before starting the child.
+Load every `preset.N` section from `export_presets.cfg`, find the exact name, and reject duplicates. Select only one fixed flag from `--export-pack`, `--export-debug`, or `--export-release` according to the preset configuration; callers cannot provide flags. Start `OS.execute_with_pipe(OS.get_executable_path(), args, false)`, require the returned dictionary to contain `stdio`, `stderr`, and `pid`, drain both non-blocking handles with a combined 256 KiB cap, poll `OS.is_process_running(pid)`, kill on deadline, wait for the child to stop, read `OS.get_process_exit_code(pid)`, and close both handles on every branch. Map missing-template output to `not_supported` with `{platform,preset}` details, unknown preset to `not_found`, other nonzero exits to `godot_error`, compute artifact SHA-256 through `FileAccess.get_sha256(path)`, and remove partial output on failure. Enforce destination PathGuard and overwrite force before starting the child.
 
 - [ ] **Step 4: Verify success, missing environment, timeout, and cleanup**
 
@@ -407,7 +421,7 @@ git commit -m "feat: add controlled project export"
 **Files:**
 - Create: `gdapi/addon/runtime/services/android_bridge.gd`
 - Create: `gdapi/addon/routes/export/android/{devices,deploy}.gd`
-- Create: `tests/fixture_project/tests/test_android_bridge.gd`
+- Create: `tests/fixtures/m5_project/tests/test_android_bridge.gd`
 - Create: `tests/e2e/m5/test_android_deploy.py`
 
 **Interfaces:**
@@ -434,11 +448,11 @@ def test_deploy_requires_exact_online_device_and_force(m5_editor):
     assert error["code"] == "unsafe_operation"
 ```
 
-The positive test runs only when `ANDROID_TEST_SERIAL` is set; it must still assert the selected serial appears exactly once and is online.
+The positive test runs only when both `ANDROID_TEST_SERIAL` and `ANDROID_TEST_APK` are set; it must still assert the selected serial appears exactly once and is online. Absence of either variable skips only this positive test.
 
 - [ ] **Step 2: Run parser and contract tests**
 
-Run: `uv run pytest tests/e2e/test_gdscript_units.py tests/e2e/m5/test_android_deploy.py -v -k android`
+Run: `uv run pytest tests/e2e/m5/test_android_deploy.py -v -k android`
 
 Expected: FAIL because the bridge/routes are absent.
 
@@ -454,7 +468,7 @@ Validate serial against `^[A-Za-z0-9._:-]+$`, package/activity against Android i
 
 Use a 60-second install timeout, cap combined output at 64 KiB, redact output before audit, and reject non-`device` states. Do not expose the bridge through `process/run`.
 
-Run those arrays with `OS.execute_with_pipe(adb_path, args, false)`, drain both pipes without blocking, poll the returned PID, call `OS.kill(pid)` on deadline, and close both FileAccess handles on every completion path.
+Run those arrays with `OS.execute_with_pipe(adb_path, args, false)`, require the returned `{stdio,stderr,pid}` dictionary, drain both pipes without blocking, poll the returned PID, call `OS.kill(pid)` on deadline, wait for termination, and close both FileAccess handles on every completion path. Return `not_found` when the configured ADB executable is absent, `not_supported` for an unavailable device transport, and `godot_error` for a nonzero ADB command after redacting output.
 
 - [ ] **Step 4: Verify no-device and optional real-device paths**
 
@@ -465,7 +479,7 @@ Expected: device listing and all negative contracts PASS everywhere; only the ex
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gdapi/addon/runtime/services/android_bridge.gd gdapi/addon/routes/export/android tests/fixture_project/tests/test_android_bridge.gd tests/e2e/m5/test_android_deploy.py
+git add gdapi/addon/runtime/services/android_bridge.gd gdapi/addon/routes/export/android tests/fixtures/m5_project/tests/test_android_bridge.gd tests/e2e/m5/test_android_deploy.py
 git commit -m "feat: add confirmed Android device deploy"
 ```
 
