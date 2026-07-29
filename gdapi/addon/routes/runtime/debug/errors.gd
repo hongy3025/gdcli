@@ -1,10 +1,10 @@
 ## runtime/debug/errors — 列出运行期已知错误
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
-func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
-	res.json({"items": [], "ok": true})
+func handle(req: GdApiRequest, res: GdApiResponse) -> void:
+	dispatch(req, res, "runtime/debug/errors", false)
 
 func doc() -> GdApiRouteDoc:
 	return (

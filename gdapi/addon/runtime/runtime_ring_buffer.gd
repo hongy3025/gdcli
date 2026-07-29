@@ -52,6 +52,12 @@ func append(level: String, message: String, details: Dictionary = {}) -> int:
 func read(after_cursor: int, limit: int = 100) -> Dictionary:
 	var bounded: int = clampi(int(limit), 1, 500)
 	var results: Array = []
+	if _items.is_empty():
+		return {
+			"items": results,
+			"next_cursor": _next_cursor - 1,
+			"dropped": 0,
+		}
 	for entry in _items:
 		var cursor: int = int(entry.cursor)
 		if cursor <= int(after_cursor):
@@ -59,19 +65,11 @@ func read(after_cursor: int, limit: int = 100) -> Dictionary:
 		results.append(entry.duplicate())
 		if results.size() >= bounded:
 			break
-	var next_cursor: int = 0
+	var next_cursor: int = int(after_cursor)
 	if not results.is_empty():
 		next_cursor = int(results[results.size() - 1].cursor)
-	if _items.is_empty():
-		next_cursor = _next_cursor - 1
-		var first: Dictionary = _items[0]
-		if int(first.cursor) > int(after_cursor) + 1:
-			pass
-	var dropped: int = 0
-	if _items.size() >= capacity and _next_cursor > capacity:
-		dropped = _next_cursor - capacity - results.size() - 0
-		if dropped < 0:
-			dropped = 0
+	var oldest: int = int(_items[0].cursor)
+	var dropped: int = maxi(0, oldest - (int(after_cursor) + 1))
 	return {
 		"items": results,
 		"next_cursor": next_cursor,

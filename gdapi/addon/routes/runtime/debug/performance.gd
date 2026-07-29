@@ -1,19 +1,10 @@
 ## runtime/debug/performance — 自定义 Performance monitor 读
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var payload: Dictionary = req.body
-	var names: Array = payload.get("monitors", [])
-	var values: Dictionary = {}
-	if names.is_empty():
-		for m in Performance.get_custom_monitor_names():
-			values[m] = Performance.get_custom_monitor(m)
-	else:
-		for n in names:
-			values[String(n)] = Performance.get_custom_monitor(String(n))
-	res.json({"values": values, "ok": true})
+	dispatch(req, res, "runtime/debug/performance", false)
 
 func doc() -> GdApiRouteDoc:
 	return (

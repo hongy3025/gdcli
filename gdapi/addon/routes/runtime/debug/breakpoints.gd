@@ -1,10 +1,10 @@
 ## runtime/debug/breakpoints — 显式 not_supported,除非 EditorDebugger 报告支持
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	res.error("editor breakpoint mutation is unavailable in runtime probe v1", "not_supported", 501)
+	dispatch(req, res, "runtime/debug/breakpoints", false)
 
 func doc() -> GdApiRouteDoc:
 	return (

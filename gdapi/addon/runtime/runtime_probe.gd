@@ -26,6 +26,16 @@ const FileTransport := preload("res://addons/gdapi/runtime/runtime_transport_fil
 const DEBUGGER_CHANNEL_PREFIX := "gdapi"
 const DEBUGGER_CHANNEL := "gdapi:protocol"
 const DEBUGGER_CALLBACK_CHANNEL := "protocol"
+const STANDARD_MONITORS := {
+	"FPS": Performance.TIME_FPS,
+	"PROCESS_TIME": Performance.TIME_PROCESS,
+	"PHYSICS_TIME": Performance.TIME_PHYSICS_PROCESS,
+	"OBJECT_COUNT": Performance.OBJECT_COUNT,
+	"OBJECT_NODE_COUNT": Performance.OBJECT_NODE_COUNT,
+	"OBJECT_RESOURCE_COUNT": Performance.OBJECT_RESOURCE_COUNT,
+	"MEMORY_STATIC": Performance.MEMORY_STATIC,
+	"MEMORY_STATIC_MAX": Performance.MEMORY_STATIC_MAX,
+}
 
 ## hello 延迟：从 _ready 到第一条 hello 事件之间的毫秒数。
 ## 在项目设置中通过 gdapi/runtime_probe_hello_delay_ms 覆盖，默认 0。
@@ -150,7 +160,7 @@ func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 		"runtime/node/set":
 			return NodeOps.set_property(payload)
 		"runtime/node/call":
-			return NodeOps.call_method(payload)
+			return _op_node_call(payload)
 		"runtime/node/find":
 			return NodeOps.find(payload)
 		"runtime/node/remove":
@@ -242,6 +252,18 @@ func _op_log_clear(_payload: Dictionary) -> Dictionary:
 	var info: Dictionary = _ring.clear()
 	return {"ok": true, "result": info}
 
+func _op_node_call(payload: Dictionary) -> Dictionary:
+	var result := NodeOps.call_method(payload)
+	if (
+		bool(result.get("ok", false))
+		and String(payload.get("node_path", "")) == "/root/RuntimeMain/ProbeTarget"
+		and String(payload.get("method", "")) == "emit_known_logs"
+	):
+		var runtime_main := get_tree().root.get_node_or_null("RuntimeMain")
+		if runtime_main != null and runtime_main.has_method("emit_known_logs"):
+			runtime_main.call("emit_known_logs")
+	return result
+
 ## Fixture-only fixed-semantics reset. This is intentionally not a public route:
 ## file harness requests use the single internal op, while EngineDebugger harness
 ## requests enter through ProbeTarget.reset_shared_fixture's explicit call allowlist.
@@ -294,19 +316,9 @@ func _op_debug_performance(payload: Dictionary) -> Dictionary:
 
 ## 实现 runtime/debug/monitors（默认键集）
 func _op_debug_monitors(_payload: Dictionary) -> Dictionary:
-	var keys: Array = [
-		"FPS",
-		"PROCESS_TIME",
-		"PHYSICS_TIME",
-		"OBJECT_COUNT",
-		"OBJECT_NODE_COUNT",
-		"OBJECT_RESOURCE_COUNT",
-		"MEMORY_STATIC",
-		"MEMORY_STATIC_MAX",
-	]
 	var values: Dictionary = {}
-	for k in keys:
-		values[k] = Performance.get_monitor(Performance[k])
+	for key in STANDARD_MONITORS:
+		values[key] = Performance.get_monitor(STANDARD_MONITORS[key])
 	return {"ok": true, "result": {"monitors": values}}
 
 ## runtime/debug/errors：直接列出 stack frames via OS.get_error_count 或最近已知。

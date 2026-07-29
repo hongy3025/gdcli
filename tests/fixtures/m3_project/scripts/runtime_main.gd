@@ -42,6 +42,14 @@ func reset_fixture() -> Dictionary:
 	probe_target.reset_fixture()
 	return {"changed": true, "undoable": false}
 
+func emit_known_logs() -> Dictionary:
+	var runtime_probe := get_tree().root.get_node_or_null("GdApiRuntimeProbe")
+	if runtime_probe == null or not runtime_probe.has_method("record_log"):
+		return {"ok": false, "error": "runtime probe log recorder is unavailable"}
+	runtime_probe.call("record_log", "info", "known-info")
+	runtime_probe.call("record_log", "error", "known-error")
+	return {"ok": true}
+
 func prepare_capture_fixture(mode: String) -> Dictionary:
 	if not mode in ["camera", "high_entropy", "oversized"]:
 		return {"ok": false, "error": "unknown fixed capture fixture mode"}

@@ -15,8 +15,12 @@ func _init() -> void:
 
 	test_init_default_capacity()
 	test_append_assigns_unique_cursors()
+	test_empty_read()
 	test_wraparound_drops_oldest()
+	test_eviction_reports_exact_dropped_count()
+	test_partial_eviction_reports_exact_dropped_count()
 	test_cursor_does_not_repeat()
+	test_two_pages_do_not_repeat_entries()
 	test_limit_caps_results()
 	test_clear_resets_state()
 
@@ -49,6 +53,13 @@ func test_append_assigns_unique_cursors() -> void:
 	assert_eq(c1, 1, "first cursor")
 	assert_eq(c2, 2, "second cursor")
 
+func test_empty_read() -> void:
+	var buf := RingBuffer.new(3)
+	var page := buf.read(0, 10)
+	assert_eq(page.items, [], "empty read has no items")
+	assert_eq(page.next_cursor, 0, "empty read cursor remains zero")
+	assert_eq(page.dropped, 0, "empty read reports no dropped entries")
+
 func test_wraparound_drops_oldest() -> void:
 	var buf := RingBuffer.new(3)
 	for value in ["a", "b", "c", "d"]:
@@ -60,6 +71,22 @@ func test_wraparound_drops_oldest() -> void:
 	# After 4 appends with capacity 3, oldest dropped; only b/c/d remain
 	assert_eq(messages, ["b", "c", "d"], "wraparound window")
 
+func test_eviction_reports_exact_dropped_count() -> void:
+	var buf := RingBuffer.new(3)
+	for value in ["a", "b", "c", "d", "e"]:
+		buf.append("info", value)
+	var page := buf.read(0, 10)
+	assert_eq(page.dropped, 2, "cursor zero reports two evicted entries")
+
+func test_partial_eviction_reports_exact_dropped_count() -> void:
+	var buf := RingBuffer.new(3)
+	for value in ["a", "b", "c", "d", "e"]:
+		buf.append("info", value)
+	var page := buf.read(1, 10)
+	assert_eq(page.dropped, 1, "cursor one reports one unseen evicted entry")
+	var caught_up := buf.read(2, 10)
+	assert_eq(caught_up.dropped, 0, "cursor before oldest retained entry has no gap")
+
 func test_cursor_does_not_repeat() -> void:
 	var buf := RingBuffer.new(3)
 	for v in ["a", "b", "c", "d"]:
@@ -69,6 +96,15 @@ func test_cursor_does_not_repeat() -> void:
 	var second := buf.read(first.next_cursor, 2)
 	assert_eq(second.items.size(), 1, "second read one item (d)")
 	assert_eq(second.next_cursor, 4, "after second next_cursor=4")
+
+func test_two_pages_do_not_repeat_entries() -> void:
+	var buf := RingBuffer.new(10)
+	for value in ["a", "b", "c"]:
+		buf.append("info", value)
+	var first := buf.read(0, 2)
+	var second := buf.read(first.next_cursor, 2)
+	assert_eq(first.items.map(func(item): return item.cursor), [1, 2], "first page cursors")
+	assert_eq(second.items.map(func(item): return item.cursor), [3], "second page excludes first page")
 
 func test_limit_caps_results() -> void:
 	var buf := RingBuffer.new(10)
@@ -86,3 +122,5 @@ func test_clear_resets_state() -> void:
 	assert_eq(info.cleared, 2, "two cleared")
 	var page := buf.read(0, 10)
 	assert_eq(page.items.size(), 0, "empty after clear")
+	assert_eq(page.next_cursor, 0, "clear resets cursor")
+	assert_eq(page.dropped, 0, "clear resets dropped count")

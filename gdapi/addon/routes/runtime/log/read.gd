@@ -1,25 +1,10 @@
 ## runtime/log/read — 增量读取运行期日志 ring buffer
 
 @tool
-extends "res://addons/gdapi/runtime/route_handler.gd"
+extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var payload: Dictionary = req.body
-	var probe: Variant = _lookup_probe()
-	if probe == null:
-		res.error("runtime_probe is not registered", "not_found", 404)
-		return
-	var ring: Variant = probe.ring_buffer()
-	var after_cursor: int = int(payload.get("after_cursor", 0))
-	var limit: int = int(payload.get("limit", 100))
-	var page: Dictionary = ring.read(after_cursor, limit)
-	res.json(page)
-
-func _lookup_probe() -> Variant:
-	var root := Engine.get_main_loop() as SceneTree
-	if root == null:
-		return null
-	return root.root.get_node_or_null("GdApiRuntimeProbe")
+	dispatch(req, res, "runtime/log/read", false)
 
 func doc() -> GdApiRouteDoc:
 	return (
