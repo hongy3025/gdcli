@@ -108,6 +108,21 @@ def _runtime_root(env: dict[str, Any]) -> Path:
     return root
 
 
+def _force_fixture_file_transport(project: Path) -> None:
+    """Force the copied M3 fixture through the production file fallback."""
+    project_file = project / "project.godot"
+    source = project_file.read_text(encoding="utf-8")
+    marker = "[gdapi]\n"
+    if marker not in source:
+        raise RuntimeError("M3 fixture is missing its [gdapi] settings section")
+    source = source.replace(
+        marker,
+        marker + "\nruntime_force_file_transport=true\n",
+        1,
+    )
+    project_file.write_text(source, encoding="utf-8")
+
+
 def cleanup_stale_runtime(env: dict[str, Any]) -> None:
     """Remove only the fixture's known runtime transport root."""
     runtime_root = _runtime_root(env)
@@ -384,6 +399,7 @@ def m3_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
     base = tmp_path_factory.mktemp("m3_editor") / "project"
     shutil.copytree(M3_FIXTURE_SOURCE, base)
+    _force_fixture_file_transport(base)
 
     install = subprocess.run(
         [str(gdcli_bin()), "install", "--project", str(base), "--force"],

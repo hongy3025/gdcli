@@ -10,40 +10,51 @@ extends Node2D
 @onready var probe_input_action: Node = $ProbeInputAction
 @onready var probe_finished_signal: Node = $ProbeFinishedSignal
 
+func _ready() -> void:
+	Engine.set_meta("gdapi_m3_capture_fixture_root", self)
+
+func _exit_tree() -> void:
+	if Engine.get_meta("gdapi_m3_capture_fixture_root", null) == self:
+		Engine.remove_meta("gdapi_m3_capture_fixture_root")
+
 func reset_fixture() -> Dictionary:
 	_remove_runtime_children(self)
 	probe_target.reset_fixture()
 	return {"changed": true, "undoable": false}
 
 func prepare_capture_fixture(mode: String) -> Dictionary:
+	if not mode in ["camera", "high_entropy", "oversized"]:
+		return {"ok": false, "error": "unknown fixed capture fixture mode"}
 	var existing := get_node_or_null("CaptureFixtureViewport")
 	if existing != null:
 		existing.free()
-	if not mode in ["camera", "high_entropy", "delayed", "oversized"]:
-		return {"ok": false, "error": "unknown fixed capture fixture mode"}
 	var viewport := SubViewport.new()
 	viewport.name = "CaptureFixtureViewport"
 	if mode == "high_entropy":
-		viewport.size = Vector2i(1280, 900)
+		viewport.size = Vector2i(1024, 600)
 	elif mode == "oversized":
 		viewport.size = Vector2i(1921, 1080)
 	else:
 		viewport.size = Vector2i(96, 54)
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	viewport.set_meta("gdapi_capture_readback_counter_path",
-		NodePath("/root/RuntimeMain/ProbeTarget"))
-	if mode == "delayed":
-		viewport.set_meta("gdapi_capture_fixture_delay", true)
-	if mode == "high_entropy":
-		viewport.set_meta("gdapi_capture_fixture_image", _make_high_entropy_image())
 	add_child(viewport)
 
-	var background := ColorRect.new()
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	background.color = Color(0.12, 0.25, 0.55, 1.0)
-	viewport.add_child(background)
+	if mode == "high_entropy":
+		var noise := TextureRect.new()
+		noise.texture = ImageTexture.create_from_image(_make_high_entropy_image())
+		noise.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		noise.stretch_mode = TextureRect.STRETCH_SCALE
+		noise.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		viewport.add_child(noise)
+		noise.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	else:
+		var background := ColorRect.new()
+		background.color = Color(0.12, 0.25, 0.55, 1.0)
+		viewport.add_child(background)
+		background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var camera := Camera2D.new()
 	camera.name = "CaptureFixtureCamera"
+	camera.position = Vector2(viewport.size) / 2.0
 	camera.enabled = true
 	viewport.add_child(camera)
 	return {
@@ -52,8 +63,8 @@ func prepare_capture_fixture(mode: String) -> Dictionary:
 	}
 
 func _make_high_entropy_image() -> Image:
-	const WIDTH := 1280
-	const HEIGHT := 900
+	const WIDTH := 1024
+	const HEIGHT := 600
 	var bytes := PackedByteArray()
 	bytes.resize(WIDTH * HEIGHT * 3)
 	var state: int = 0x13579BDF

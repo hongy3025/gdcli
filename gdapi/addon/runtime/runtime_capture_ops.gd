@@ -23,10 +23,10 @@ static func viewport(payload: Dictionary) -> Dictionary:
 	var validated := validate_viewport_payload(payload)
 	if not bool(validated.get("ok", false)):
 		return validated
+	var deadline_msec := Time.get_ticks_msec() + int(validated.timeout_ms)
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree == null or tree.root == null:
 		return _failure("not_found", "scene viewport is unavailable")
-	var deadline_msec := Time.get_ticks_msec() + int(validated.timeout_ms)
 	await RenderingServer.frame_post_draw
 	if _deadline_reached(deadline_msec):
 		return _failure("timeout", "viewport capture timed out")
@@ -36,10 +36,10 @@ static func camera(payload: Dictionary) -> Dictionary:
 	var validated := validate_camera_payload(payload)
 	if not bool(validated.get("ok", false)):
 		return validated
+	var deadline_msec := Time.get_ticks_msec() + int(validated.timeout_ms)
 	var resolved := _resolve_camera(String(validated.node_path))
 	if not bool(resolved.get("ok", false)):
 		return resolved
-	var deadline_msec := Time.get_ticks_msec() + int(validated.timeout_ms)
 	await RenderingServer.frame_post_draw
 	if _deadline_reached(deadline_msec):
 		return _failure("timeout", "camera capture timed out")
@@ -50,6 +50,7 @@ static func frames(payload: Dictionary) -> Dictionary:
 	var validated := validate_frames_payload(payload)
 	if not bool(validated.get("ok", false)):
 		return validated
+	var deadline_msec := Time.get_ticks_msec() + int(validated.timeout_ms)
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree == null or tree.root == null:
 		return _failure("not_found", "scene viewport is unavailable")
@@ -60,7 +61,6 @@ static func frames(payload: Dictionary) -> Dictionary:
 			return resolved
 		source = resolved.viewport
 
-	var deadline_msec := Time.get_ticks_msec() + int(validated.timeout_ms)
 	var frames_arr: Array = []
 	for i in int(validated.count):
 		if i > 0:
@@ -141,14 +141,6 @@ static func validate_camera_path(value: Variant, required: bool) -> Dictionary:
 		return _failure("invalid_param", "camera path must be an absolute /root path")
 	return {"ok": true, "path": path}
 
-static func fit_dimensions(width: int, height: int) -> Vector2i:
-	if width <= 0 or height <= 0:
-		return Vector2i.ZERO
-	if width <= MAX_WIDTH and height <= MAX_HEIGHT:
-		return Vector2i(width, height)
-	var scale := min(float(MAX_WIDTH) / float(width), float(MAX_HEIGHT) / float(height))
-	return Vector2i(maxi(1, int(floor(width * scale))), maxi(1, int(floor(height * scale))))
-
 ## Check the complete protocol reply, including a conservative id/generation envelope.
 static func protocol_result_fits(result: Variant) -> bool:
 	var envelope := Protocol.reply(9_223_372_036_854_775_807, true, result, "", "",
@@ -180,22 +172,19 @@ static func _capture_viewport(viewport_node: Viewport, metadata: Dictionary,
 		current_result: Dictionary = {}, deadline_msec: int = -1) -> Dictionary:
 	if viewport_node == null:
 		return _failure("not_found", "viewport is unavailable")
-	if bool(viewport_node.get_meta("gdapi_capture_fixture_delay", false)):
-		await viewport_node.get_tree().create_timer(0.25).timeout
-		if deadline_msec >= 0 and _deadline_reached(deadline_msec):
-			return _failure("timeout", "capture timed out before readback")
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "capture timed out before readback")
 	var texture := viewport_node.get_texture()
 	if texture == null:
 		return _failure("godot_error", "viewport texture is unavailable")
-	var fixture_image: Variant = viewport_node.get_meta("gdapi_capture_fixture_image", null)
-	var result := capture_texture(texture, metadata, current_result, fixture_image,
+	var result := capture_texture(texture, metadata, current_result, deadline_msec,
 		viewport_node)
 	return result
 
 ## Public test seam around the allocation boundary. A fake texture can prove
 ## get_image() is never reached for an oversized source.
 static func capture_texture(texture: Variant, metadata: Dictionary,
-		current_result: Dictionary = {}, fixture_image: Variant = null,
+		current_result: Dictionary = {}, deadline_msec: int = -1,
 		viewport_node: Viewport = null) -> Dictionary:
 	if texture == null:
 		return _failure("godot_error", "viewport texture is unavailable")
@@ -206,8 +195,12 @@ static func capture_texture(texture: Variant, metadata: Dictionary,
 	if source_width > MAX_WIDTH or source_height > MAX_HEIGHT:
 		return _failure("invalid_param",
 			"capture source exceeds the 1920x1080 pre-readback limit")
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "capture timed out before readback")
 	_mark_fixture_readback(viewport_node)
-	var image: Image = fixture_image if fixture_image is Image else texture.get_image()
+	var image: Image = texture.get_image()
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "capture timed out during readback")
 	if image == null or image.is_empty():
 		return _failure("godot_error", "viewport image is unavailable")
 	if image.get_width() <= 0 or image.get_height() <= 0:
@@ -216,18 +209,28 @@ static func capture_texture(texture: Variant, metadata: Dictionary,
 		return _failure("invalid_param",
 			"capture image exceeds the 1920x1080 allocation limit")
 	var png_bytes := image.save_png_to_buffer()
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "capture timed out during PNG encoding")
 	if png_bytes.is_empty():
 		return _failure("godot_error", "viewport PNG encoding failed")
 	var estimated_base64 := ((png_bytes.size() + 2) / 3) * 4
 	var occupied := _protocol_size(current_result)
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "capture timed out during reply size validation")
 	if estimated_base64 + occupied + PROTOCOL_ENVELOPE_RESERVE > MAX_ENCODED_BYTES:
 		return _failure("invalid_param", "encoded capture reply exceeds 4 MiB")
+	var sha256 := png_bytes_to_sha256(png_bytes)
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "capture timed out during PNG hashing")
+	var data_base64 := Marshalls.raw_to_base64(png_bytes)
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "capture timed out during base64 encoding")
 	var item: Dictionary = {
 		"mime": "image/png",
 		"width": image.get_width(),
 		"height": image.get_height(),
-		"sha256": png_bytes_to_sha256(png_bytes),
-		"data_base64": Marshalls.raw_to_base64(png_bytes),
+		"sha256": sha256,
+		"data_base64": data_base64,
 	}
 	item.merge(metadata, true)
 	if not protocol_result_fits(item if current_result.is_empty() else {
@@ -235,16 +238,22 @@ static func capture_texture(texture: Variant, metadata: Dictionary,
 		"count": int(current_result.get("count", 0)) + 1,
 	}):
 		return _failure("invalid_param", "encoded capture reply exceeds 4 MiB")
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "capture timed out during protocol size validation")
 	return {"ok": true, "result": item}
 
 static func _mark_fixture_readback(viewport_node: Viewport) -> void:
 	if viewport_node == null:
 		return
-	var raw_path: Variant = viewport_node.get_meta("gdapi_capture_readback_counter_path", null)
-	if not (raw_path is NodePath):
+	var raw_root: Variant = Engine.get_meta("gdapi_m3_capture_fixture_root", null)
+	if not (raw_root is Node) or not is_instance_valid(raw_root):
 		return
-	var tree := Engine.get_main_loop() as SceneTree
-	var counter_node := tree.root.get_node_or_null(raw_path) if tree != null else null
+	var fixture_root := raw_root as Node
+	if viewport_node.get_parent() != fixture_root:
+		return
+	if fixture_root.get_node_or_null("CaptureFixtureViewport") != viewport_node:
+		return
+	var counter_node := fixture_root.get_node_or_null("ProbeTarget")
 	if counter_node == null:
 		return
 	var current: Variant = counter_node.get("capture_readbacks")
@@ -276,6 +285,9 @@ static func _strict_integer(payload: Dictionary, key: String, default_value: int
 
 static func _deadline_reached(deadline_msec: int) -> bool:
 	return Time.get_ticks_msec() >= deadline_msec
+
+static func _deadline_expired(deadline_msec: int) -> bool:
+	return deadline_msec >= 0 and _deadline_reached(deadline_msec)
 
 static func _failure(code: String, error: String) -> Dictionary:
 	return {"ok": false, "code": code, "error": error}

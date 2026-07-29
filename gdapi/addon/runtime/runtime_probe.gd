@@ -33,6 +33,7 @@ var _hello_delay_ms: int = 0
 
 ## hello 阶段是否已经发送——只发一次
 var _hello_sent: bool = false
+var _engine_debugger_registered: bool = false
 
 ## 本地日志/错误 ring buffer,容量 2000 条
 var _ring: RefCounted = RingBuffer.new(2000)
@@ -49,7 +50,11 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		# Editor 进程不运行游戏,probe 仅在游戏进程里注册 capture
 		return
-	EngineDebugger.register_message_capture(DEBUGGER_CHANNEL_PREFIX, _on_runtime_capture)
+	var force_file_transport := bool(ProjectSettings.get_setting(
+		"gdapi/runtime_force_file_transport", false))
+	if not force_file_transport:
+		EngineDebugger.register_message_capture(DEBUGGER_CHANNEL_PREFIX, _on_runtime_capture)
+		_engine_debugger_registered = true
 	# 文件 transport:总在游戏进程里启动,与 EngineDebugger 并存。
 	# EngineDebugger 在 headless 不可达时由 file transport 接管。
 	_file_transport = FileTransport.new(_hello_delay_ms)
@@ -68,6 +73,9 @@ func _process(_dt: float) -> void:
 
 ## probe 退出时清理 file transport(删除自己的子目录)
 func _exit_tree() -> void:
+	if _engine_debugger_registered:
+		EngineDebugger.unregister_message_capture(DEBUGGER_CHANNEL_PREFIX)
+		_engine_debugger_registered = false
 	if _file_transport != null:
 		_file_transport.stop()
 
@@ -319,6 +327,8 @@ func _send_hello() -> void:
 	if _hello_sent:
 		return
 	_hello_sent = true
+	if not _engine_debugger_registered:
+		return
 	var hello: Dictionary = Protocol.event(0, "hello", {
 		"protocol_version": Protocol.VERSION,
 		"node": OS.get_processor_name(),
@@ -331,7 +341,7 @@ func _send_hello() -> void:
 
 ## Wire 发送:把 reply / event 通过 EngineDebugger 推到 editor
 func _send_message(message: Dictionary) -> bool:
-	if EngineDebugger == null or not EngineDebugger.is_active():
+	if not _engine_debugger_registered or EngineDebugger == null or not EngineDebugger.is_active():
 		return false
 	EngineDebugger.send_message(DEBUGGER_CHANNEL, [message])
 	return true

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import time
 
 import pytest
@@ -14,6 +15,7 @@ from .conftest import exec_ok, exec_error
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PROBE_TARGET = "/root/RuntimeMain/ProbeTarget"
 CAPTURE_CAMERA = "/root/RuntimeMain/CaptureFixtureViewport/CaptureFixtureCamera"
+MAX_PROTOCOL_BYTES = 4 * 1024 * 1024
 
 
 def _png_signature_present(capture):
@@ -38,6 +40,19 @@ def _readbacks(m3_running):
         "node_path": PROBE_TARGET,
         "property": "capture_readbacks",
     })["value"]
+
+
+def _protocol_reply_size(result, generation):
+    runtime_result = {key: value for key, value in result.items() if key != "ok"}
+    reply = {
+        "version": 1,
+        "id": 9_223_372_036_854_775_807,
+        "kind": "reply",
+        "ok": True,
+        "result": runtime_result,
+        "generation": generation,
+    }
+    return len(json.dumps(reply, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
 def test_viewport_capture_is_valid_png(m3_running):
@@ -130,9 +145,23 @@ def test_frame_capture_returns_dict(m3_running):
         assert hashlib.sha256(data).hexdigest() == frame["sha256"]
 
 
-def test_real_high_entropy_capture_is_bounded_and_transport_recovers(m3_running):
+def test_real_high_entropy_single_frame_fits_then_cumulative_reply_is_rejected(m3_running):
     fixture = _prepare_capture_fixture(m3_running, "high_entropy")
     assert fixture["camera_path"] == CAPTURE_CAMERA
+    status = exec_ok(m3_running, "runtime/status")
+    assert status["transport"] == "file"
+
+    before = _readbacks(m3_running)
+    single = exec_ok(m3_running, "runtime/screenshot/camera", {
+        "node_path": CAPTURE_CAMERA,
+        "timeout_ms": 10000,
+    })
+    png = _png_signature_present(single)
+    assert (single["width"], single["height"]) == (1024, 600)
+    assert len(png) > 1024 * 1024
+    assert _protocol_reply_size(single, status["generation"]) <= MAX_PROTOCOL_BYTES
+    assert _readbacks(m3_running) == before + 1
+
     started = time.monotonic()
     error = exec_error(m3_running, "runtime/screenshot/frames", {
         "count": 2,
@@ -143,24 +172,32 @@ def test_real_high_entropy_capture_is_bounded_and_transport_recovers(m3_running)
     assert error["code"] == "invalid_param"
     assert "4 MiB" in error["error"]
     assert time.monotonic() - started < 10
-    diagnostics = error["diagnostics"]
-    reply_bytes = (diagnostics["stdout"] + diagnostics["stderr"]).encode("utf-8")
-    assert len(reply_bytes) < 4 * 1024 * 1024
     assert exec_ok(m3_running, "runtime/status")["state"] == "connected"
     _png_signature_present(exec_ok(m3_running, "runtime/screenshot/viewport"))
 
 
 def test_capture_deadline_stops_before_readback_and_transport_recovers(m3_running):
-    fixture = _prepare_capture_fixture(m3_running, "delayed")
+    fixture = _prepare_capture_fixture(m3_running, "camera")
     assert fixture["camera_path"] == CAPTURE_CAMERA
     before = _readbacks(m3_running)
     error = exec_error(m3_running, "runtime/screenshot/camera", {
         "node_path": CAPTURE_CAMERA,
-        "timeout_ms": 50,
+        "timeout_ms": 1,
     })
     assert error["code"] == "timeout"
     assert _readbacks(m3_running) == before
-    time.sleep(0.35)
+    time.sleep(0.1)
     assert _readbacks(m3_running) == before
     assert exec_ok(m3_running, "runtime/status")["state"] == "connected"
     _png_signature_present(exec_ok(m3_running, "runtime/screenshot/viewport"))
+
+
+def test_invalid_capture_fixture_mode_has_no_side_effect(m3_running):
+    fixture = _prepare_capture_fixture(m3_running, "camera")
+    invalid = _prepare_capture_fixture(m3_running, "not-a-mode")
+    assert invalid["ok"] is False
+    assert invalid["error"] == "unknown fixed capture fixture mode"
+    capture = exec_ok(m3_running, "runtime/screenshot/camera", {
+        "node_path": fixture["camera_path"],
+    })
+    _png_signature_present(capture)

@@ -10,12 +10,19 @@ class FakeTexture:
 	var width: int
 	var height: int
 	var readback_count := 0
+	var width_delay_ms := 0
+	var readback_delay_ms := 0
 
-	func _init(p_width: int, p_height: int) -> void:
+	func _init(p_width: int, p_height: int, p_width_delay_ms: int = 0,
+			p_readback_delay_ms: int = 0) -> void:
 		width = p_width
 		height = p_height
+		width_delay_ms = p_width_delay_ms
+		readback_delay_ms = p_readback_delay_ms
 
 	func get_width() -> int:
+		if width_delay_ms > 0:
+			OS.delay_msec(width_delay_ms)
 		return width
 
 	func get_height() -> int:
@@ -23,6 +30,8 @@ class FakeTexture:
 
 	func get_image() -> Image:
 		readback_count += 1
+		if readback_delay_ms > 0:
+			OS.delay_msec(readback_delay_ms)
 		return Image.create(width, height, false, Image.FORMAT_RGBA8)
 
 var passed := 0
@@ -32,9 +41,10 @@ func _init() -> void:
 	print("Running GdApiRuntimeCaptureOps tests...\n")
 	test_frames_validation_is_strict_and_bounded()
 	test_camera_path_validation_is_strict()
-	test_fit_dimensions_use_1920_by_1080()
 	test_encoded_result_counts_protocol_envelope()
 	test_oversized_texture_is_rejected_before_readback()
+	test_expired_deadline_stops_before_readback()
+	test_expiry_during_readback_never_returns_success()
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -91,11 +101,6 @@ func test_camera_path_validation_is_strict() -> void:
 	assert_true(CaptureOps.validate_camera_path("", false).get("ok", false),
 		"empty optional camera path accepted")
 
-func test_fit_dimensions_use_1920_by_1080() -> void:
-	assert_eq(CaptureOps.fit_dimensions(3840, 2160), Vector2i(1920, 1080), "4K fits 1080p")
-	assert_eq(CaptureOps.fit_dimensions(1920, 1200), Vector2i(1728, 1080), "height uses 1080 limit")
-	assert_eq(CaptureOps.fit_dimensions(800, 600), Vector2i(800, 600), "small image unchanged")
-
 func test_encoded_result_counts_protocol_envelope() -> void:
 	var small := {"frames": [{"data_base64": "AAAA"}], "count": 1}
 	assert_true(CaptureOps.protocol_result_fits(small), "small protocol result fits")
@@ -107,3 +112,17 @@ func test_oversized_texture_is_rejected_before_readback() -> void:
 	var result: Dictionary = CaptureOps.capture_texture(texture, {})
 	assert_invalid(result, "oversized source texture")
 	assert_eq(texture.readback_count, 0, "oversized source performs no CPU readback")
+
+func test_expired_deadline_stops_before_readback() -> void:
+	var texture := FakeTexture.new(64, 64, 5)
+	var deadline := Time.get_ticks_msec() + 1
+	var result: Dictionary = CaptureOps.capture_texture(texture, {}, {}, deadline)
+	assert_eq(result.get("code", ""), "timeout", "deadline before readback returns timeout")
+	assert_eq(texture.readback_count, 0, "expired deadline performs no CPU readback")
+
+func test_expiry_during_readback_never_returns_success() -> void:
+	var texture := FakeTexture.new(64, 64, 0, 5)
+	var deadline := Time.get_ticks_msec() + 1
+	var result: Dictionary = CaptureOps.capture_texture(texture, {}, {}, deadline)
+	assert_eq(result.get("code", ""), "timeout", "expiry during readback returns timeout")
+	assert_eq(texture.readback_count, 1, "readback started before deadline only once")
