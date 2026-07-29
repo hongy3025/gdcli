@@ -20,10 +20,16 @@ const CAPABILITIES := [
 const CAPABILITY_FIELDS := {
 	"editor_eval": ["enabled", "max_source_bytes", "allowed_input_keys"],
 	"runtime_eval": ["enabled", "max_source_bytes", "allowed_input_keys"],
-	"process": [
-		"enabled", "executables", "cwd_roots", "max_timeout_ms", "max_output_bytes",
+	"process":
+	[
+		"enabled",
+		"executables",
+		"cwd_roots",
+		"max_timeout_ms",
+		"max_output_bytes",
 	],
-	"network": [
+	"network":
+	[
 		"enabled",
 		"schemes",
 		"hosts",

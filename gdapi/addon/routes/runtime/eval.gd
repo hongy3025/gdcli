@@ -7,10 +7,13 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const ROUTE := "runtime/eval"
 
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var gate := Policy.new().authorize("runtime_eval", ROUTE, req.body)
 	if not gate.ok:
-		AuditLog.record(ROUTE, "dangerous", {"force": req.get_body("force", false)}, false, gate.code)
+		AuditLog.record(
+			ROUTE, "dangerous", {"force": req.get_body("force", false)}, false, gate.code
+		)
 		res.error(gate.error, gate.code, ErrorCodes.http_status(gate.code))
 		return
 	var broker = Engine.get_meta("gdapi_runtime_broker", null)
@@ -27,5 +30,18 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	AuditLog.record(ROUTE, "dangerous", {"force": true, "type": result.type}, true, "")
 	res.json(result)
 
+
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("执行受限的运行时表达式").desc("使用与 editor/eval 相同的固定输入语法；运行时未连接时返回 conflict。").param("source", "String", true, "受限 Expression 源码").param("inputs", "Dictionary", false, "允许的输入值").param("force", "bool", true, "确认执行").returns("表达式结果", {"value": "encoded Variant", "type": "String", "elapsed_ms": "int", "undoable": "false"}).example('{"source":"1+1","force":true}')
+	return (
+		GdApiRouteDoc
+		. make("执行受限的运行时表达式")
+		. desc("使用与 editor/eval 相同的固定输入语法；运行时未连接时返回 conflict。")
+		. param("source", "String", true, "受限 Expression 源码")
+		. param("inputs", "Dictionary", false, "允许的输入值")
+		. param("force", "bool", true, "确认执行")
+		. returns(
+			"表达式结果",
+			{"value": "encoded Variant", "type": "String", "elapsed_ms": "int", "undoable": "false"}
+		)
+		. example('{"source":"1+1","force":true}')
+	)

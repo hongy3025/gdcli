@@ -6,11 +6,25 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 
 const MAX_SOURCE_BYTES := 16 * 1024
-const ALLOWED_GLOBALS := ["Vector2", "Vector2i", "Vector3", "Vector3i", "Vector4", "Vector4i", "Color", "Rect2", "Rect2i", "Quaternion"]
+const ALLOWED_GLOBALS := [
+	"Vector2",
+	"Vector2i",
+	"Vector3",
+	"Vector3i",
+	"Vector4",
+	"Vector4i",
+	"Color",
+	"Rect2",
+	"Rect2i",
+	"Quaternion"
+]
 
 
 static func execute(source: String, inputs: Dictionary, policy: Dictionary) -> Dictionary:
-	if source.to_utf8_buffer().size() > min(MAX_SOURCE_BYTES, int(policy.get("max_source_bytes", MAX_SOURCE_BYTES))):
+	if (
+		source.to_utf8_buffer().size()
+		> min(MAX_SOURCE_BYTES, int(policy.get("max_source_bytes", MAX_SOURCE_BYTES)))
+	):
 		return _error(ErrorCodes.INVALID_PARAM, "source exceeds policy limit")
 	if inputs.size() > 64:
 		return _error(ErrorCodes.INVALID_PARAM, "too many inputs")
@@ -36,13 +50,40 @@ static func execute(source: String, inputs: Dictionary, policy: Dictionary) -> D
 	var value: Variant = expression.execute(values, null, false)
 	if expression.has_execute_failed():
 		return _error(ErrorCodes.INVALID_PARAM, "expression execution failed")
-	return {"ok": true, "value": VariantCodec.from_variant(value), "type": type_string(typeof(value)), "elapsed_ms": Time.get_ticks_msec() - started, "undoable": false}
+	return {
+		"ok": true,
+		"value": VariantCodec.from_variant(value),
+		"type": type_string(typeof(value)),
+		"elapsed_ms": Time.get_ticks_msec() - started,
+		"undoable": false
+	}
 
 
 static func _validate_source(source: String, names: Array[String]) -> Dictionary:
-	if source.strip_edges().is_empty() or source.contains(";") or source.contains("\n") or source.contains("\r"):
+	if (
+		source.strip_edges().is_empty()
+		or source.contains(";")
+		or source.contains("\n")
+		or source.contains("\r")
+	):
 		return _error(ErrorCodes.PERMISSION_DENIED, "statements are not permitted")
-	for token in ["=", "load", "preload", "Engine", "OS", "ProjectSettings", "ClassDB", "get_tree", "while", "for", "func", "await", "yield", "Callable", "Object"]:
+	for token in [
+		"=",
+		"load",
+		"preload",
+		"Engine",
+		"OS",
+		"ProjectSettings",
+		"ClassDB",
+		"get_tree",
+		"while",
+		"for",
+		"func",
+		"await",
+		"yield",
+		"Callable",
+		"Object"
+	]:
 		if source.contains(token):
 			return _error(ErrorCodes.PERMISSION_DENIED, "expression contains a forbidden token")
 	if source.contains("."):

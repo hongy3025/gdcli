@@ -46,6 +46,40 @@ uv run pytest tests/e2e/ -v -m e2e       # 仅运行 e2e 标记的测试
 uv run pytest tests/e2e/ -v -m "not e2e" # 跳过 e2e 测试
 ```
 
+## GDScript 格式化与 lint 强制门禁
+
+在开始任何单元测试前，必须先处理本次修改过的全部 `.gd` 文件：
+
+1. 必须使用 `gdformat` 统一格式化。仓库提供的 `scripts/format-gd.py` 会扫描并格式化仓库内所有适用的 GDScript 文件；执行：
+
+   ```bash
+   python scripts/format-gd.py
+   python scripts/format-gd.py --check
+   ```
+
+2. 必须使用 `gdlint` 检查所有本次修改过的 `.gd` 文件。若 `gdformat` 或 `gdlint` 任一命令不存在，必须先自动安装：
+
+   ```bash
+   uv tool install gdtoolkit
+   ```
+
+   安装后重新确认 `gdformat` 和 `gdlint` 均可用；安装失败时不得开始单元测试。
+
+3. `gdlint` 检查失败时不得跳过、降级或带错误运行测试，必须先修复 GDScript 或明确记录经过批准的例外。格式化和 lint 必须覆盖所有已修改 `.gd` 文件，包括新增文件；未修改的 `.gd` 文件也会被 `scripts/format-gd.py` 一并规范化。
+
+Windows PowerShell 可使用以下命令获取修改文件并执行 lint：
+
+```powershell
+if (-not (Get-Command gdformat -ErrorAction SilentlyContinue) -or
+    -not (Get-Command gdlint -ErrorAction SilentlyContinue)) {
+    uv tool install gdtoolkit
+}
+python scripts/format-gd.py
+python scripts/format-gd.py --check
+$gdFiles = @(git diff --name-only --diff-filter=ACMR | Where-Object { $_ -like '*.gd' })
+if ($gdFiles.Count -gt 0) { gdlint $gdFiles }
+```
+
 ## 关键架构细节
 
 - `cli/src/main.rs` 是 CLI 入口，使用 clap 解析参数

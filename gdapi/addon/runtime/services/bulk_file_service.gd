@@ -8,6 +8,7 @@ const MAX_FILES := 1000
 const MAX_REPLACEMENTS := 10000
 const TRASH_ROOT := "res://.godot/gdapi-trash"
 
+
 static func delete(body: Dictionary) -> Dictionary:
 	var paths: Array = body.get("paths", [])
 	if typeof(paths) != TYPE_ARRAY or paths.is_empty() or paths.size() > MAX_FILES:
@@ -28,23 +29,42 @@ static func delete(body: Dictionary) -> Dictionary:
 	for entry in plan.operations:
 		var source: String = entry.path
 		var destination := "%s/%s" % [trash, source.trim_prefix("res://")]
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(destination.get_base_dir()))
-		if DirAccess.rename_absolute(ProjectSettings.globalize_path(source), ProjectSettings.globalize_path(destination)) != OK:
+		DirAccess.make_dir_recursive_absolute(
+			ProjectSettings.globalize_path(destination.get_base_dir())
+		)
+		if (
+			DirAccess.rename_absolute(
+				ProjectSettings.globalize_path(source), ProjectSettings.globalize_path(destination)
+			)
+			!= OK
+		):
 			_rollback_manifest(manifest)
 			return _error(ErrorCodes.GODOT_ERROR, "batch delete rolled back")
 		manifest.append({"source": source, "trash": destination})
 		var uid := source + ".uid"
 		if FileAccess.file_exists(ProjectSettings.globalize_path(uid)):
 			var uid_destination := destination + ".uid"
-			DirAccess.rename_absolute(ProjectSettings.globalize_path(uid), ProjectSettings.globalize_path(uid_destination))
+			DirAccess.rename_absolute(
+				ProjectSettings.globalize_path(uid), ProjectSettings.globalize_path(uid_destination)
+			)
 			manifest.back().uid_trash = uid_destination
-	var mf := FileAccess.open(ProjectSettings.globalize_path(trash + "/manifest.json"), FileAccess.WRITE)
+	var mf := FileAccess.open(
+		ProjectSettings.globalize_path(trash + "/manifest.json"), FileAccess.WRITE
+	)
 	if mf == null:
 		_rollback_manifest(manifest)
 		return _error(ErrorCodes.GODOT_ERROR, "cannot write recovery manifest")
 	mf.store_string(JSON.stringify({"operation_id": operation_id, "entries": manifest}))
 	mf.close()
-	return {"ok": true, "changed": true, "undoable": false, "deleted": manifest.size(), "operation_id": operation_id, "manifest": manifest, "plan_hash": plan.plan_hash}
+	return {
+		"ok": true,
+		"changed": true,
+		"undoable": false,
+		"deleted": manifest.size(),
+		"operation_id": operation_id,
+		"manifest": manifest,
+		"plan_hash": plan.plan_hash
+	}
 
 
 static func replace(body: Dictionary) -> Dictionary:
@@ -75,7 +95,10 @@ static func replace(body: Dictionary) -> Dictionary:
 			return _error(ErrorCodes.CONFLICT, "source changed during apply")
 		var text := file.get_as_text()
 		file.close()
-		if FileAccess.get_sha256(ProjectSettings.globalize_path(operation.path)) != operation.sha256:
+		if (
+			FileAccess.get_sha256(ProjectSettings.globalize_path(operation.path))
+			!= operation.sha256
+		):
 			return _error(ErrorCodes.CONFLICT, "source changed during apply")
 		var output := text.replace(find_text, replacement)
 		var tmp := operation.path + ".gdcli-replace-tmp"
@@ -84,10 +107,22 @@ static func replace(body: Dictionary) -> Dictionary:
 			return _error(ErrorCodes.GODOT_ERROR, "cannot stage replacement")
 		out.store_string(output)
 		out.close()
-		if DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp), ProjectSettings.globalize_path(operation.path)) != OK:
+		if (
+			DirAccess.rename_absolute(
+				ProjectSettings.globalize_path(tmp), ProjectSettings.globalize_path(operation.path)
+			)
+			!= OK
+		):
 			return _error(ErrorCodes.GODOT_ERROR, "cannot apply replacement")
 		changed += int(operation.replacements)
-	return {"ok": true, "changed": changed > 0, "undoable": false, "files": matches.size(), "replacements": changed, "plan_hash": plan.plan_hash}
+	return {
+		"ok": true,
+		"changed": changed > 0,
+		"undoable": false,
+		"files": matches.size(),
+		"replacements": changed,
+		"plan_hash": plan.plan_hash
+	}
 
 
 static func recover(operation_id: String) -> Dictionary:
@@ -105,8 +140,16 @@ static func recover(operation_id: String) -> Dictionary:
 	for entry in parsed.get("entries", []):
 		if FileAccess.file_exists(ProjectSettings.globalize_path(entry.source)):
 			return _error(ErrorCodes.CONFLICT, "recovery destination already exists")
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(entry.source.get_base_dir()))
-		if DirAccess.rename_absolute(ProjectSettings.globalize_path(entry.trash), ProjectSettings.globalize_path(entry.source)) != OK:
+		DirAccess.make_dir_recursive_absolute(
+			ProjectSettings.globalize_path(entry.source.get_base_dir())
+		)
+		if (
+			DirAccess.rename_absolute(
+				ProjectSettings.globalize_path(entry.trash),
+				ProjectSettings.globalize_path(entry.source)
+			)
+			!= OK
+		):
 			return _error(ErrorCodes.GODOT_ERROR, "recovery failed")
 		restored += 1
 	return {"ok": true, "changed": restored > 0, "undoable": false, "restored": restored}
@@ -120,12 +163,19 @@ static func _delete_plan(paths: Array) -> Dictionary:
 			return checked
 		if not FileAccess.file_exists(ProjectSettings.globalize_path(checked.path)):
 			return _error(ErrorCodes.NOT_FOUND, "file not found: %s" % checked.path)
-		operations.append({"path": checked.path, "sha256": FileAccess.get_sha256(ProjectSettings.globalize_path(checked.path))})
+		operations.append(
+			{
+				"path": checked.path,
+				"sha256": FileAccess.get_sha256(ProjectSettings.globalize_path(checked.path))
+			}
+		)
 	operations.sort_custom(func(a, b): return a.path < b.path)
 	return {"ok": true, "operations": operations, "plan_hash": _hash_plan(operations)}
 
 
-static func _scan_files(root: String, find_text: String, replacement: String, regex_mode: bool, matches: Array) -> Dictionary:
+static func _scan_files(
+	root: String, find_text: String, replacement: String, regex_mode: bool, matches: Array
+) -> Dictionary:
 	var dir := DirAccess.open(root)
 	if dir == null:
 		return _error(ErrorCodes.NOT_FOUND, "root not found")
@@ -136,15 +186,27 @@ static func _scan_files(root: String, find_text: String, replacement: String, re
 			var path := root.path_join(name)
 			if dir.current_is_dir():
 				var nested := _scan_files(path, find_text, replacement, regex_mode, matches)
-				if not nested.ok: return nested
+				if not nested.ok:
+					return nested
 			else:
 				var file := FileAccess.open(ProjectSettings.globalize_path(path), FileAccess.READ)
 				if file != null:
-					var text := file.get_as_text(); file.close()
+					var text := file.get_as_text()
+					file.close()
 					var count := text.count(find_text)
 					if count > 0:
-						matches.append({"path": path, "sha256": FileAccess.get_sha256(ProjectSettings.globalize_path(path)), "replacements": count})
-						if matches.size() > MAX_FILES or _replacement_count(matches) > MAX_REPLACEMENTS:
+						matches.append(
+							{
+								"path": path,
+								"sha256":
+								FileAccess.get_sha256(ProjectSettings.globalize_path(path)),
+								"replacements": count
+							}
+						)
+						if (
+							matches.size() > MAX_FILES
+							or _replacement_count(matches) > MAX_REPLACEMENTS
+						):
 							return _error(ErrorCodes.INVALID_PARAM, "bulk replace exceeds limits")
 		name = dir.get_next()
 	dir.list_dir_end()
@@ -153,18 +215,25 @@ static func _scan_files(root: String, find_text: String, replacement: String, re
 
 static func _replacement_count(items: Array) -> int:
 	var total := 0
-	for item in items: total += int(item.replacements)
+	for item in items:
+		total += int(item.replacements)
 	return total
 
 
 static func _hash_plan(value: Variant) -> String:
-	var context := HashingContext.new(); context.start(HashingContext.HASH_SHA256); context.update(JSON.stringify(value).to_utf8_buffer()); return context.finish().hex_encode()
+	var context := HashingContext.new()
+	context.start(HashingContext.HASH_SHA256)
+	context.update(JSON.stringify(value).to_utf8_buffer())
+	return context.finish().hex_encode()
 
 
 static func _rollback_manifest(manifest: Array) -> void:
 	for index in range(manifest.size() - 1, -1, -1):
 		var entry: Dictionary = manifest[index]
-		DirAccess.rename_absolute(ProjectSettings.globalize_path(entry.trash), ProjectSettings.globalize_path(entry.source))
+		DirAccess.rename_absolute(
+			ProjectSettings.globalize_path(entry.trash),
+			ProjectSettings.globalize_path(entry.source)
+		)
 
 
 static func _error(code: String, message: String) -> Dictionary:

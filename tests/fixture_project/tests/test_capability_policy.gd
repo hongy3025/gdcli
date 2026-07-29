@@ -82,16 +82,20 @@ func test_policy_reloads_to_denial_after_malformed_replacement() -> void:
 
 
 func test_audit_log_redacts_high_risk_payloads_recursively() -> void:
-	var clean: Dictionary = AuditLog.summarize(
-		{
-			"source": "secret_expression()",
-			"stdout": "private output",
-			"stderr": "private error",
-			"environment": {"SAFE_NAME": "still private"},
-			"request": {"headers": {"Accept": "application/json", "Authorization": "Bearer secret"}},
-			"nested": {"token": "abc"},
-			"safe": "value",
-		}
+	var clean: Dictionary = (
+		AuditLog
+		. summarize(
+			{
+				"source": "secret_expression()",
+				"stdout": "private output",
+				"stderr": "private error",
+				"environment": {"SAFE_NAME": "still private"},
+				"request":
+				{"headers": {"Accept": "application/json", "Authorization": "Bearer secret"}},
+				"nested": {"token": "abc"},
+				"safe": "value",
+			}
+		)
 	)
 	assert_eq(clean.get("source"), "[REDACTED]", "source is redacted")
 	assert_eq(clean.get("stdout"), "[REDACTED]", "stdout is redacted")

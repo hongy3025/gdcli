@@ -27,7 +27,9 @@ func tick(now_ms: int) -> void:
 		var finished: Variant = task["tick"].call(now_ms)
 		if bool(finished):
 			if not _response_is_sent(task["response"]):
-				_fail_task(task, ErrorCodes.GODOT_ERROR, "deferred task completed without a response")
+				_fail_task(
+					task, ErrorCodes.GODOT_ERROR, "deferred task completed without a response"
+				)
 			_tasks.remove_at(index)
 		elif _response_is_sent(task["response"]):
 			# A task may send its terminal response and report completion on the next
@@ -75,7 +77,6 @@ func _fail_task(task: Dictionary, code: String, message: String) -> void:
 		return
 	if response.has_method("error"):
 		response.error(message, code, ErrorCodes.http_status(code))
-
 
 
 func _response_is_sent(response: Variant) -> bool:

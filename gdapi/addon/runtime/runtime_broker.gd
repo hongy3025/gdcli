@@ -424,7 +424,10 @@ func receive(message: Variant) -> void:
 	# The editor broker remains on v1 until a session explicitly negotiates v2.
 	# Protocol.validate_message accepts v2 for the M6 probe boundary, but an
 	# unnegotiated v2 reply must not consume a v1 pending request.
-	if typeof(message) != TYPE_DICTIONARY or int(Dictionary(message).get("version", -1)) != Protocol.VERSION:
+	if (
+		typeof(message) != TYPE_DICTIONARY
+		or int(Dictionary(message).get("version", -1)) != Protocol.VERSION
+	):
 		return
 	var verdict: Dictionary = Protocol.validate_message(message)
 	if not bool(verdict.get("ok", false)):

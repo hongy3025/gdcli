@@ -52,7 +52,8 @@ func test_cancel_all_cleans_up_every_pending_task_once() -> void:
 	assert_eq(registry.pending_count(), 0, "shutdown clears registry")
 
 
-class FakeResponse extends RefCounted:
+class FakeResponse:
+	extends RefCounted
 	var sent_count := 0
 	var error_codes: Array = []
 
@@ -69,7 +70,8 @@ class FakeResponse extends RefCounted:
 			error_codes.append(code)
 
 
-class FakeTask extends RefCounted:
+class FakeTask:
+	extends RefCounted
 	var response := FakeResponse.new()
 	var deadline_ms: int
 	var completes_on_tick: bool
