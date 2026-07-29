@@ -45,6 +45,7 @@ func _init() -> void:
 	test_oversized_texture_is_rejected_before_readback()
 	test_expired_deadline_stops_before_readback()
 	test_expiry_during_readback_never_returns_success()
+	test_frame_aggregate_expiry_never_returns_success()
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -126,3 +127,10 @@ func test_expiry_during_readback_never_returns_success() -> void:
 	var result: Dictionary = CaptureOps.capture_texture(texture, {}, {}, deadline)
 	assert_eq(result.get("code", ""), "timeout", "expiry during readback returns timeout")
 	assert_eq(texture.readback_count, 1, "readback started before deadline only once")
+
+func test_frame_aggregate_expiry_never_returns_success() -> void:
+	var frame := {"data_base64": "x".repeat(Protocol.MAX_MESSAGE_BYTES)}
+	var deadline := Time.get_ticks_msec() + 1
+	var result: Dictionary = CaptureOps.finalize_frames_result([frame], deadline)
+	assert_eq(result.get("code", ""), "timeout",
+		"expiry during aggregate protocol serialization returns timeout")

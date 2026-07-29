@@ -1,5 +1,32 @@
 extends Node2D
 
+const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
+
+class CaptureBoundaryTexture:
+	extends RefCounted
+
+	var width: int
+	var height: int
+	var width_delay_ms: int
+	var readback_count := 0
+
+	func _init(p_width: int, p_height: int, p_width_delay_ms: int = 0) -> void:
+		width = p_width
+		height = p_height
+		width_delay_ms = p_width_delay_ms
+
+	func get_width() -> int:
+		if width_delay_ms > 0:
+			OS.delay_msec(width_delay_ms)
+		return width
+
+	func get_height() -> int:
+		return height
+
+	func get_image() -> Image:
+		readback_count += 1
+		return Image.create(width, height, false, Image.FORMAT_RGBA8)
+
 ## RuntimeMain — M3 fixture 根节点
 ##
 ## 包含可观测子节点 ProbeTarget 与若干 Input 中继节点。
@@ -9,13 +36,6 @@ extends Node2D
 @onready var probe_input: Node = $ProbeInput
 @onready var probe_input_action: Node = $ProbeInputAction
 @onready var probe_finished_signal: Node = $ProbeFinishedSignal
-
-func _ready() -> void:
-	Engine.set_meta("gdapi_m3_capture_fixture_root", self)
-
-func _exit_tree() -> void:
-	if Engine.get_meta("gdapi_m3_capture_fixture_root", null) == self:
-		Engine.remove_meta("gdapi_m3_capture_fixture_root")
 
 func reset_fixture() -> Dictionary:
 	_remove_runtime_children(self)
@@ -60,6 +80,24 @@ func prepare_capture_fixture(mode: String) -> Dictionary:
 	return {
 		"ok": true,
 		"camera_path": "/root/RuntimeMain/CaptureFixtureViewport/CaptureFixtureCamera",
+	}
+
+func probe_capture_boundary(mode: String) -> Dictionary:
+	if not mode in ["oversized", "expired"]:
+		return {"ok": false, "error": "unknown fixed capture boundary mode"}
+	var texture: CaptureBoundaryTexture
+	var deadline_msec := -1
+	if mode == "oversized":
+		texture = CaptureBoundaryTexture.new(1921, 1080)
+	else:
+		texture = CaptureBoundaryTexture.new(96, 54, 5)
+		deadline_msec = Time.get_ticks_msec() + 1
+	var capture_result := CaptureOps.capture_texture(texture, {}, {}, deadline_msec)
+	return {
+		"ok": true,
+		"capture_ok": bool(capture_result.get("ok", false)),
+		"code": String(capture_result.get("code", "")),
+		"readbacks": texture.readback_count,
 	}
 
 func _make_high_entropy_image() -> Image:

@@ -54,7 +54,7 @@ def test_runtime_route_documentation_is_complete(m3_editor):
 
 def test_failed_cli_diagnostics_include_runtime_context(m3_editor):
     error = exec_error(m3_editor, "runtime/node/get", {
-        "node_path": "/root/RuntimeMain/ProbeTarget",
+        "node_path": "RuntimeMain/ProbeTarget",
         "property": "counter",
     })
     diagnostics = error.get("diagnostics", {})

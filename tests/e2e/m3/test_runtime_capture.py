@@ -35,11 +35,14 @@ def _prepare_capture_fixture(m3_running, mode):
     return result["result"]
 
 
-def _readbacks(m3_running):
-    return exec_ok(m3_running, "runtime/node/get", {
+def _capture_boundary_probe(m3_running, mode):
+    result = exec_ok(m3_running, "runtime/node/call", {
         "node_path": PROBE_TARGET,
-        "property": "capture_readbacks",
-    })["value"]
+        "method": "probe_capture_boundary",
+        "args": [mode],
+    })
+    assert result["method"] == "probe_capture_boundary"
+    return result["result"]
 
 
 def _protocol_reply_size(result, generation):
@@ -84,13 +87,14 @@ def test_camera_capture_returns_valid_png_and_path(m3_running):
 def test_oversized_camera_source_is_rejected_before_readback(m3_running):
     fixture = _prepare_capture_fixture(m3_running, "oversized")
     assert fixture["camera_path"] == CAPTURE_CAMERA
-    before = _readbacks(m3_running)
     error = exec_error(m3_running, "runtime/screenshot/camera", {
         "node_path": CAPTURE_CAMERA,
     })
     assert error["code"] == "invalid_param"
     assert "pre-readback" in error["error"]
-    assert _readbacks(m3_running) == before
+    boundary = _capture_boundary_probe(m3_running, "oversized")
+    assert boundary["code"] == "invalid_param"
+    assert boundary["readbacks"] == 0
     assert exec_ok(m3_running, "runtime/status")["state"] == "connected"
 
 
@@ -151,7 +155,6 @@ def test_real_high_entropy_single_frame_fits_then_cumulative_reply_is_rejected(m
     status = exec_ok(m3_running, "runtime/status")
     assert status["transport"] == "file"
 
-    before = _readbacks(m3_running)
     single = exec_ok(m3_running, "runtime/screenshot/camera", {
         "node_path": CAPTURE_CAMERA,
         "timeout_ms": 10000,
@@ -160,7 +163,6 @@ def test_real_high_entropy_single_frame_fits_then_cumulative_reply_is_rejected(m
     assert (single["width"], single["height"]) == (1024, 600)
     assert len(png) > 1024 * 1024
     assert _protocol_reply_size(single, status["generation"]) <= MAX_PROTOCOL_BYTES
-    assert _readbacks(m3_running) == before + 1
 
     started = time.monotonic()
     error = exec_error(m3_running, "runtime/screenshot/frames", {
@@ -179,15 +181,15 @@ def test_real_high_entropy_single_frame_fits_then_cumulative_reply_is_rejected(m
 def test_capture_deadline_stops_before_readback_and_transport_recovers(m3_running):
     fixture = _prepare_capture_fixture(m3_running, "camera")
     assert fixture["camera_path"] == CAPTURE_CAMERA
-    before = _readbacks(m3_running)
     error = exec_error(m3_running, "runtime/screenshot/camera", {
         "node_path": CAPTURE_CAMERA,
         "timeout_ms": 1,
     })
     assert error["code"] == "timeout"
-    assert _readbacks(m3_running) == before
+    boundary = _capture_boundary_probe(m3_running, "expired")
+    assert boundary["code"] == "timeout"
+    assert boundary["readbacks"] == 0
     time.sleep(0.1)
-    assert _readbacks(m3_running) == before
     assert exec_ok(m3_running, "runtime/status")["state"] == "connected"
     _png_signature_present(exec_ok(m3_running, "runtime/screenshot/viewport"))
 

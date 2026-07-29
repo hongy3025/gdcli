@@ -62,6 +62,7 @@ static func frames(payload: Dictionary) -> Dictionary:
 		source = resolved.viewport
 
 	var frames_arr: Array = []
+	var finalized: Dictionary = {}
 	for i in int(validated.count):
 		if i > 0:
 			await tree.create_timer(float(validated.interval_ms) / 1000.0).timeout
@@ -78,10 +79,10 @@ static func frames(payload: Dictionary) -> Dictionary:
 			return captured
 		var frame: Dictionary = captured.result
 		frames_arr.append(frame)
-		var aggregate := {"frames": frames_arr, "count": frames_arr.size()}
-		if not protocol_result_fits(aggregate):
-			return _failure("invalid_param", "encoded capture reply exceeds 4 MiB")
-	return {"ok": true, "result": {"frames": frames_arr, "count": frames_arr.size()}}
+		finalized = finalize_frames_result(frames_arr, deadline_msec)
+		if not bool(finalized.get("ok", false)):
+			return finalized
+	return finalized
 
 static func validate_viewport_payload(payload: Variant) -> Dictionary:
 	if typeof(payload) != TYPE_DICTIONARY:
@@ -147,6 +148,18 @@ static func protocol_result_fits(result: Variant) -> bool:
 		"g".repeat(128))
 	return JSON.stringify(envelope).to_utf8_buffer().size() <= MAX_ENCODED_BYTES
 
+## Serialize the complete aggregate before checking the same operation deadline.
+## The post-serialization gate prevents a final frame from succeeding after its
+## deadline merely because protocol sizing itself consumed the remaining time.
+static func finalize_frames_result(frames_arr: Array, deadline_msec: int) -> Dictionary:
+	var aggregate := {"frames": frames_arr, "count": frames_arr.size()}
+	var fits := protocol_result_fits(aggregate)
+	if _deadline_expired(deadline_msec):
+		return _failure("timeout", "frame capture timed out during protocol size validation")
+	if not fits:
+		return _failure("invalid_param", "encoded capture reply exceeds 4 MiB")
+	return {"ok": true, "result": aggregate}
+
 static func _resolve_camera(node_path: String) -> Dictionary:
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree == null or tree.root == null:
@@ -177,15 +190,13 @@ static func _capture_viewport(viewport_node: Viewport, metadata: Dictionary,
 	var texture := viewport_node.get_texture()
 	if texture == null:
 		return _failure("godot_error", "viewport texture is unavailable")
-	var result := capture_texture(texture, metadata, current_result, deadline_msec,
-		viewport_node)
+	var result := capture_texture(texture, metadata, current_result, deadline_msec)
 	return result
 
 ## Public test seam around the allocation boundary. A fake texture can prove
 ## get_image() is never reached for an oversized source.
 static func capture_texture(texture: Variant, metadata: Dictionary,
-		current_result: Dictionary = {}, deadline_msec: int = -1,
-		viewport_node: Viewport = null) -> Dictionary:
+		current_result: Dictionary = {}, deadline_msec: int = -1) -> Dictionary:
 	if texture == null:
 		return _failure("godot_error", "viewport texture is unavailable")
 	var source_width := int(texture.get_width())
@@ -197,7 +208,6 @@ static func capture_texture(texture: Variant, metadata: Dictionary,
 			"capture source exceeds the 1920x1080 pre-readback limit")
 	if _deadline_expired(deadline_msec):
 		return _failure("timeout", "capture timed out before readback")
-	_mark_fixture_readback(viewport_node)
 	var image: Image = texture.get_image()
 	if _deadline_expired(deadline_msec):
 		return _failure("timeout", "capture timed out during readback")
@@ -241,24 +251,6 @@ static func capture_texture(texture: Variant, metadata: Dictionary,
 	if _deadline_expired(deadline_msec):
 		return _failure("timeout", "capture timed out during protocol size validation")
 	return {"ok": true, "result": item}
-
-static func _mark_fixture_readback(viewport_node: Viewport) -> void:
-	if viewport_node == null:
-		return
-	var raw_root: Variant = Engine.get_meta("gdapi_m3_capture_fixture_root", null)
-	if not (raw_root is Node) or not is_instance_valid(raw_root):
-		return
-	var fixture_root := raw_root as Node
-	if viewport_node.get_parent() != fixture_root:
-		return
-	if fixture_root.get_node_or_null("CaptureFixtureViewport") != viewport_node:
-		return
-	var counter_node := fixture_root.get_node_or_null("ProbeTarget")
-	if counter_node == null:
-		return
-	var current: Variant = counter_node.get("capture_readbacks")
-	if typeof(current) == TYPE_INT:
-		counter_node.set("capture_readbacks", int(current) + 1)
 
 static func _protocol_size(result: Variant) -> int:
 	var envelope := Protocol.reply(9_223_372_036_854_775_807, true, result, "", "",
