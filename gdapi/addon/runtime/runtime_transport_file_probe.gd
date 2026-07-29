@@ -16,7 +16,9 @@ extends RefCounted
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
 const DEFAULT_HANDLER_TIMEOUT_MS := 5_000
-const MAX_HANDLER_TIMEOUT_MS := 25_000
+const MAX_OPERATION_TIMEOUT_MS := 25_000
+const TRANSPORT_GRACE_TIMEOUT_MS := 500
+const MAX_HANDLER_TIMEOUT_MS := MAX_OPERATION_TIMEOUT_MS + TRANSPORT_GRACE_TIMEOUT_MS
 
 ## hello_delay_ms >0 时,start() 后推迟该毫秒数再写 hello.json
 var hello_delay_ms: int = 0
@@ -170,7 +172,7 @@ func _scan_inbox(_now_msec: int) -> void:
 			inbox.remove(filename)
 			continue
 		var id: int = int(dict.id)
-		if not _claim_inbox(id, request_generation):
+		if not _claim_inbox(id, request_generation, dict.get("payload", {})):
 			inbox.remove(filename)
 			continue
 		# 删除 inbox 防止重复消费；领取后异步处理只拥有内存中的 request。
@@ -181,18 +183,38 @@ func _scan_inbox(_now_msec: int) -> void:
 		_start_request(id, dict)
 
 ## 原子领取 request id；同一 id 的后续 inbox 文件只会被删除，不会再次分派。
-func _claim_inbox(id: int, generation: String = "") -> bool:
+func _claim_inbox(id: int, generation: String = "", payload: Variant = {}) -> bool:
 	if _claimed.has(id):
 		return false
 	_claimed[id] = true
 	_inflight[id] = {
-		"deadline_msec": Time.get_ticks_msec() + _handler_timeout(),
+		"deadline_msec": Time.get_ticks_msec() + _request_handler_timeout(payload),
 		"generation": generation,
 	}
 	return true
 
 func _handler_timeout() -> int:
 	return clampi(handler_timeout_ms, 1, MAX_HANDLER_TIMEOUT_MS)
+
+## A broker-normalized operation timeout receives a transport-only grace that
+## remains strictly below RuntimeRoute's broker grace. Invalid or absent payload
+## metadata falls back to the bounded legacy handler timeout.
+func _request_handler_timeout(payload: Variant) -> int:
+	if typeof(payload) != TYPE_DICTIONARY or not payload.has("timeout_ms"):
+		return _handler_timeout()
+	var raw: Variant = payload["timeout_ms"]
+	var operation_timeout := -1
+	if typeof(raw) == TYPE_INT:
+		if raw > 0:
+			operation_timeout = mini(int(raw), MAX_OPERATION_TIMEOUT_MS)
+	elif typeof(raw) == TYPE_FLOAT:
+		var raw_float := float(raw)
+		if is_finite(raw_float) and raw_float == floor(raw_float) and raw_float > 0.0:
+			operation_timeout = mini(int(minf(raw_float, float(MAX_OPERATION_TIMEOUT_MS))),
+				MAX_OPERATION_TIMEOUT_MS)
+	if operation_timeout <= 0:
+		return _handler_timeout()
+	return operation_timeout + TRANSPORT_GRACE_TIMEOUT_MS
 
 ## 将已经完成但首次落盘失败的 reply 重试；成功前保留 inflight 状态。
 func _retry_pending_replies() -> void:

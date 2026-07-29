@@ -50,7 +50,7 @@ def test_input_routes_are_adapter_backed_mutations(name):
 def test_fixture_reset_releases_action_edge_state():
     source = fixture_script_source("probe_input_action.gd")
     assert "func reset_fixture()" in source
-    assert "func _process(" in source
+    assert "func _input(" in source
     assert "_previous_pressed = false" in source
     assert 'Input.action_release("ui_accept")' in source
 
@@ -79,6 +79,33 @@ def test_input_action_counts_false_to_true_edges_once(m3_running):
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": False})
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": True})
     wait_for(lambda: get_counter(m3_running, "input_actions") == before + 2, timeout=2.0)
+
+
+def test_zero_delay_action_sequence_observes_release_press_edge(m3_running):
+    before = get_counter(m3_running, "input_actions")
+    exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": True})
+    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 1, timeout=2.0)
+    result = exec_ok(m3_running, "runtime/input/sequence", {
+        "events": [
+            {
+                "after_ms": 0,
+                "route": "runtime/input/action",
+                "data": {"action": "ui_accept", "pressed": True},
+            },
+            {
+                "after_ms": 0,
+                "route": "runtime/input/action",
+                "data": {"action": "ui_accept", "pressed": False},
+            },
+            {
+                "after_ms": 0,
+                "route": "runtime/input/action",
+                "data": {"action": "ui_accept", "pressed": True},
+            },
+        ],
+    })
+    assert result["events"] == 3
+    assert get_counter(m3_running, "input_actions") == before + 2
 
 
 @pytest.mark.parametrize("route,payload", [
@@ -129,6 +156,20 @@ def test_input_sequence_executes_valid_events_in_game_process(m3_running):
     assert result["undoable"] is False
     wait_for(lambda: get_counter(m3_running, "input_keys") == before_keys + 1)
     wait_for(lambda: get_counter(m3_running, "input_mouse") == before_mouse + 1)
+
+
+def test_input_sequence_over_five_seconds_honors_explicit_timeout(m3_running):
+    before = get_counter(m3_running, "input_keys")
+    result = exec_ok(m3_running, "runtime/input/sequence", {
+        "timeout_ms": 10000,
+        "events": [{
+            "after_ms": 6000,
+            "route": "runtime/input/key",
+            "data": {"keycode": 32, "pressed": True},
+        }],
+    })
+    assert result["events"] == 1
+    wait_for(lambda: get_counter(m3_running, "input_keys") == before + 1)
 
 
 def test_input_sequence_rejects_negative_after_ms(m3_running):

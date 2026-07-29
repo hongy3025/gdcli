@@ -151,6 +151,7 @@ func test_runtime_node_get_dispatches_through_broker() -> void:
 		assert_eq(broker.calls[0].payload, {
 			"node_path": "/root/RuntimeMain/ProbeTarget",
 			"property": "spawn_position",
+			"timeout_ms": 5000,
 		}, "runtime/node/get forwards exact read-only payload")
 	assert_false(_last_response(server).body.has("changed"), "runtime/node/get is not a mutation")
 	assert_false(_last_response(server).body.has("undoable"), "runtime/node/get has no undo contract")
@@ -214,15 +215,27 @@ func _assert_mutation_boundary_audited(req: Request, op: String, context: String
 func test_timeout_defaults_caps_and_rejects_invalid_values() -> void:
 	var adapter := RuntimeRoute.new()
 	assert_eq(adapter.operation_timeout(_request()), 5000, "missing timeout uses default")
+	assert_eq(adapter.operation_timeout(_request({"timeout_ms": 5000.0})), 5000,
+		"exact integral float timeout is accepted")
 	assert_eq(adapter.operation_timeout(_request({"timeout_ms": 99999})), 25000, "timeout is capped")
 	var broker := FakeBroker.new()
 	broker.next_reply = {"ok": true, "result": {"ready": true}}
+	_dispatch({}, broker)
+	assert_eq(broker.calls[0].payload.timeout_ms, 5000, "default timeout reaches runtime payload")
 	var capped := _dispatch({"timeout_ms": 99999}, broker)
-	assert_eq(broker.calls[0].timeout_ms, 26000, "broker receives operation timeout plus grace")
-	assert_eq(broker.calls[0].payload.timeout_ms, 25000, "runtime receives capped operation timeout")
+	assert_eq(broker.calls[1].timeout_ms, 26000, "broker receives operation timeout plus grace")
+	assert_eq(broker.calls[1].payload.timeout_ms, 25000, "runtime receives capped operation timeout")
+	for invalid in [5000.0000001, -0.0000001]:
+		assert_eq(adapter.operation_timeout(_request({"timeout_ms": invalid})), -1,
+			"unsafe timeout %s is rejected" % invalid)
+	for invalid in [NAN, INF, -INF]:
+		var direct_request := _request()
+		direct_request.body = {"timeout_ms": invalid}
+		assert_eq(adapter.operation_timeout(direct_request), -1,
+			"non-finite timeout %s is rejected" % invalid)
 	var invalid_server := _dispatch({"timeout_ms": "slow"}, broker)
 	assert_eq(_last_response(invalid_server).status, 400, "invalid timeout is invalid_param")
-	assert_eq(broker.calls.size(), 1, "invalid timeout never reaches broker")
+	assert_eq(broker.calls.size(), 2, "invalid timeout never reaches broker")
 
 func test_error_codes_map_to_stable_http_statuses() -> void:
 	var expected := {

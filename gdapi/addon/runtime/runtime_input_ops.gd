@@ -16,6 +16,8 @@ const MAX_JOYPAD_AXIS := 3
 const MAX_TOUCH_INDEX := 31
 const MAX_POSITION_COMPONENT := 1000000.0
 const MAX_ACTION_LENGTH := 128
+const DEFAULT_OPERATION_TIMEOUT_MS := 5000
+const MAX_OPERATION_TIMEOUT_MS := 25000
 const INPUT_ROUTES := [
 	"runtime/input/key",
 	"runtime/input/mouse",
@@ -115,10 +117,12 @@ static func action(payload: Dictionary) -> Dictionary:
 		return verdict
 	var action_name: String = payload["action"]
 	var pressed: bool = payload.get("pressed", true)
-	if pressed:
-		Input.action_press(action_name)
-	else:
-		Input.action_release(action_name)
+	var event := InputEventAction.new()
+	event.action = action_name
+	event.pressed = pressed
+	event.strength = 1.0 if pressed else 0.0
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
 	return _success({
 		"event_type": "action",
 		"action": action_name,
@@ -131,15 +135,20 @@ static func sequence(payload: Dictionary) -> Dictionary:
 	var verdict := _validate_sequence(payload)
 	if not bool(verdict.get("ok", false)):
 		return verdict
+	var timeout_ms := _operation_timeout(payload)
+	var deadline_msec := Time.get_ticks_msec() + timeout_ms
 	var events: Array = payload["events"]
+	var tree := Engine.get_main_loop() as SceneTree
+	if not events.is_empty() and tree == null:
+		return _failure("godot_error", "runtime SceneTree is unavailable")
 	for entry_variant in events:
 		var entry: Dictionary = entry_variant
 		var after_ms: int = entry.get("after_ms", 0)
 		if after_ms > 0:
-			var tree := Engine.get_main_loop() as SceneTree
-			if tree == null:
-				return _failure("godot_error", "runtime SceneTree is unavailable")
 			await tree.create_timer(after_ms / 1000.0).timeout
+		await tree.process_frame
+		if Time.get_ticks_msec() >= deadline_msec:
+			return _failure("timeout", "input sequence operation timed out")
 		var child_result := _dispatch_child(String(entry["route"]), entry["data"])
 		if not bool(child_result.get("ok", false)):
 			return child_result
@@ -153,7 +162,7 @@ static func _validate_key(payload: Dictionary) -> Dictionary:
 	if not payload.has("keycode"):
 		return _failure("missing_param", "keycode is required")
 	var keycode: Variant = payload["keycode"]
-	if not _is_integer_number(keycode) or int(keycode) <= 0 or int(keycode) > MAX_KEYCODE:
+	if not _integer_in_range(keycode, 1, MAX_KEYCODE):
 		return _failure("invalid_param", "keycode must be a bounded positive integer")
 	return _validate_optional_bool(payload, "pressed")
 
@@ -168,14 +177,14 @@ static func _validate_mouse(payload: Dictionary) -> Dictionary:
 		if not payload.has("button"):
 			return _failure("missing_param", "mouse button is required")
 		var button: Variant = payload["button"]
-		if not _is_integer_number(button) or int(button) < 1 or int(button) > 8:
+		if not _integer_in_range(button, 1, 8):
 			return _failure("invalid_param", "mouse button must be 1..8")
 		return _validate_optional_bool(payload, "pressed")
 	return {"ok": true}
 
 static func _validate_gamepad(payload: Dictionary) -> Dictionary:
 	var device: Variant = payload.get("device", 0)
-	if not _is_integer_number(device) or int(device) < 0 or int(device) > MAX_DEVICE:
+	if not _integer_in_range(device, 0, MAX_DEVICE):
 		return _failure("invalid_param", "gamepad device must be 0..15")
 	var kind: Variant = payload.get("kind", "button")
 	if typeof(kind) != TYPE_STRING or String(kind) not in ["button", "axis"]:
@@ -184,7 +193,7 @@ static func _validate_gamepad(payload: Dictionary) -> Dictionary:
 		if not payload.has("button"):
 			return _failure("missing_param", "gamepad button is required")
 		var button: Variant = payload["button"]
-		if not _is_integer_number(button) or int(button) < 0 or int(button) > MAX_JOYPAD_BUTTON:
+		if not _integer_in_range(button, 0, MAX_JOYPAD_BUTTON):
 			return _failure("invalid_param", "gamepad button must be 0..127")
 		return _validate_optional_bool(payload, "pressed")
 	if not payload.has("axis"):
@@ -192,7 +201,7 @@ static func _validate_gamepad(payload: Dictionary) -> Dictionary:
 	if not payload.has("value"):
 		return _failure("missing_param", "gamepad axis value is required")
 	var axis: Variant = payload["axis"]
-	if not _is_integer_number(axis) or int(axis) < 0 or int(axis) > MAX_JOYPAD_AXIS:
+	if not _integer_in_range(axis, 0, MAX_JOYPAD_AXIS):
 		return _failure("invalid_param", "gamepad axis must be 0..3")
 	var value: Variant = payload["value"]
 	if not _is_number(value) or not is_finite(float(value)) or float(value) < -1.0 or float(value) > 1.0:
@@ -201,7 +210,7 @@ static func _validate_gamepad(payload: Dictionary) -> Dictionary:
 
 static func _validate_touch(payload: Dictionary) -> Dictionary:
 	var index: Variant = payload.get("index", 0)
-	if not _is_integer_number(index) or int(index) < 0 or int(index) > MAX_TOUCH_INDEX:
+	if not _integer_in_range(index, 0, MAX_TOUCH_INDEX):
 		return _failure("invalid_param", "touch index must be 0..31")
 	var position_verdict := _validate_position(payload.get("position", [0, 0]))
 	if not bool(position_verdict.get("ok", false)):
@@ -219,6 +228,9 @@ static func _validate_action(payload: Dictionary) -> Dictionary:
 	return _validate_optional_bool(payload, "pressed")
 
 static func _validate_sequence(payload: Dictionary) -> Dictionary:
+	var timeout_ms := _operation_timeout(payload)
+	if timeout_ms <= 0:
+		return _failure("invalid_param", "timeout_ms must be a bounded positive integer")
 	if not payload.has("events"):
 		return _failure("missing_param", "events is required")
 	var events_variant: Variant = payload["events"]
@@ -233,11 +245,13 @@ static func _validate_sequence(payload: Dictionary) -> Dictionary:
 			return _failure("invalid_param", "sequence entries must be objects")
 		var entry: Dictionary = entry_variant
 		var after_variant: Variant = entry.get("after_ms", 0)
-		if not _is_integer_number(after_variant) or int(after_variant) < 0:
+		if not _integer_in_range(after_variant, 0, MAX_SEQUENCE_TOTAL_MS):
 			return _failure("invalid_param", "after_ms must be a non-negative integer")
 		total_ms += int(after_variant)
 		if total_ms > MAX_SEQUENCE_TOTAL_MS:
 			return _failure("invalid_param", "sequence total duration exceeds 10s")
+		if total_ms >= timeout_ms:
+			return _failure("invalid_param", "sequence duration must be less than timeout_ms")
 		if not entry.has("route") or typeof(entry["route"]) != TYPE_STRING:
 			return _failure("invalid_param", "sequence route must be a string")
 		var route: String = entry["route"]
@@ -303,12 +317,22 @@ static func _validate_optional_bool(payload: Dictionary, key_name: String) -> Di
 static func _is_number(value: Variant) -> bool:
 	return typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT
 
-static func _is_integer_number(value: Variant) -> bool:
+static func _integer_in_range(value: Variant, minimum: int, maximum: int) -> bool:
 	if typeof(value) == TYPE_INT:
-		return true
-	if typeof(value) != TYPE_FLOAT or not is_finite(float(value)):
+		return value >= minimum and value <= maximum
+	if typeof(value) != TYPE_FLOAT:
 		return false
-	return is_equal_approx(float(value), round(float(value)))
+	var number := float(value)
+	return is_finite(number) and number == floor(number) \
+		and number >= float(minimum) and number <= float(maximum)
+
+static func _operation_timeout(payload: Dictionary) -> int:
+	if not payload.has("timeout_ms"):
+		return DEFAULT_OPERATION_TIMEOUT_MS
+	var raw: Variant = payload["timeout_ms"]
+	if not _integer_in_range(raw, 1, MAX_OPERATION_TIMEOUT_MS):
+		return -1
+	return int(raw)
 
 static func _success(fields: Dictionary) -> Dictionary:
 	var result := {

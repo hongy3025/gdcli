@@ -36,8 +36,7 @@ func dispatch(req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool 
 		return
 
 	var payload: Dictionary = payload_variant.duplicate(true)
-	if payload.has("timeout_ms"):
-		payload["timeout_ms"] = timeout
+	payload["timeout_ms"] = timeout
 	var broker_timeout := mini(timeout + BROKER_GRACE_TIMEOUT, MAX_BROKER_TIMEOUT)
 	var broker: Variant = RuntimeBroker.instance()
 	if broker == null or not broker.has_method("request"):
@@ -65,12 +64,19 @@ static func operation_timeout(req: GdApiRequest) -> int:
 	var raw: Variant = req.body["timeout_ms"]
 	var timeout_value: int = -1
 	if typeof(raw) == TYPE_INT:
-		timeout_value = int(raw)
-	elif typeof(raw) == TYPE_FLOAT and is_equal_approx(float(raw), round(float(raw))):
-		timeout_value = int(raw)
+		if raw > 0:
+			timeout_value = mini(int(raw), MAX_OPERATION_TIMEOUT)
+	elif typeof(raw) == TYPE_FLOAT:
+		var raw_float := float(raw)
+		if is_finite(raw_float) and raw_float == floor(raw_float) \
+				and raw_float > 0.0 and raw_float <= float(MAX_OPERATION_TIMEOUT):
+			timeout_value = int(raw_float)
+		elif is_finite(raw_float) and raw_float == floor(raw_float) \
+				and raw_float > float(MAX_OPERATION_TIMEOUT):
+			timeout_value = MAX_OPERATION_TIMEOUT
 	if timeout_value <= 0:
 		return -1
-	return mini(timeout_value, MAX_OPERATION_TIMEOUT)
+	return timeout_value
 
 ## Return the stable HTTP status for a protocol error code.
 static func http_status(code: String) -> int:

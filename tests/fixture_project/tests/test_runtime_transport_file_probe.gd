@@ -21,6 +21,7 @@ func _run() -> void:
 	test_inbox_request_triggers_callback()
 	await test_suspended_request_claims_duplicate_id_and_finishes_once()
 	await test_suspended_request_times_out_once()
+	await test_request_payload_timeout_controls_handler_deadline()
 	test_completed_request_id_never_restarts_after_outbox_consumed()
 	test_failed_outbox_write_retries_without_losing_reply()
 	test_non_dictionary_inbox_is_discarded()
@@ -63,8 +64,11 @@ func _cleanup(root: String) -> void:
 	DirAccess.remove_absolute(root)
 
 func _write_request(path: String, id: int, generation: String) -> void:
+	_write_request_payload(path, id, generation, {})
+
+func _write_request_payload(path: String, id: int, generation: String, payload: Dictionary) -> void:
 	var file := FileAccess.open(path, FileAccess.WRITE)
-	file.store_string(JSON.stringify(Protocol.request(id, "runtime/status", {}, generation)))
+	file.store_string(JSON.stringify(Protocol.request(id, "runtime/status", payload, generation)))
 	file.close()
 
 func _read_reply(path: String) -> Dictionary:
@@ -236,6 +240,29 @@ func test_suspended_request_times_out_once() -> void:
 	_write_request(probe_dir.path_join("inbox/duplicate-45.json"), 45, t.generation())
 	t.tick(now + 4)
 	assert_eq(tracker.calls, 1, "timed out id never restarts")
+	t.stop()
+	_cleanup(root)
+
+func test_request_payload_timeout_controls_handler_deadline() -> void:
+	var root := _make_root()
+	var t := Transport.new(0, root)
+	t.set_request_handler(func(_msg: Dictionary) -> Dictionary:
+		await create_timer(60.0).timeout
+		return {"ok": true}
+	)
+	t.start()
+	var probe_dir := root.path_join(t.probe_id())
+	_write_request_payload(probe_dir.path_join("inbox/48.json"), 48, t.generation(), {
+		"timeout_ms": 10000,
+	})
+	var before := Time.get_ticks_msec()
+	t.tick(before)
+	var deadline := int(t._inflight.get(48, {}).get("deadline_msec", 0))
+	assert_true(deadline - before > 10000, "handler deadline includes transport grace")
+	assert_true(deadline - before < 11000, "handler deadline remains below broker grace")
+	t.tick(before + 6000)
+	assert_true(not FileAccess.file_exists(probe_dir.path_join("outbox/48.json")),
+		"request longer than default 5s is still inflight")
 	t.stop()
 	_cleanup(root)
 
