@@ -110,7 +110,7 @@ def test_reset_failure_preserves_last_runtime_status_payload(
     assert set(harness.DIAGNOSTIC_FIELDS) <= set(caught.value.diagnostics)
 
 
-def test_each_reset_flow_gets_one_explicit_recovery_restart(
+def test_reset_recovery_restores_environment_but_fails_affected_test(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     env = {
@@ -122,10 +122,9 @@ def test_each_reset_flow_gets_one_explicit_recovery_restart(
         "recovery_markers": [],
         "recovery_events": [],
     }
+    original = _failure("fixture reset lost broker reply")
     attempts = iter([
-        RuntimeError("first reset failed"),
-        {"ok": True, "changed": True, "undoable": False},
-        RuntimeError("second reset failed"),
+        original,
         {"ok": True, "changed": True, "undoable": False},
     ])
 
@@ -152,10 +151,105 @@ def test_each_reset_flow_gets_one_explicit_recovery_restart(
         lambda _env, recovery_restarts=0: _env.update(game_attached=True),
     )
     monkeypatch.setattr(harness, "_record_recovery", lambda *_args: None)
+    monkeypatch.setattr(
+        harness,
+        "_diagnostics",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("original HarnessFailure diagnostics must not be rebuilt")
+        ),
+    )
+
+    with pytest.raises(harness.HarnessFailure) as caught:
+        harness.reset_fixture(env)
+
+    assert env["game_attached"] is True
+    assert caught.value.diagnostics["stderr"] == "pending request"
+    assert caught.value.diagnostics["recovery_succeeded"] is True
+    assert len(env["recovery_markers"]) == 1
+
+
+def test_file_transport_reset_uses_public_broker_node_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    env = {
+        "project": tmp_path,
+        "gdcli": "gdcli",
+        "godot_log_path": tmp_path / "godot.log",
+        "game_attached": True,
+        "fixture_reset_count": 0,
+    }
+    calls = []
+
+    def exec_result(_env, route, data=None):
+        calls.append((route, data))
+        if route == "runtime/status":
+            return {
+                "ok": True,
+                "state": "connected",
+                "pending": 0,
+                "transport": "file",
+            }
+        if route == "runtime/node/call":
+            return {
+                "ok": True,
+                "method": "reset_shared_fixture",
+                "result": {"changed": True, "undoable": False},
+            }
+        raise AssertionError(f"unexpected route: {route}")
+
+    monkeypatch.setattr(harness, "exec_ok", exec_result)
 
     assert harness.reset_fixture(env)["changed"] is True
-    assert harness.reset_fixture(env)["changed"] is True
-    assert len(env["recovery_markers"]) == 2
+    assert calls == [
+        ("runtime/status", None),
+        ("runtime/node/call", {
+            "node_path": "/root/RuntimeMain/ProbeTarget",
+            "method": "reset_shared_fixture",
+            "args": [],
+        }),
+    ]
+
+
+def test_session_budget_accepts_planned_starts_and_rejects_recovery():
+    harness.assert_session_budget({
+        "editor_start_count": 1,
+        "game_run_count": 3,
+        "fixture_reset_restarts": 0,
+        "recovery_markers": [],
+    })
+
+    with pytest.raises(AssertionError, match="game starts"):
+        harness.assert_session_budget({
+            "editor_start_count": 1,
+            "game_run_count": 4,
+            "fixture_reset_restarts": 1,
+            "recovery_markers": [{"operation": "runtime/fixture/reset"}],
+        })
+
+
+def test_session_finalizer_reports_cleanup_and_budget_failures(
+    monkeypatch: pytest.MonkeyPatch
+):
+    cleanup_error = RuntimeError("editor cleanup failed")
+    monkeypatch.setattr(
+        harness,
+        "detach_editor",
+        lambda _env: (_ for _ in ()).throw(cleanup_error),
+    )
+    env = {
+        "editor_start_count": 1,
+        "game_run_count": 4,
+        "fixture_reset_restarts": 1,
+        "recovery_markers": [{"operation": "runtime/fixture/reset"}],
+        "recovery_events": [],
+    }
+
+    with pytest.raises(ExceptionGroup) as caught:
+        harness.finalize_m3_session(env)
+
+    messages = [str(error) for error in caught.value.exceptions]
+    assert messages[0] == "editor cleanup failed"
+    assert "M3 session budget violated" in messages[1]
 
 
 def test_failed_game_commands_do_not_increment_lifecycle_counters(

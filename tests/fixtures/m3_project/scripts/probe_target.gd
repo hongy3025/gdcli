@@ -50,6 +50,7 @@ func reset_fixture() -> void:
 	visible = true
 	modulate = Color.WHITE
 	self_modulate = Color.WHITE
+	process_mode = Node.PROCESS_MODE_INHERIT
 	input_keys = 0
 	input_mouse = 0
 	input_gamepad = 0

@@ -114,3 +114,67 @@ The handoff-owned changes in `.gitignore`, both protected `project.godot`
 files, `runtime_main.tscn`, the roadmap status report, and
 `tests/fixtures/m3_project/addons/` were not modified, staged, or committed by
 this task.
+
+## Fix round 1
+
+### Finding-to-fix mapping
+
+1. Removed the harness-owned file-transport request IDs and direct
+   inbox/outbox writes. Both EngineDebugger and file transport now reset only
+   through broker-owned `runtime/node/call` to the fixed
+   `ProbeTarget.reset_shared_fixture` allowlist hook. The internal probe reset
+   operation remains private and is not used by the harness.
+2. Split fixed identity protection from allowlisted property/method access.
+   `ProbeTarget`, the three infrastructure nodes, the scene root, and runtime
+   probe cannot be duplicated, renamed, reparented, or removed.
+   `ProbeTarget` still permits its required set/call surface, and reset now
+   restores `process_mode` to `PROCESS_MODE_INHERIT`. Task 9 duplicate/rename
+   coverage now uses runtime-created dedicated nodes; runtime-created
+   reparent/remove behavior remains enabled.
+3. A successful reset recovery restores the shared environment only for later
+   tests, then raises `HarnessFailure` for the affected test with the original
+   diagnostics and `recovery_succeeded: true`. Session teardown always checks
+   one editor, at most three planned game starts, zero reset restarts, and zero
+   recovery markers/events. Cleanup and budget failures are preserved together
+   in an `ExceptionGroup`.
+
+### TDD and verification evidence
+
+- Harness RED: recovery returned success, file transport entered the direct
+  file path, and no session-budget function existed.
+- NodeOps RED: duplicate/rename/reparent/remove of `ProbeTarget` succeeded and
+  its allowlisted set boundary was not separated from identity protection.
+- Finalizer RED: `finalize_m3_session` was absent and could not report cleanup
+  plus budget failures together.
+- Original-diagnostics RED: recovery rebuilt diagnostics instead of retaining
+  the originating `HarnessFailure.diagnostics`.
+
+Final results:
+
+```text
+uv run pytest tests/e2e/m3/test_harness.py -v
+10 passed
+
+GODOT_BIN=Godot-v4.7.1 uv run pytest tests/e2e/test_gdscript_units.py -v
+14 passed
+
+GODOT_BIN=Godot-v4.7.1 uv run pytest \
+  tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_runtime_nodes.py \
+  -v --durations=20 --maxfail=1
+25 passed
+
+GODOT_BIN=Godot-v4.7.1 uv run pytest tests/e2e/m3/test_m3_contract.py \
+  -k "runtime_manifest_match or runtime_manifest_has_no_aliases" -v
+2 passed, 2 deselected; runtime route files = 35
+
+uv run python -m py_compile tests/e2e/m3/conftest.py \
+  tests/e2e/m3/test_harness.py tests/e2e/m3/test_runtime_nodes.py
+exit 0
+```
+
+The exact Task 10 three-file command remains intentionally RED only at later
+task boundaries: 27 passed / 9 failed across Task 11 input behavior and Task 13
+log/debug behavior. No skip, xfail, direct HTTP fallback, or local operation
+was added.
+
+Fix round 1 is recorded by the commit containing this report.

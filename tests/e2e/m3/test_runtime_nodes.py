@@ -71,6 +71,9 @@ def test_fixture_reset_restores_shared_runtime_state(m3_running):
     exec_ok(m3_running, "runtime/node/call", {
         "node_path": path, "method": "increment_later", "args": [9, 100],
     })
+    exec_ok(m3_running, "runtime/node/set", {
+        "node_path": path, "property": "process_mode", "value": 4,
+    })
     for route, payload in [
         ("runtime/input/key", {"keycode": 32, "pressed": True}),
         ("runtime/input/mouse", {"kind": "button", "button": 1, "pressed": True}),
@@ -100,6 +103,9 @@ def test_fixture_reset_restores_shared_runtime_state(m3_running):
         assert exec_ok(m3_running, "runtime/node/get", {
             "node_path": path, "property": name,
         })["value"] == 0
+    assert exec_ok(m3_running, "runtime/node/get", {
+        "node_path": path, "property": "process_mode",
+    })["value"] == 0
     time.sleep(0.2)
     assert exec_ok(m3_running, "runtime/node/get", {
         "node_path": path, "property": "counter",
@@ -191,12 +197,15 @@ def test_runtime_node_create_returns_dedicated_game_node(m3_running):
 
 
 def test_runtime_node_duplicate_copies_typed_allowlisted_property(m3_running):
-    source = "/root/RuntimeMain/ProbeTarget"
-    exec_ok(m3_running, "runtime/node/set", {
-        "node_path": source,
-        "property": "position",
-        "value": {"type": "Vector2", "value": [31, 42]},
+    created = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain",
+        "type": "Node2D",
+        "name": "Task9DuplicateSource",
+        "properties": {
+            "position": {"type": "Vector2", "value": [31, 42]},
+        },
     })
+    source = created["node_path"]
     duplicate = exec_ok(m3_running, "runtime/node/duplicate", {
         "node_path": source,
         "name": "Task9Duplicate",
@@ -211,20 +220,20 @@ def test_runtime_node_duplicate_copies_typed_allowlisted_property(m3_running):
 
 
 def test_runtime_node_rename_changes_only_dedicated_node(m3_running):
-    source = "/root/RuntimeMain/ProbeTarget"
-    duplicate = exec_ok(m3_running, "runtime/node/duplicate", {
-        "node_path": source,
+    created = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain",
+        "type": "Node2D",
         "name": "Task9RenameSource",
     })
     renamed = exec_ok(m3_running, "runtime/node/rename", {
-        "node_path": duplicate["node_path"],
+        "node_path": created["node_path"],
         "name": "Task9Renamed",
     })
     assert renamed["changed"] is True
     assert renamed["undoable"] is False
     assert renamed["node_path"] == "/root/RuntimeMain/Task9Renamed"
     assert exec_error(m3_running, "runtime/node/info", {
-        "node_path": duplicate["node_path"],
+        "node_path": created["node_path"],
     })["code"] == "not_found"
     assert exec_ok(m3_running, "runtime/node/info", {
         "node_path": renamed["node_path"],
@@ -232,7 +241,11 @@ def test_runtime_node_rename_changes_only_dedicated_node(m3_running):
 
 
 def test_runtime_node_mutations_reject_unsafe_targets_without_mutation(m3_running):
-    source = "/root/RuntimeMain/ProbeTarget"
+    source = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain",
+        "type": "Node2D",
+        "name": "Task9UnsafeSource",
+    })["node_path"]
     invalid_create = exec_error(m3_running, "runtime/node/create", {
         "parent_path": "/root/RuntimeMain/../RuntimeMain",
         "type": "Node2D",
@@ -287,6 +300,32 @@ def test_runtime_infrastructure_nodes_reject_mutations(m3_running):
     for name in infrastructure_nodes:
         infrastructure = f"/root/RuntimeMain/{name}"
         assert exec_ok(m3_running, "runtime/node/info", {"node_path": infrastructure})["node_path"] == infrastructure
+
+
+@pytest.mark.parametrize(("route", "payload"), [
+    ("runtime/node/duplicate", {
+        "node_path": "/root/RuntimeMain/ProbeTarget",
+        "name": "Task10ProtectedDuplicate",
+    }),
+    ("runtime/node/rename", {
+        "node_path": "/root/RuntimeMain/ProbeTarget",
+        "name": "Task10ProtectedRename",
+    }),
+    ("runtime/node/reparent", {
+        "node_path": "/root/RuntimeMain/ProbeTarget",
+        "new_parent": "/root/RuntimeMain",
+    }),
+    ("runtime/node/remove", {
+        "node_path": "/root/RuntimeMain/ProbeTarget",
+    }),
+])
+def test_runtime_fixed_fixture_identity_rejects_destructive_mutations(
+    m3_running, route, payload
+):
+    error = exec_error(m3_running, route, payload)
+    assert error["code"] == "permission_denied"
+    target = "/root/RuntimeMain/ProbeTarget"
+    assert exec_ok(m3_running, "runtime/node/info", {"node_path": target})["node_path"] == target
 
 
 def test_runtime_created_node_can_reparent_and_remove(m3_running):

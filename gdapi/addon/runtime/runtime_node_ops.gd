@@ -223,6 +223,8 @@ static func duplicate_node(payload: Dictionary) -> Dictionary:
 	if not bool(lookup.get("ok", false)):
 		return lookup
 	var source: Node = lookup.node
+	if _is_protected_node(source):
+		return {"ok": false, "code": "permission_denied", "error": "cannot duplicate protected runtime node"}
 	if not _is_dedicated_target(source):
 		return {"ok": false, "code": "permission_denied", "error": "only dedicated scene nodes may be duplicated"}
 	var parent := source.get_parent()
@@ -251,6 +253,8 @@ static func rename(payload: Dictionary) -> Dictionary:
 	if not bool(lookup.get("ok", false)):
 		return lookup
 	var node: Node = lookup.node
+	if _is_protected_node(node):
+		return {"ok": false, "code": "permission_denied", "error": "cannot rename protected runtime node"}
 	if not _is_dedicated_target(node):
 		return {"ok": false, "code": "permission_denied", "error": "only dedicated scene nodes may be renamed"}
 	var name_result := _validate_node_name(String(payload.get("name", "")))
@@ -487,19 +491,25 @@ static func _is_protected_node(node: Node) -> bool:
 	var tree := Engine.get_main_loop() as SceneTree
 	if node == tree.root or node == _scene_root():
 		return true
-	if String(node.name) == "GdApiRuntimeProbe" or String(node.name) in INFRASTRUCTURE_NODE_NAMES:
+	if (
+		String(node.name) == "GdApiRuntimeProbe"
+		or String(node.name) in INFRASTRUCTURE_NODE_NAMES
+		or String(node.name) in DEDICATED_FIXTURE_NODE_NAMES
+	):
 		return true
 	var script := node.get_script()
 	return script != null and String(script.resource_path).ends_with("/runtime_probe.gd")
 
 static func _is_dedicated_target(node: Node) -> bool:
 	var scene := _scene_root()
-	if node == null or scene == null or node == scene or _is_protected_node(node) or not scene.is_ancestor_of(node):
+	if node == null or scene == null or node == scene or not scene.is_ancestor_of(node):
+		return false
+	if String(node.name) in DEDICATED_FIXTURE_NODE_NAMES and node.get_parent() == scene:
+		_mark_dedicated_node(node)
+		return true
+	if _is_protected_node(node):
 		return false
 	if bool(node.get_meta(DEDICATED_NODE_META, false)):
-		return true
-	if String(node.name) in DEDICATED_FIXTURE_NODE_NAMES:
-		_mark_dedicated_node(node)
 		return true
 	return false
 

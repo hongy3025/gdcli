@@ -63,6 +63,26 @@ func _run() -> void:
 		"node_path": "/root/Task9Scene/ProbeFinishedSignal",
 		"name": "Task9InfrastructureRenamed",
 	}), "infrastructure rename")
+	_assert_permission(NodeOps.duplicate_node({
+		"node_path": "/root/Task9Scene/ProbeTarget",
+		"name": "Task10ProtectedDuplicate",
+	}), "fixed fixture duplicate")
+	_assert_permission(NodeOps.reparent({
+		"node_path": "/root/Task9Scene/ProbeTarget",
+		"new_parent": "/root/Task9Scene",
+	}), "fixed fixture reparent")
+	_assert_permission(NodeOps.remove({
+		"node_path": "/root/Task9Scene/ProbeTarget",
+	}), "fixed fixture remove")
+	_assert_permission(NodeOps.rename({
+		"node_path": "/root/Task9Scene/ProbeTarget",
+		"name": "Task10ProtectedRename",
+	}), "fixed fixture rename")
+	_assert_true(NodeOps.set_property({
+		"node_path": "/root/Task9Scene/ProbeTarget",
+		"property": "process_mode",
+		"value": Node.PROCESS_MODE_DISABLED,
+	}).get("ok", false), "fixed fixture still permits allowlisted set")
 	_assert_permission(NodeOps.set_property({
 		"node_path": "/root/Task9Scene/FixtureControl",
 		"property": "visible",
