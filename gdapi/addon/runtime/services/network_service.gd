@@ -6,7 +6,9 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const TargetGuard := preload("res://addons/gdapi/runtime/services/network_target_guard.gd")
 
 
-static func validate(body: Dictionary, policy: Dictionary) -> Dictionary:
+static func validate(
+	body: Dictionary, policy: Dictionary, resolver: Callable = Callable()
+) -> Dictionary:
 	var url := String(body.get("url", ""))
 	var parts := url.split("://", true, 1)
 	if parts.size() != 2:
@@ -20,7 +22,7 @@ static func validate(body: Dictionary, policy: Dictionary) -> Dictionary:
 		var fields := authority.rsplit(":", true, 1)
 		host = fields[0]
 		port = int(fields[1])
-	var target := TargetGuard.authorize(url, policy)
+	var target := TargetGuard.authorize(url, policy, resolver)
 	if not target.ok:
 		return target
 	var method := String(body.get("method", "GET")).to_upper()

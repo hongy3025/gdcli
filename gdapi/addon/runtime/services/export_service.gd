@@ -57,16 +57,14 @@ static func run(body: Dictionary) -> Dictionary:
 	var output_text := ""
 	var deadline := Time.get_ticks_msec() + int(body.get("timeout_ms", 120000))
 	while OS.is_process_running(pid) and Time.get_ticks_msec() < deadline:
-		output_text += _drain(stdout, stderr)
-		if output_text.length() > 262144:
-			OS.kill(pid)
-			break
 		OS.delay_msec(10)
-	output_text += _drain(stdout, stderr)
 	if OS.is_process_running(pid):
 		OS.kill(pid)
 	while OS.is_process_running(pid):
 		OS.delay_msec(10)
+	output_text = stdout.get_as_text() + stderr.get_as_text()
+	if output_text.length() > 262144:
+		output_text = output_text.substr(0, 262144)
 	var exit_code := OS.get_process_exit_code(pid)
 	stdout.close()
 	stderr.close()
@@ -115,15 +113,6 @@ static func _template_available(platform: String) -> bool:
 			ProjectSettings.globalize_path("res://.godot/export_template_check")
 		)
 	)
-
-
-static func _drain(stdout: FileAccess, stderr: FileAccess) -> String:
-	var text := ""
-	if stdout.get_available_bytes() > 0:
-		text += stdout.get_as_text()
-	if stderr.get_available_bytes() > 0:
-		text += stderr.get_as_text()
-	return text
 
 
 static func _err(code: String, message: String) -> Dictionary:

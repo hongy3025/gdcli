@@ -34,7 +34,7 @@ static func authorize(
 		port = int(fields[1])
 	if host.is_empty() or port < 1 or port > 65535:
 		return _error(ErrorCodes.INVALID_PARAM, "invalid host or port")
-	var allowed := policy.get("hosts", []).has(host)
+	var allowed: bool = policy.get("hosts", []).has(host)
 	for item in policy.get("hosts", []):
 		var pattern := String(item)
 		if pattern.begins_with("*.") and host.ends_with("." + pattern.trim_prefix("*.")):
@@ -48,7 +48,7 @@ static func authorize(
 			addresses.assign(resolved)
 	else:
 		addresses.assign(IP.resolve_hostname_addresses(host, IP.TYPE_ANY))
-	if addresses.is_empty() and IP.is_valid_ip_address(host):
+	if addresses.is_empty() and _is_ip_literal(host):
 		addresses.append(host)
 	if addresses.is_empty():
 		return _error(ErrorCodes.PERMISSION_DENIED, "host could not be resolved")
@@ -96,7 +96,22 @@ static func is_public_address(address: String) -> bool:
 		or value.begins_with("2001:db8")
 	):
 		return false
-	return IP.is_valid_ip_address(value)
+	return _is_ip_literal(value)
+
+
+static func _is_ip_literal(value: String) -> bool:
+	var ipv4 := value.split(".")
+	if ipv4.size() == 4:
+		for part in ipv4:
+			if part.is_empty() or not part.is_valid_int() or int(part) < 0 or int(part) > 255:
+				return false
+		return true
+	if value.count(":") >= 2:
+		for part in value.split(":"):
+			if not part.is_empty() and (not part.is_valid_hex_number() or part.length() > 4):
+				return false
+		return true
+	return false
 
 
 static func _normalize_addresses(addresses: Array) -> Array:

@@ -100,18 +100,12 @@ static func _execute(args: Array, timeout_ms: int, executable: String = "") -> D
 	var output := ""
 	var deadline := Time.get_ticks_msec() + timeout_ms
 	while OS.is_process_running(pid) and Time.get_ticks_msec() < deadline:
-		if stdout.get_available_bytes() > 0:
-			output += stdout.get_as_text()
-		if stderr.get_available_bytes() > 0:
-			output += stderr.get_as_text()
-		if output.length() > 65536:
-			OS.kill(pid)
-			break
 		OS.delay_msec(10)
 	if OS.is_process_running(pid):
 		OS.kill(pid)
 	while OS.is_process_running(pid):
 		OS.delay_msec(10)
+	output = stdout.get_as_text() + stderr.get_as_text()
 	var code := OS.get_process_exit_code(pid)
 	stdout.close()
 	stderr.close()

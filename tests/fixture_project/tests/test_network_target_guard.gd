@@ -37,9 +37,13 @@ func _test_private_and_mapped_addresses_are_denied() -> void:
 func _test_redirect_limit_is_carried_into_request_spec() -> void:
 	var policy := _policy()
 	policy["max_redirects"] = 3
-	var result := Service.validate({"url": "http://public.example/path", "force": true}, policy)
+	var result := Service.validate(
+		{"url": "http://public.example/path", "force": true},
+		policy,
+		Callable(self, "_resolve_public")
+	)
 	_assert_true(result.ok, "network request validates")
-	_assert_eq(result.max_redirects, 3, "redirect policy is carried")
+	_assert_eq(result.get("max_redirects", 0), 3, "redirect policy is carried")
 
 
 func _policy() -> Dictionary:
