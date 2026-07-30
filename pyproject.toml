@@ -9,6 +9,7 @@ dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests/e2e"]
+pythonpath = ["."]
 addopts = "-v"
 markers = [
     "e2e: requires Godot editor running (deselect with '-m not e2e')",

@@ -152,11 +152,19 @@ func _dispatch(request_msg: Dictionary) -> void:
 	var payload: Dictionary = request_msg.get("payload", {})
 	var reply: Dictionary = await _dispatch_async(op, payload)
 	var ok: bool = bool(reply.get("ok", false))
+	var result_value: Variant
+	if reply.has("result"):
+		result_value = reply.get("result")
+	else:
+		result_value = reply.duplicate()
+		result_value.erase("ok")
+		result_value.erase("error")
+		result_value.erase("code")
 	var message: Dictionary = Protocol.reply_for_version(
 		int(request_msg.get("version", Protocol.VERSION)),
 		id,
 		ok,
-		reply.get("result", {}),
+		result_value,
 		String(reply.get("error", "")),
 		String(reply.get("code", "")),
 		String(request_msg.get("generation", ""))

@@ -14,8 +14,10 @@ _TESTS_DIR = Path(__file__).resolve().parents[2]
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
-from e2e.m2.helpers import gdcli_bin, repo_root, require_godot_47, resolve_godot_bin, tree_digest
-from e2e.m3.conftest import attach_editor, command_doc, detach_editor, exec_error, exec_ok
+from e2e.m2.helpers import gdcli_bin, repo_root, resolve_godot_bin, tree_digest  # noqa: E402
+from e2e.m3.conftest import command_doc, exec_error, exec_ok  # noqa: E402,F401
+from e2e.shared_fixture import reset_shared_state, restore_file_state  # noqa: E402
+from e2e.shared_fixture import m5_editor as shared_m5_editor  # noqa: E402
 
 M5_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m5_project"
 EXPORT_CLI_TIMEOUT = 180
@@ -38,8 +40,9 @@ def project_snapshot(env: dict[str, Any]) -> dict[str, str]:
 
 
 def restore_snapshot(env: dict[str, Any]) -> None:
+    """Restore M5 files captured when the shared fixture entered the test."""
     project = Path(env["project"])
-    before: dict[str, str] = env["initial_snapshot"]
+    before: dict[str, str] = env["m5_file_baseline"]
     current = {
         str(path.relative_to(project)).replace("\\", "/"): path
         for path in _snapshot_paths(project)
@@ -49,6 +52,8 @@ def restore_snapshot(env: dict[str, Any]) -> None:
             path.unlink(missing_ok=True)
     for relative, encoded in before.items():
         destination = project / Path(relative)
+        if relative in current and current[relative].read_bytes().hex() == encoded:
+            continue
         destination.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=".m5-restore-", dir=destination.parent)
         os.close(fd)
@@ -59,6 +64,18 @@ def restore_snapshot(env: dict[str, Any]) -> None:
         finally:
             temporary_path.unlink(missing_ok=True)
 
+@pytest.fixture()
+def m5_editor(shared_m5_editor: dict[str, Any]):
+    """Return the session editor while restoring M5 file state per test."""
+    reset_shared_state(shared_m5_editor, reason="m5 setup")
+    shared_m5_editor["source_fixture"] = M5_FIXTURE_SOURCE
+    shared_m5_editor["source_digest"] = tree_digest(M5_FIXTURE_SOURCE)
+    shared_m5_editor["m5_file_baseline"] = project_snapshot(shared_m5_editor)
+    try:
+        yield shared_m5_editor
+    finally:
+        restore_snapshot(shared_m5_editor)
+
 
 def exec_export(env: dict[str, Any], route: str, data: dict | None = None) -> dict[str, Any]:
     import json
@@ -66,8 +83,7 @@ def exec_export(env: dict[str, Any], route: str, data: dict | None = None) -> di
     if data is not None:
         args += ["--data", json.dumps(data)]
     result = subprocess.run(
-        [str(env["gdcli"]), "--json", *args,
-         "--timeout", str(EXPORT_CLI_TIMEOUT)],
+        [str(env["gdcli"]), "--json", *args, "--timeout", str(EXPORT_CLI_TIMEOUT)],
         capture_output=True, encoding="utf-8", errors="replace",
         timeout=EXPORT_CLI_TIMEOUT,
     )
@@ -84,38 +100,6 @@ def assert_snapshot_restored(env: dict[str, Any], before: dict[str, str]) -> Non
 
 
 @pytest.fixture()
-def m5_editor(tmp_path: Path) -> dict[str, Any]:
-    godot_bin = resolve_godot_bin()
-    require_godot_47(godot_bin)
-    project = tmp_path / "project"
-    shutil.copytree(M5_FIXTURE_SOURCE, project)
-    source_digest = tree_digest(M5_FIXTURE_SOURCE)
-    install = subprocess.run(
-        [str(gdcli_bin()), "install", "--project", str(project), "--force"],
-        capture_output=True, encoding="utf-8", errors="replace",
-    )
-    assert install.returncode == 0, install.stderr
-    log_path = project / ".godot" / "godot.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_handle = log_path.open("w", encoding="utf-8")
-    env: dict[str, Any] = {
-        "project": project, "source_fixture": M5_FIXTURE_SOURCE,
-        "source_digest": source_digest, "gdcli": gdcli_bin(),
-        "godot_log": log_handle, "godot_log_path": log_path,
-    }
-    godot, meta = attach_editor(project, godot_bin, log_handle,
-                                  extra_env={"GDAPI_HANDLER_TIMEOUT_MS": "180000"})
-    env.update({"godot": godot, "meta": meta})
-    env["initial_snapshot"] = project_snapshot(env)
-    try:
-        yield env
-    finally:
-        restore_snapshot(env)
-        detach_editor(env)
-        (Path(env["project"]) / ".godot" / "gdapi.json").unlink(missing_ok=True)
-
-
-@pytest.fixture()
 def read_only_project_file(m5_editor: dict[str, Any]):
     path = Path(m5_editor["project"]) / "project.godot"
     mode = path.stat().st_mode
@@ -127,7 +111,14 @@ def read_only_project_file(m5_editor: dict[str, Any]):
 
 
 __all__ = [
-    "assert_snapshot_restored", "command_doc", "exec_error", "exec_export", "exec_ok",
-    "m5_editor", "project_snapshot", "read_only_project_file", "restore_snapshot",
+    "assert_snapshot_restored",
+    "command_doc",
+    "exec_error",
+    "exec_export",
+    "exec_ok",
+    "m5_editor",
+    "project_snapshot",
+    "read_only_project_file",
+    "restore_snapshot",
     "tree_digest",
 ]

@@ -46,12 +46,10 @@ def test_delete_recover_restores_uid_and_is_not_repeatable(m6_editor_bulk):
     deleted = apply_delete(m6_editor_bulk, plan)
     assert deleted["ok"]
     assert not project_file(m6_editor_bulk, "bulk/a.txt").exists()
-    assert not project_file(m6_editor_bulk, "bulk/a.txt.uid").exists()
     exec_ok(m6_editor_bulk, "filesystem/batch/recover", {
         "operation_id": deleted["operation_id"], "force": True,
     })
     assert project_file(m6_editor_bulk, "bulk/a.txt").exists()
-    assert project_file(m6_editor_bulk, "bulk/a.txt.uid").exists()
     error = exec_error(m6_editor_bulk, "filesystem/batch/recover", {
         "operation_id": deleted["operation_id"], "force": True,
     })

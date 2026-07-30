@@ -60,45 +60,45 @@ def _exec_fail(env: dict, route: str, data: str | None = None) -> int:
 # ── 连通性 ──────────────────────────────────────────────
 
 class TestConnectivity:
-    def test_ping(self, godot_env):
+    def test_ping(self, e2e_editor):
         """gdcli exec gdapi/health/ping 返回 ok:true"""
-        resp = _exec(godot_env, "gdapi/health/ping")
+        resp = _exec(e2e_editor, "gdapi/health/ping")
         assert resp["ok"] is True
 
-    def test_ping_contains_editor_version(self, godot_env):
+    def test_ping_contains_editor_version(self, e2e_editor):
         """gdapi/health/ping 响应包含 editor_version"""
-        resp = _exec(godot_env, "gdapi/health/ping")
+        resp = _exec(e2e_editor, "gdapi/health/ping")
         assert "editor_version" in resp
 
-    def test_ping_contains_gdapi_version(self, godot_env):
+    def test_ping_contains_gdapi_version(self, e2e_editor):
         """gdapi/health/ping 响应包含 gdapi_version"""
-        resp = _exec(godot_env, "gdapi/health/ping")
+        resp = _exec(e2e_editor, "gdapi/health/ping")
         assert "gdapi_version" in resp
 
 
 # ── 路由命名空间 ─────────────────────────────────────────
 
 class TestRouteNamespace:
-    def test_routes_include_m1_baseline(self, godot_env):
+    def test_routes_include_m1_baseline(self, e2e_editor):
         """gdapi/routes 返回的 route 超集必须涵盖 M1 基线."""
-        resp = _exec(godot_env, "gdapi/routes")
+        resp = _exec(e2e_editor, "gdapi/routes")
         assert resp["ok"] is True
         actual = set(resp["routes"])
         assert M1_BASELINE_ROUTES <= actual
         assert RETIRED_ROUTES.isdisjoint(actual)
 
-    def test_removed_aliases_are_not_exposed(self, godot_env):
+    def test_removed_aliases_are_not_exposed(self, e2e_editor):
         """旧别名 routes / commands / help / command-help 不再暴露"""
         for removed in RETIRED_ROUTES:
-            _exec_fail(godot_env, removed)
+            _exec_fail(e2e_editor, removed)
 
 
 # ── 命令元数据 ─────────────────────────────────────────
 
 class TestCommandsMetadata:
-    def test_commands_list_includes_m1_baseline(self, godot_env):
+    def test_commands_list_includes_m1_baseline(self, e2e_editor):
         """command/list 返回的 path 超集必须涵盖 M1 基线."""
-        resp = _exec(godot_env, "command/list")
+        resp = _exec(e2e_editor, "command/list")
         assert resp["ok"] is True
         command_paths = {item["path"] for item in resp["commands"]}
         assert M1_BASELINE_ROUTES <= command_paths
@@ -108,48 +108,48 @@ class TestCommandsMetadata:
 # ── 路径安全 ─────────────────────────────────────────
 
 class TestPathGuard:
-    def test_relative_path_normalized(self, godot_env):
+    def test_relative_path_normalized(self, e2e_editor):
         """相对路径被规范化为 res://"""
-        resp = _exec(godot_env, "gdapi/health/pathcheck",
+        resp = _exec(e2e_editor, "gdapi/health/pathcheck",
                      '{"path":"scenes/test.tscn","mode":"read"}')
         assert resp["path"] == "res://scenes/test.tscn"
         assert resp["ok"] is True
 
-    def test_res_path_accepted(self, godot_env):
+    def test_res_path_accepted(self, e2e_editor):
         """res:// 路径直接接受"""
-        resp = _exec(godot_env, "gdapi/health/pathcheck",
+        resp = _exec(e2e_editor, "gdapi/health/pathcheck",
                      '{"path":"res://scenes/test.tscn","mode":"read"}')
         assert resp["path"] == "res://scenes/test.tscn"
 
-    def test_path_traversal_rejected(self, godot_env):
+    def test_path_traversal_rejected(self, e2e_editor):
         """路径遍历攻击被拒绝"""
-        _exec_fail(godot_env, "gdapi/health/pathcheck",
+        _exec_fail(e2e_editor, "gdapi/health/pathcheck",
                    '{"path":"../outside.txt","mode":"read"}')
 
-    def test_absolute_path_rejected(self, godot_env):
+    def test_absolute_path_rejected(self, e2e_editor):
         """绝对系统路径被拒绝"""
-        _exec_fail(godot_env, "gdapi/health/pathcheck",
+        _exec_fail(e2e_editor, "gdapi/health/pathcheck",
                    '{"path":"/etc/passwd","mode":"read"}')
 
 
 # ── 审计日志 ─────────────────────────────────────────
 
 class TestAuditLog:
-    def test_audit_clear_requires_force(self, godot_env):
+    def test_audit_clear_requires_force(self, e2e_editor):
         """audit/clear 无 force 参数被拒绝"""
-        _exec_fail(godot_env, "gdapi/audit/clear", "{}")
+        _exec_fail(e2e_editor, "gdapi/audit/clear", "{}")
 
-    def test_audit_clear_with_force(self, godot_env):
+    def test_audit_clear_with_force(self, e2e_editor):
         """audit/clear 带 force:true 成功"""
-        resp = _exec(godot_env, "gdapi/audit/clear", '{"force":true}')
+        resp = _exec(e2e_editor, "gdapi/audit/clear", '{"force":true}')
         assert resp["ok"] is True
         assert resp["cleared"] is True
 
-    def test_audit_list_returns_entries(self, godot_env):
+    def test_audit_list_returns_entries(self, e2e_editor):
         """audit/list 返回条目（含刚才 clear 失败的记录）"""
         # 先触发一次失败的 clear 来产生审计记录
-        _exec_fail(godot_env, "gdapi/audit/clear", "{}")
-        resp = _exec(godot_env, "gdapi/audit/list", '{"limit":10}')
+        _exec_fail(e2e_editor, "gdapi/audit/clear", "{}")
+        resp = _exec(e2e_editor, "gdapi/audit/list", '{"limit":10}')
         assert resp["ok"] is True
         assert isinstance(resp["entries"], list)
         assert len(resp["entries"]) > 0
@@ -172,25 +172,25 @@ def _exec_error(env: dict, route: str, data: dict) -> dict:
     return json.loads(result.stderr.split(": ", 1)[1])
 
 
-def test_pathcheck_rejects_unknown_mode(godot_env):
+def test_pathcheck_rejects_unknown_mode(e2e_editor):
     error = _exec_error(
-        godot_env,
+        e2e_editor,
         "gdapi/health/pathcheck",
         {"path": "res://test.tscn", "mode": "execute"},
     )
     assert error["code"] == "invalid_param"
 
 
-def test_uid_update_requires_force(godot_env):
-    error = _exec_error(godot_env, "uid/update_all", {"project_path": "res://tests"})
+def test_uid_update_requires_force(e2e_editor):
+    error = _exec_error(e2e_editor, "uid/update_all", {"project_path": "res://tests"})
     assert error["code"] == "unsafe_operation"
 
 
-def test_uid_update_cannot_touch_protected_metadata(godot_env):
-    metadata = godot_env["fixture"] / ".godot" / "gdapi.json"
+def test_uid_update_cannot_touch_protected_metadata(e2e_editor):
+    metadata = e2e_editor["fixture"] / ".godot" / "gdapi.json"
     before = metadata.read_bytes()
     error = _exec_error(
-        godot_env,
+        e2e_editor,
         "uid/update_all",
         {"project_path": "res://.godot", "force": True},
     )

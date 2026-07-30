@@ -1,70 +1,63 @@
-"""Real editor UndoRedo acceptance test using a fixture-only plugin."""
+"""Real editor UndoRedo acceptance test — migrated to shared editor.
 
-import os
-import shutil
-import subprocess
-import sys
-from pathlib import Path
+The original test created its own Godot editor process with a standalone
+fixture project. This version uses the session-scoped shared editor and
+exercises the same EditableAction contract through gdcli routes and the
+test-plugin command channel.
+"""
 
-from conftest import _repo_root, _gdcli_bin, require_godot_47
+from __future__ import annotations
 
+from typing import Any
 
-def _copy_native_library(root: Path, project: Path) -> None:
-    if sys.platform == "win32":
-        source = root / "target" / "debug" / "gdapi.dll"
-        destination = project / "addons" / "gdapi" / "bin" / "windows" / "gdapi.dll"
-    elif sys.platform == "darwin":
-        source = root / "target" / "debug" / "libgdapi.dylib"
-        destination = project / "addons" / "gdapi" / "bin" / "macos" / "libgdapi.dylib"
-    else:
-        source = root / "target" / "debug" / "libgdapi.so"
-        destination = project / "addons" / "gdapi" / "bin" / "linux" / "libgdapi.so"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
+import pytest
+
+from e2e.m2.helpers import editor_redo, editor_undo, exec_ok
 
 
-def _isolated_project(tmp_path: Path) -> Path:
-    root = _repo_root()
-    build = subprocess.run(
-        ["cargo", "build", "--workspace"],
-        cwd=root,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    assert build.returncode == 0, build.stdout + build.stderr
-    source = root / "tests" / "fixture_project"
-    project = tmp_path / "fixture_project"
-    shutil.copytree(
-        source,
-        project,
-        ignore=shutil.ignore_patterns(".godot", "gdapi"),
-    )
-    install = subprocess.run(
-        [str(_gdcli_bin()), "install", "--project", str(project), "--force"],
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    assert install.returncode == 0, install.stdout + install.stderr
-    _copy_native_library(root, project)
-    return project
+@pytest.mark.usefixtures("e2e_editor")
+def test_edit_action_commit_property_undo_redo(e2e_editor: dict[str, Any]) -> None:
+    """EditAction.commit_property produces undoable/redoable actions.
 
+    Uses the shared editor's test-plugin command channel to exercise
+    the same UndoRedo contract as the original standalone test.
+    """
+    # Read a known property on a stable node
+    pos = exec_ok(e2e_editor, "node/property/get", {
+        "node_path": "/root/Main/Player",
+        "property": "position",
+    })
+    assert pos["value"]["type"] == "Vector2"
+    original = pos["value"]
 
-def test_real_editor_undo_redo(tmp_path):
-    from e2e.m2.helpers import resolve_godot_bin, require_godot_47
-    godot_bin = resolve_godot_bin()
-    project = _isolated_project(tmp_path)
-    process_env = os.environ.copy()
-    process_env["GDAPI_RUN_EDITOR_TESTS"] = "1"
-    result = subprocess.run(
-        [godot_bin, "--editor", "--headless", "--path", str(project)],
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        env=process_env,
-        timeout=45,
-    )
-    output = result.stdout + result.stderr
-    assert result.returncode == 0, output
-    assert "GDAPI_EDITOR_TEST_PASS" in output
+    # Change the property — should be undoable
+    new_position = {"type": "Vector2", "value": [41.0, 73.0]}
+    set_result = exec_ok(e2e_editor, "node/property/set", {
+        "node_path": "/root/Main/Player",
+        "property": "position",
+        "value": new_position,
+    })
+    assert set_result["undoable"] is True
+
+    # Verify the change took effect
+    pos = exec_ok(e2e_editor, "node/property/get", {
+        "node_path": "/root/Main/Player",
+        "property": "position",
+    })["value"]
+    assert pos == new_position
+
+    # Undo via the test-plugin command channel
+    editor_undo(e2e_editor)
+    pos = exec_ok(e2e_editor, "node/property/get", {
+        "node_path": "/root/Main/Player",
+        "property": "position",
+    })["value"]
+    assert pos == original, "undo did not restore original value"
+
+    # Redo via the test-plugin command channel
+    editor_redo(e2e_editor)
+    pos = exec_ok(e2e_editor, "node/property/get", {
+        "node_path": "/root/Main/Player",
+        "property": "position",
+    })["value"]
+    assert pos == new_position, "redo did not restore changed value"

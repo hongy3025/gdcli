@@ -412,11 +412,19 @@ func _make_reply(
 			generation,
 			version
 		)
+	var result_value: Variant
+	if reply_body.has("result"):
+		result_value = reply_body.get("result")
+	else:
+		result_value = reply_body.duplicate()
+		result_value.erase("ok")
+		result_value.erase("error")
+		result_value.erase("code")
 	var reply := Protocol.reply_for_version(
 		version,
 		id,
 		bool(reply_body.ok),
-		reply_body.get("result", null),
+		result_value,
 		String(reply_body.get("error", "")),
 		String(reply_body.get("code", "")),
 		generation

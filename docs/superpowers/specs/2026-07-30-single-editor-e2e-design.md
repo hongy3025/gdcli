@@ -87,7 +87,8 @@ session teardown
 - 全量测试断言保持不变，重复运行结果一致；
 - 现有 6 分钟预算测试继续通过并记录新的耗时基线；
 - 新增共享 fixture 生命周期、PID 一致性、reset 失败诊断和策略恢复测试。
-
+- `tests/e2e/shared_fixture.EDITOR_START_COUNTER["starts"]` 在完整 suite 中恰好为 1。
+- 任何模块 conftest 不得再调用 `subprocess.Popen` 启动 Godot editor；模块 fixture（`m2_editor` / `m3_editor` / `m4_env` / `m5_editor` / `m6_editor*`）必须返回 `e2e_editor` 的同一 env，不允许重建进程或项目副本。
 ### 收集顺序优化验收
 
 - 不增加测试用例（仍是同一集合）；

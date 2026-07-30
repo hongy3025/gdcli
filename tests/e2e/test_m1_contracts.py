@@ -13,23 +13,23 @@ STANDARD_CODES = {
 }
 
 
-def test_all_command_docs_are_complete(godot_env):
+def test_all_command_docs_are_complete(e2e_editor):
     listing = gdcli_json(
-        godot_env, "exec", "command/list", "--project", str(godot_env["fixture"])
+        e2e_editor, "exec", "command/list", "--project", str(e2e_editor["fixture"])
     )
     for command in listing["commands"]:
         assert command["summary"], command["path"]
         detail = gdcli_json(
-            godot_env, "exec", "command/doc", command["path"],
-            "--project", str(godot_env["fixture"]),
+            e2e_editor, "exec", "command/doc", command["path"],
+            "--project", str(e2e_editor["fixture"]),
         )["doc"]
         assert detail["returns"]["fields"], command["path"]
         if detail["params"]:
             assert detail["examples"], command["path"]
 
 
-def test_literal_route_error_codes_are_standard(godot_env):
-    root = Path(godot_env["root"]) / "gdapi" / "addon"
+def test_literal_route_error_codes_are_standard(e2e_editor):
+    root = Path(e2e_editor["root"]) / "gdapi" / "addon"
     pattern = re.compile(r'res\.error\([^\n]*,\s*"([a-z_]+)"')
     found = set()
     for path in root.rglob("*.gd"):
@@ -37,16 +37,16 @@ def test_literal_route_error_codes_are_standard(godot_env):
     assert found <= STANDARD_CODES, sorted(found - STANDARD_CODES)
 
 
-def test_audit_clear_records_exact_public_route(godot_env):
+def test_audit_clear_records_exact_public_route(e2e_editor):
     gdcli_json(
-        godot_env, "exec", "gdapi/audit/clear",
-        "--project", str(godot_env["fixture"]),
+        e2e_editor, "exec", "gdapi/audit/clear",
+        "--project", str(e2e_editor["fixture"]),
         "--data", '{"force":true}',
     )
     rejected = subprocess.run(
         [
-            str(godot_env["gdcli"]), "--json", "exec", "gdapi/audit/clear",
-            "--project", str(godot_env["fixture"]), "--data", "{}",
+            str(e2e_editor["gdcli"]), "--json", "exec", "gdapi/audit/clear",
+            "--project", str(e2e_editor["fixture"]), "--data", "{}",
         ],
         capture_output=True,
         encoding="utf-8",
@@ -54,8 +54,8 @@ def test_audit_clear_records_exact_public_route(godot_env):
     )
     assert rejected.returncode == 2
     entries = gdcli_json(
-        godot_env, "exec", "gdapi/audit/list",
-        "--project", str(godot_env["fixture"]),
+        e2e_editor, "exec", "gdapi/audit/list",
+        "--project", str(e2e_editor["fixture"]),
         "--data", '{"since":0,"limit":10}',
     )["entries"]
     assert entries[-1]["route"] == "gdapi/audit/clear"

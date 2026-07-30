@@ -37,5 +37,9 @@ def test_m4_alias_shares_e2e_editor(m4_env, e2e_editor):
 
 def test_editor_start_counter_records_one_start(e2e_editor):
     # The shared fixture has been activated at least once for this test.
-    assert EDITOR_START_COUNTER["starts"] >= 1
+    assert EDITOR_START_COUNTER["starts"] == 1, (
+        f"expected exactly one editor start, got {EDITOR_START_COUNTER['starts']}"
+    )
     assert e2e_editor["editor_pid"] in EDITOR_START_COUNTER["pids"]
+    # Emit machine-checkable line for the nested full-suite budget test
+    print(f"\nGODOT_EDITOR_STARTS={EDITOR_START_COUNTER['starts']}")
