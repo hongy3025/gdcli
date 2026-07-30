@@ -166,6 +166,33 @@ def _copy_native_library(env: dict[str, Any]) -> None:
 # ── editor startup ────────────────────────────────────────────────────
 
 
+def build_editor_command(godot_bin: str, project: Path) -> list[str]:
+    return [
+        godot_bin,
+        "--editor",
+        "--headless",
+        "--audio-driver",
+        "Dummy",
+        "--path",
+        str(project),
+    ]
+
+
+def build_editor_environment(project: Path) -> dict[str, str]:
+    appdata = project / ".godot" / "appdata"
+    local_appdata = project / ".godot" / "localappdata"
+    appdata.mkdir(parents=True, exist_ok=True)
+    local_appdata.mkdir(parents=True, exist_ok=True)
+    editor_env = os.environ.copy()
+    editor_env.update(
+        {
+            "APPDATA": str(appdata),
+            "LOCALAPPDATA": str(local_appdata),
+        }
+    )
+    return editor_env
+
+
 def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
     log_path = env["project"] / ".godot" / "godot.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -174,12 +201,12 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
     env["godot_log"] = log_handle
 
     process = subprocess.Popen(
-        [env["godot_bin"], "--editor", "--headless", "--path", str(env["project"])],
+        build_editor_command(env["godot_bin"], env["project"]),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         text=True,
         env={
-            **os.environ,
+            **build_editor_environment(env["project"]),
             "GDAPI_HANDLER_TIMEOUT_MS": "180000",
         },
     )
@@ -583,7 +610,7 @@ def m3_lifecycle(e2e_editor) -> dict[str, Any]:
     """
     from e2e.m3.conftest import (  # late import to avoid cycles
         exec_ok, project_run, _runtime_root, _runtime_entries,
-        wait_for_connected, detach_game, reset_fixture,
+        wait_for_connected, wait_for_editor_playing, detach_game, reset_fixture,
     )
 
     initial = exec_ok(e2e_editor, "runtime/status")
@@ -592,7 +619,8 @@ def m3_lifecycle(e2e_editor) -> dict[str, Any]:
     try:
         for cycle_index in range(2):
             started = project_run(e2e_editor)
-            connected = wait_for_connected(e2e_editor, timeout=30.0)
+            wait_for_editor_playing(e2e_editor)
+            connected = wait_for_connected(e2e_editor, timeout=60.0)
             active = exec_ok(e2e_editor, "runtime/status")
             stale = (
                 _runtime_root(e2e_editor)

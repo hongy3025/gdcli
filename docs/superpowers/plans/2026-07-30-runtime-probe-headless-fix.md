@@ -4,7 +4,7 @@
 
 **Goal:** Make Godot 4.7.1 Windows headless editor reliably start and stop runtime probe scenes through `project/run` and `project/stop`.
 
-**Architecture:** Keep the existing session-scoped editor and broker. Add a pure Python editor-command builder, defer editor play calls to the main loop, and make the E2E harness wait for actual `editor_playing` before broker connection.
+**Architecture:** Keep the existing session-scoped editor and broker. Add pure Python editor-command/environment builders, route scene playback through the persistent `EditorPlugin`, and make the E2E harness wait for actual `editor_playing` before broker connection.
 
 **Tech Stack:** Godot 4.7.1 GDScript, Python pytest, `gdformat`, `gdlint`, Rust workspace tests.
 
@@ -55,6 +55,8 @@ def test_build_editor_command_uses_headless_audio_driver(tmp_path: Path):
 
 - [ ] Run `uv run pytest tests/e2e/test_shared_editor_lifecycle.py::test_build_editor_command_uses_headless_audio_driver -q`; expect failure because the builder is absent.
 - [ ] Implement `build_editor_command(godot_bin: str, project: Path) -> list[str]` returning exactly the list above, and make `_start_editor` pass it to `subprocess.Popen`.
+- [ ] Implement `build_editor_environment(project: Path) -> dict[str, str]` that creates `<project>/.godot/appdata` and `<project>/.godot/localappdata`, overrides `APPDATA` and `LOCALAPPDATA`, and make `_start_editor` use it.
+- [ ] Add a pure test asserting both Godot data directories are project-local and writable.
 - [ ] Re-run the focused test and require one pass.
 - [ ] Commit with `git commit -m "test: lock headless editor startup command"`.
 
@@ -63,7 +65,7 @@ def test_build_editor_command_uses_headless_audio_driver(tmp_path: Path):
 **Files:** Modify `gdapi/addon/routes/project/run.gd`; add/update the adjacent route/harness contract test.
 
 - [ ] Add a failing static regression test asserting `run.gd` contains `call_deferred` and an `editor_playing` response field; run it and confirm failure against the synchronous route.
-- [ ] Add a route-local deferred callable for `EditorInterface.play_main_scene()` and `play_custom_scene()`. Keep path validation before scheduling; do not busy-wait in the route.
+- [ ] Read `application/run/main_scene` for the no-argument case and route both main/custom scene requests through the persistent plugin's `request_play_scene(scene_path)`, which synchronously calls `EditorInterface.play_custom_scene()`.
 - [ ] Include `"editor_playing": EditorInterface.is_playing_scene()` in the acceptance response and document it as an immediate snapshot; keep `runtime_state` limited to `stopped|connecting|connected`.
 - [ ] Run focused route/harness tests after the GDScript gate passes and require them to pass.
 - [ ] Commit with `git commit -m "fix: defer editor scene playback from gdapi route"`.

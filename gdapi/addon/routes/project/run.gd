@@ -28,7 +28,13 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 	# 如果未指定场景路径，运行主场景
 	if scene_path.is_empty():
-		EditorInterface.play_main_scene()
+		var main_scene_path := String(ProjectSettings.get_setting("application/run/main_scene", ""))
+		if main_scene_path.is_empty():
+			res.error("main scene is not configured", "not_found", 404)
+			return
+		if not _request_play_scene(main_scene_path):
+			res.error("editor play service is unavailable", "conflict", 409)
+			return
 		req.log_info("Started playing main scene")
 		(
 			res
@@ -37,6 +43,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 					"ok": true,
 					"action": "play_main_scene",
 					"runtime_state": _runtime_state_label(broker),
+					"editor_playing": EditorInterface.is_playing_scene(),
 				}
 			)
 		)
@@ -56,7 +63,9 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 
 	# 运行指定场景
-	EditorInterface.play_custom_scene(scene_path)
+	if not _request_play_scene(scene_path):
+		res.error("editor play service is unavailable", "conflict", 409)
+		return
 
 	req.log_info("Started playing scene: " + scene_path)
 
@@ -69,9 +78,18 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"action": "play_custom_scene",
 				"scene": scene_path,
 				"runtime_state": _runtime_state_label(broker),
+				"editor_playing": EditorInterface.is_playing_scene(),
 			}
 		)
 	)
+
+
+func _request_play_scene(scene_path: String) -> bool:
+	var plugin: Variant = Engine.get_meta("gdapi_plugin", null)
+	if plugin == null or not plugin.has_method("request_play_scene"):
+		return false
+	plugin.call("request_play_scene", scene_path)
+	return true
 
 
 ## 把 broker 当前 state 转字符串,便于外部调试
@@ -91,7 +109,11 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("运行 Godot 场景")
 		. desc(
-			"不带 scene_path 时运行主场景；带 scene_path 时运行指定路径的自定义场景；用于自动化测试和快速预览。M3 同时把 runtime broker 切换到 connecting,等待 EditorDebuggerPlugin 的 hello"
+			(
+				"不带 scene_path 时运行主场景；带 scene_path 时运行指定路径的自定义场景；"
+				+ "用于自动化测试和快速预览。M3 同时把 runtime broker 切换到 connecting,"
+				+ "等待 EditorDebuggerPlugin 的 hello。editor_playing 是响应时的播放状态快照"
+			)
 		)
 		. param("scene_path", "String", false, "要运行的场景路径,留空则运行主场景", "")
 		. example('{"scene_path":"res://test.tscn"}')
@@ -102,6 +124,7 @@ func doc() -> GdApiRouteDoc:
 				"action": "String, play_main_scene 或 play_custom_scene",
 				"scene": "String, 仅自定义场景模式存在，运行的场景路径",
 				"runtime_state": "String, stopped|connecting|connected",
+				"editor_playing": "bool, 响应时编辑器是否正在播放场景",
 			}
 		)
 	)

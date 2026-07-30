@@ -193,6 +193,27 @@ def test_build_environment_yields_one_process(
     assert shared_fixture.EDITOR_START_COUNTER["pids"] == {captured["pid"]}
 
 
+def test_build_editor_command_uses_headless_audio_driver(tmp_path: Path):
+    assert shared_fixture.build_editor_command("godot.exe", tmp_path) == [
+        "godot.exe",
+        "--editor",
+        "--headless",
+        "--audio-driver",
+        "Dummy",
+        "--path",
+        str(tmp_path),
+    ]
+
+
+def test_build_editor_environment_isolates_godot_user_data(tmp_path: Path):
+    environment = shared_fixture.build_editor_environment(tmp_path)
+
+    assert Path(environment["APPDATA"]) == tmp_path / ".godot" / "appdata"
+    assert Path(environment["LOCALAPPDATA"]) == tmp_path / ".godot" / "localappdata"
+    assert Path(environment["APPDATA"]).is_dir()
+    assert Path(environment["LOCALAPPDATA"]).is_dir()
+
+
 def test_build_environment_copies_unified_project(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
 ) -> None:

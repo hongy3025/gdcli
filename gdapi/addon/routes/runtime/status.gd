@@ -19,6 +19,9 @@ const RuntimeBroker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 ## @param res 响应对象
 func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 	var broker: Variant = RuntimeBroker.instance()
+	var editor_playing: bool = false
+	if Engine.has_singleton("EditorInterface"):
+		editor_playing = EditorInterface.is_playing_scene()
 	if broker == null:
 		(
 			res
@@ -30,6 +33,7 @@ func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 					"session_id": -1,
 					"pending": 0,
 					"broker_registered": false,
+					"editor_playing": editor_playing,
 				}
 			)
 		)
@@ -37,6 +41,10 @@ func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 	var status: Dictionary = broker.status()
 	status["ok"] = true
 	status["broker_registered"] = true
+	status["editor_playing"] = editor_playing
+	# 当编辑器未播放场景时，强制返回 stopped 状态（即使 broker 已注册但 probe 未连接）
+	if not editor_playing:
+		status["state"] = "stopped"
 	res.json(status)
 
 

@@ -215,7 +215,9 @@ def local_http_server() -> _ServerRef:
 
 
 def latest_audit(env: dict[str, Any], route: str) -> dict[str, Any]:
-    entries = exec_ok(env, "gdapi/audit/list", {"limit": 100}).get("entries", [])
+    # Query with limit=1000 to capture all entries regardless of prior
+    # module activity (M3 runtime tests can push 100+ entries).
+    entries = exec_ok(env, "gdapi/audit/list", {"limit": 1000}).get("entries", [])
     matching = [e for e in entries if e.get("route") == route]
     if not matching:
         raise AssertionError(f"No audit entries found for route {route}")
@@ -223,7 +225,7 @@ def latest_audit(env: dict[str, Any], route: str) -> dict[str, Any]:
 
 
 def audit_for_route(env: dict[str, Any], route: str) -> list[dict[str, Any]]:
-    entries = exec_ok(env, "gdapi/audit/list", {"limit": 100}).get("entries", [])
+    entries = exec_ok(env, "gdapi/audit/list", {"limit": 1000}).get("entries", [])
     return [e for e in entries if e.get("route") == route]
 
 

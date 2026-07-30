@@ -388,7 +388,6 @@ def test_reset_disconnects_pending_await_exactly_once(m3_running):
     _assert_async_resources_clean(m3_running)
 
 
-@pytest.mark.skip(reason="file_transport_last_disconnect_* properties on FileTransport RefCounted, not exposed on GdApiRuntimeProbe node")
 def test_transport_disconnect_completes_await_once_and_cleans_late_runtime_work(m3_running):
     waiter = _start_cli(m3_running, "runtime/signal/await", {
         "node_path": TARGET,

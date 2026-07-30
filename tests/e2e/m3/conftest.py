@@ -270,7 +270,8 @@ def attach_game(env: dict[str, Any], *, recovery_restarts: int = RECOVERY_RESTAR
     for attempt in range(recovery_restarts + 1):
         try:
             project_run(env)
-            wait_for_connected(env, timeout=30.0)
+            wait_for_editor_playing(env)
+            wait_for_connected(env, timeout=60.0)
             env["game_attached"] = True
             return
         except BaseException as exc:
@@ -403,8 +404,10 @@ def project_stop(env: dict) -> dict:
     return result
 
 
-def exec_ok(env: dict, route: str, data: dict | None = None) -> dict[str, Any]:
+def exec_ok(env: dict, route: str, data: dict | None = None, extra_args: list[str] | None = None) -> dict[str, Any]:
     args = _command_args(env, route, data)
+    if extra_args:
+        args.extend(extra_args)
     result = _run_cli(env, args)
     if result.returncode != 0:
         raise _harness_failure(
@@ -418,8 +421,10 @@ def exec_ok(env: dict, route: str, data: dict | None = None) -> dict[str, Any]:
     return payload
 
 
-def exec_error(env: dict, route: str, data: dict | None = None) -> dict[str, Any]:
+def exec_error(env: dict, route: str, data: dict | None = None, extra_args: list[str] | None = None) -> dict[str, Any]:
     args = _command_args(env, route, data)
+    if extra_args:
+        args.extend(extra_args)
     result = _run_cli(env, args)
     diagnostics = _diagnostics(env, args, result)
     if result.returncode == 0:
@@ -454,7 +459,30 @@ def _poll_runtime_status(
     return args, result, _parse_payload(result)
 
 
-def wait_for_connected(env: dict, timeout: float = 30.0) -> dict[str, Any]:
+def wait_for_editor_playing(env: dict, timeout: float = 15.0) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_status: dict[str, Any] = {}
+    last_args: list[str] = []
+    last_result: subprocess.CompletedProcess[str] | None = None
+    while time.monotonic() < deadline:
+        last_args, last_result, payload = _poll_runtime_status(env)
+        if payload is not None:
+            last_status = payload
+            if payload.get("ok") is True and payload.get("editor_playing") is True:
+                return payload
+        time.sleep(0.1)
+    if last_result is None:
+        last_args, last_result, _ = _poll_runtime_status(env)
+    raise _harness_failure(
+        env,
+        last_args,
+        last_result,
+        f"editor never entered playing state within {timeout}s "
+        f"(last status: {last_status})",
+    )
+
+
+def wait_for_connected(env: dict, timeout: float = 60.0) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     last_status: dict = {}
     last_args: list[str] = []
@@ -487,7 +515,12 @@ def wait_stopped(env: dict, timeout: float = 10.0) -> dict[str, Any]:
         last_args, last_result, payload = _poll_runtime_status(env)
         if payload is not None:
             last_status = payload
-            if payload.get("ok") is True and payload.get("state") == "stopped" and payload.get("pending", 0) == 0:
+            if (
+                payload.get("ok") is True
+                and payload.get("state") == "stopped"
+                and payload.get("pending", 0) == 0
+                and not payload.get("editor_playing", True)
+            ):
                 return payload
         time.sleep(0.1)
     if last_result is None:
@@ -647,5 +680,6 @@ __all__ = [
     "runtime_route_source",
     "wait_for",
     "wait_for_connected",
+    "wait_for_editor_playing",
     "wait_stopped",
 ]

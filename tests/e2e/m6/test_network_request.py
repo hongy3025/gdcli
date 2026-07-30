@@ -55,7 +55,6 @@ def test_response_cap_truncates_or_errors(m6_editor_network, local_http_server):
         assert result.get("code") in ("godot_error", "timeout")
 
 
-@pytest.mark.skip(reason="audit log cleared by M3 reset_shared_state when run in full suite; pre-existing interaction")
 def test_audit_redacts_body_and_headers(m6_editor_network, local_http_server):
     exec_ok(m6_editor_network, "network/http_request", {
         "url": local_http_server.url("/ok"), "force": True,

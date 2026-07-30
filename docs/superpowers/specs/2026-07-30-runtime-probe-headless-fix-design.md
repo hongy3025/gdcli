@@ -21,13 +21,13 @@
 
 ### 编辑器启动
 
-在 `tests/e2e/shared_fixture.py` 中集中构造 editor 命令，保留 `--editor --headless --path`，并增加 `--audio-driver Dummy`，避免 headless 下音频设备初始化影响场景播放。命令构造抽为纯函数，单测断言参数顺序和关键参数。
+在 `tests/e2e/shared_fixture.py` 中集中构造 editor 命令，保留 `--editor --headless --path`，并增加 `--audio-driver Dummy`，避免 headless 下音频设备初始化影响场景播放。为每个临时项目设置独立可写的 `APPDATA` 和 `LOCALAPPDATA`，避免宿主机 Godot 4.6 配置 junction 被 Godot 4.7.1 复用。命令和环境构造均由单测覆盖。
 
 不采用 `--display-driver headless` 作为默认值：已有进度记录表明该组合曾导致 `EditorInterface.play_main_scene()` 不启动；保留 `--headless` 以兼容当前 Godot 4.7.1 Windows 构建。
 
 ### project/run
 
-`project/run` 继续先调用 `broker.begin_connect()`，然后通过编辑器主循环的 deferred 调用触发 `play_main_scene()`/`play_custom_scene()`，避免在 HTTP poll 回调内直接执行编辑器播放切换。路由响应只表示请求已接受，并包含 `editor_playing`；fixture 负责轮询 `runtime/status`，确认 `editor_playing == true` 后再等待 probe 连接。
+`project/run` 继续先调用 `broker.begin_connect()`，从 `application/run/main_scene` 读取主场景路径，并通过常驻 `EditorPlugin` 调用 `EditorInterface.play_custom_scene()`。路由 handler 是临时对象，不能持有 deferred 请求；常驻插件保证播放调用的接收者和生命周期稳定。路由响应包含 `editor_playing`；fixture 负责轮询 `runtime/status`，确认 `editor_playing == true` 后再等待 probe 连接。
 
 如果主场景或指定场景无法启动，路由返回明确错误，不伪造成功响应。停止路由使用合法的 `pass` 等待体，并在 detach 前等待 `EditorInterface.is_playing_scene()` 变为 false。
 

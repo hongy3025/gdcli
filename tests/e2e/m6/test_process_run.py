@@ -24,9 +24,6 @@ def test_process_run_no_shell_preserves_argv(m6_editor_process: dict[str, Any]) 
     assert '"$(whoami)"' in result["stdout"]
 
 
-@pytest.mark.skip(
-    reason="M3 reset_shared_state clears the audit log before M6 in the full suite"
-)
 def test_process_run_timeout_has_one_failed_terminal_audit(
     m6_editor_process: dict[str, Any],
 ) -> None:

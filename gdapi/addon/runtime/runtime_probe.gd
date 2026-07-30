@@ -14,8 +14,8 @@
 ##   并存(同时存在);EngineDebugger 抢到 hello 时把 broker._active_transport
 ##   置为 engine_debugger,headless 下 file transport 兜底。
 
-@tool
 # gdlint: ignore=class-definitions-order
+@tool
 extends Node
 
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
@@ -53,6 +53,17 @@ var _ring: RefCounted = RingBuffer.new(2000)
 
 ## 文件 transport 实例;非编辑器进程下 _ready() 中创建
 var _file_transport: RefCounted = null
+
+## 暴露给 runtime/node/get 的 file transport 断开统计属性
+# gdlint: ignore=class-definitions-order
+var file_transport_last_disconnect_abandoned: int:
+	get:
+		return _file_transport.last_disconnect_abandoned_count() if _file_transport != null else 0
+
+# gdlint: ignore=class-definitions-order
+var file_transport_last_disconnect_remaining: int:
+	get:
+		return _file_transport.last_disconnect_remaining_count() if _file_transport != null else 0
 
 
 ## 容器,根据 _ready 时机,允许 hello 阶段被推迟

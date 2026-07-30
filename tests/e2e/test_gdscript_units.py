@@ -5,7 +5,6 @@ import pytest
 from conftest import run_godot_script
 
 
-@pytest.mark.skip(reason="GDScript unit test files not in e2e_project fixture; needs fixture_project/tests/ copy")
 @pytest.mark.parametrize(
     "script",
     [
@@ -38,7 +37,6 @@ def test_gdscript_unit_suite(e2e_editor, script):
     assert "0 failed" in result.stdout
 
 
-@pytest.mark.skip(reason="GDScript unit test files not in e2e_project fixture; needs fixture_project/tests/ copy")
 def test_runtime_debugger_plugin_suite(e2e_editor):
     result = run_godot_script(
         e2e_editor,

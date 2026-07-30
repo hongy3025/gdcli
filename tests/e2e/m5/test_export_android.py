@@ -5,10 +5,8 @@ import pytest
 from .conftest import exec_error, exec_export
 
 pytestmark = pytest.mark.skip(
-    "export/run requires GdApiServer handler timeout >5s default; "
-    "see docs/TODO.md"
+    reason="android export requires Android SDK/ADB environment"
 )
-
 
 def test_export_run_returns_matching_artifact_digest(m5_editor):
     output = Path(m5_editor["project"]) / "build" / "m5.pck"

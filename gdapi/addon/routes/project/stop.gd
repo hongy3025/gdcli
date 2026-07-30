@@ -16,33 +16,22 @@ const RuntimeBroker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 ## 检查当前是否有场景正在运行，如果有则停止运行。
 ## @param req 请求对象
 ## @param res 响应对象
-func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	# 先把 broker 切换为 detached,所有 pending 立即收到 conflict。
+func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
+	# 先停止场景，再 detach broker。
+	# 顺序很重要：wait_stopped() 依赖 broker 状态判断停服完成，
+	# 但 EditorInterface.is_playing_scene() 可能异步返回 false。
+	# 如果先 detach 再 stop_playing_scene，wait_stopped 可能在
+	# 场景还在运行时就返回，导致后续 project_run 的 play_main_scene 无效果。
 	var broker: Variant = RuntimeBroker.instance()
+	if EditorInterface.is_playing_scene():
+		EditorInterface.stop_playing_scene()
+		# 等待场景真正停止（最多 10 秒）
+		var deadline: int = Time.get_ticks_msec() + 10000
+		while Time.get_ticks_msec() < deadline and EditorInterface.is_playing_scene():
+			pass  # 忙等，不 yield 以避免路由协程复杂度
 	if broker != null:
 		broker.detach("game stopped")
 
-	# 检查是否有场景正在运行
-	if not EditorInterface.is_playing_scene():
-		(
-			res
-			. json(
-				{
-					"ok": true,
-					"action": "stop",
-					"message": "not playing",
-					"runtime_state": "stopped",
-				}
-			)
-		)
-		return
-
-	# 停止运行场景
-	EditorInterface.stop_playing_scene()
-
-	req.log_info("Stopped playing scene")
-
-	# 返回成功响应
 	(
 		res
 		. json(

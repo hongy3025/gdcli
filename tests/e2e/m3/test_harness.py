@@ -28,6 +28,36 @@ def _failure(message: str) -> RuntimeError:
     return error
 
 
+def test_project_run_uses_persistent_editor_play_service():
+    source = Path("gdapi/addon/routes/project/run.gd").read_text(encoding="utf-8")
+    assert "application/run/main_scene" in source
+    assert "request_play_scene" in source
+    assert '"editor_playing"' in source
+
+    plugin_source = Path("gdapi/addon/plugin.gd").read_text(encoding="utf-8")
+    assert "func request_play_scene" in plugin_source
+    assert "EditorInterface.play_custom_scene" in plugin_source
+
+
+def test_wait_for_editor_playing_waits_for_editor_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    statuses = iter([
+        {"ok": True, "state": "stopped", "editor_playing": False},
+        {"ok": True, "state": "connecting", "editor_playing": True},
+    ])
+    result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    monkeypatch.setattr(
+        harness,
+        "_poll_runtime_status",
+        lambda _env: (["exec", "runtime/status"], result, next(statuses)),
+    )
+
+    status = harness.wait_for_editor_playing({"project": tmp_path}, timeout=1.0)
+
+    assert status["editor_playing"] is True
+
+
 def test_detach_game_preserves_attachment_and_diagnostics_when_wait_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
@@ -293,33 +323,4 @@ class _FakeEditorProcess:
         self.killed = True
 
 
-@pytest.mark.skip(reason="legacy recovery API removed in the unified single-editor model")
-def test_detach_editor_retries_game_teardown_then_kills_and_reports_diagnostics(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    process = _FakeEditorProcess()
-    teardown_calls = []
 
-    def failing_detach(_env):
-        teardown_calls.append(True)
-        raise _failure("game stop failed")
-
-    env = {
-        "project": tmp_path,
-        "game_attached": True,
-        "godot": process,
-        "godot_log": io.StringIO("log"),
-        "recovery_events": [],
-    }
-    monkeypatch.setattr(harness, "detach_game", failing_detach)
-    monkeypatch.setattr(harness, "cleanup_stale_runtime", lambda _env: None)
-
-    with pytest.warns(RuntimeWarning) as recovery_warnings:
-        harness.detach_editor(env)
-
-    assert len(teardown_calls) == 2
-    assert len(recovery_warnings) == 2
-    assert process.killed is True
-    assert env["game_attached"] is True
-    recovery_text = "\n".join(map(str, env["recovery_events"]))
-    assert all(field in recovery_text for field in harness.DIAGNOSTIC_FIELDS)

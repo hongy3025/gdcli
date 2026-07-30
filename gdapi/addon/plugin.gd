@@ -28,6 +28,7 @@ const LOG_DEBUG := 0
 const LOG_INFO := 1
 const LOG_WARN := 2
 const LOG_ERROR := 3
+const MAX_AUDIT_ENTRIES: int = 1000
 
 ## 级别名称映射
 const LOG_LEVEL_NAMES := {0: "debug", 1: "info", 2: "warn", 3: "error"}
@@ -53,8 +54,6 @@ var _log_buffer: Array = []
 var _log_seq: int = 0
 ## 当前全局日志级别，默认 INFO
 var _log_level: int = LOG_INFO
-
-const MAX_AUDIT_ENTRIES: int = 1000
 
 var _audit_buffer: Array = []
 var _audit_seq: int = 0
@@ -187,6 +186,11 @@ func _process(_dt: float) -> void:
 		if req == null:
 			break
 		_router.dispatch(req, _server)
+
+
+func request_play_scene(scene_path: String) -> void:
+	if not scene_path.is_empty():
+		EditorInterface.play_custom_scene(scene_path)
 
 
 func register_deferred_task(task: Dictionary) -> bool:
