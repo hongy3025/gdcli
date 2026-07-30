@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 import pytest
+from e2e.route_manifests import M3_RUNTIME_ROUTES
 
 from .helpers import command_doc, exec_ok
 
@@ -51,8 +52,10 @@ def test_routes_match_expected_inventory(m2_editor):
     actual = set(routes)
     missing = M2_BASELINE_ROUTES - actual
     unexpected = RETIRED_ROUTES & actual
+    leaked_runtime = M3_RUNTIME_ROUTES & actual
     assert not missing, f"missing M2 baseline routes: {sorted(missing)}"
     assert not unexpected, f"retired routes still exposed: {sorted(unexpected)}"
+    assert not leaked_runtime, f"M3 runtime routes leaked into M2: {sorted(leaked_runtime)}"
 
 
 def test_commands_list_contains_m2_new_routes(m2_editor):

@@ -1,19 +1,12 @@
+from e2e.route_manifests import M5_ROUTES
+
 from .conftest import command_doc, exec_error, exec_ok
 
 
 def test_m5_route_families_are_registered(m5_editor):
     routes = set(exec_ok(m5_editor, "gdapi/routes")["routes"])
-    expected = {
-        "project/settings/get", "project/settings/set", "project/settings/list", "project/settings/reset",
-        "project/input_map/list", "project/input_map/action/add", "project/input_map/action/remove",
-        "project/input_map/bind", "project/input_map/unbind", "project/autoload/list",
-        "project/autoload/add", "project/autoload/remove", "classdb/classes", "classdb/class",
-        "classdb/methods", "classdb/properties", "classdb/signals", "classdb/inheriters", "uid/repair",
-        "diagnostics/health", "diagnostics/unused_resources", "diagnostics/cycle_deps", "diagnostics/script_errors",
-        "export/presets", "export/run", "export/android/devices", "export/android/deploy",
-    }
-    assert expected <= routes
-    for route in sorted(expected):
+    assert M5_ROUTES <= routes
+    for route in sorted(M5_ROUTES):
         doc = command_doc(m5_editor, route)
         assert doc["summary"] and doc["returns"]["fields"]
 
