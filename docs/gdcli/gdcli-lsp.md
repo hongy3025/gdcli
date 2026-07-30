@@ -1,3 +1,4 @@
+
 # gdcli lsp — LSP 代码智能操作
 
 通过 Godot 内置 LSP 服务器操作代码。需要编辑器运行中。
@@ -51,6 +52,7 @@ gdcli lsp definition player.gd:Player.Inventory.name
 | 默认 | `gdcli lsp native-symbol Node3D` | 类名、签名、描述全文 |
 | `--members` | `gdcli lsp native-symbol --members Node3D` | 按 Constants/Properties/Signals/Methods 分组列表 |
 | `--full` | `gdcli lsp native-symbol --full Node3D` | 所有成员完整展开（detail + 全部 documentation） |
-| 查询成员 | `gdcli lsp native-symbol Node3D get_parent` | 单个成员详情 |
+| 查询成员 | `gdcli lsp native-symbol Node3D get_parent
+` | 单个成员详情 |
 
 `--members` 与 `--full` 互斥。`--json` 模式下输出完整 JSON，不受 flag 影响。
