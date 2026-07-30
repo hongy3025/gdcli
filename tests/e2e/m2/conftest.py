@@ -1,7 +1,8 @@
-"""M2 E2E test fixtures — isolated Godot editor per test."""
+"""M2 E2E test fixtures — module-scoped editor with per-test reset."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -39,7 +40,53 @@ def _gdcli_ping(env_root: Path, godot_bin: str) -> bool:
         return False
 
 
-@pytest.fixture
+def project_snapshot(project: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(project.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(project)).replace("\\", "/")
+        if rel.startswith(".godot/") or rel.startswith("addons/gdapi/bin/"):
+            continue
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def reset_project_state(env: dict[str, Any]) -> None:
+    project = Path(env["project"])
+    fixture_root = Path(env["fixture_root"])
+    shutil.copytree(fixture_root, project, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".godot"))
+    subprocess.run(
+        [str(env["gdcli"]), "--json", "exec", "project/stop", "--project", str(project)],
+        capture_output=True, check=False,
+    )
+    subprocess.run(
+        [str(env["gdcli"]), "--json", "exec", "scene/open",
+         "--project", str(project),
+         "--data", json.dumps({"scene_path": "res://main.tscn"})],
+        capture_output=True, check=False,
+    )
+    subprocess.run(
+        [str(env["gdcli"]), "--json", "exec", "editor/selection/set",
+         "--project", str(project), "--data", json.dumps({"nodes": []})],
+        capture_output=True, check=False,
+    )
+    subprocess.run(
+        [str(env["gdcli"]), "--json", "exec", "gdapi/audit/clear",
+         "--project", str(project), "--data", json.dumps({"force": True})],
+        capture_output=True, check=False,
+    )
+    subprocess.run(
+        [str(env["gdcli"]), "install", "--project", str(project), "--force"],
+        capture_output=True, check=False,
+    )
+
+
+@pytest.fixture(scope="module")
 def m2_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     root = repo_root()
     godot_bin = resolve_godot_bin()
@@ -81,8 +128,6 @@ def m2_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         godot_log_handle.close()
         raise
 
-    # Wait until the gdcli HTTP round-trip succeeds. Metadata appears before the
-    # server becomes fully responsive so we need to actively probe.
     deadline = time.time() + 60.0
     ready = False
     last_error = ""
@@ -101,9 +146,6 @@ def m2_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         godot_log_handle.close()
         raise RuntimeError(f"gdapi ping never succeeded within 60s: {last_error}")
 
-    # Wait for EditorUndoRedoManager to be fully initialized before proceeding.
-    # Writes (node/property/set, script/create, filesystem/write, etc.) hang if
-    # called before the editor finishes loading its docks and layout.
     wait_for_godot_ready(base)
 
     env = {
@@ -126,3 +168,12 @@ def m2_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             godot.kill()
         godot_log_handle.close()
+
+
+@pytest.fixture(autouse=True)
+def isolated_test_state(m2_editor):
+    before = project_snapshot(Path(m2_editor["project"]))
+    yield
+    reset_project_state(m2_editor)
+    after = project_snapshot(Path(m2_editor["project"]))
+    assert after == before, "M2 project state changed after test"
