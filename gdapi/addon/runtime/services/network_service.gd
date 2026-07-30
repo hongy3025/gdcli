@@ -70,6 +70,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 		"done": false,
 		"redirects": 0,
 		"visited": {spec.url: true},
+		"current_url": spec.url,
 		"headers": request_headers,
 		"method": HTTPClient.METHOD_GET if spec.method == "GET" else HTTPClient.METHOD_HEAD,
 		"body": spec.body,
@@ -84,7 +85,9 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 				and response_code >= 300
 				and response_code < 400
 			):
-				var location := _header_value(headers, "location")
+				var location := _resolve_redirect_url(
+					String(state.current_url), _header_value(headers, "location")
+				)
 				if location.is_empty() or int(state.redirects) >= int(spec.max_redirects):
 					state.done = true
 					state["outcome"] = {
@@ -112,6 +115,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 					return
 				state.redirects += 1
 				state.visited[target.url] = true
+				state.current_url = target.url
 				var redirect_error := node.request(
 					target.url, state.headers, state.method, state.body
 				)
@@ -180,6 +184,35 @@ static func _header_value(headers: PackedStringArray, wanted: String) -> String:
 		if separator > 0 and header.left(separator).strip_edges().to_lower() == wanted:
 			return header.substr(separator + 1).strip_edges()
 	return ""
+
+
+static func _resolve_redirect_url(current_url: String, location: String) -> String:
+	var target := location.strip_edges()
+	if target.is_empty() or target.contains("#"):
+		return ""
+	if target.contains("://"):
+		return target
+	var scheme_end := current_url.find("://")
+	if scheme_end < 0:
+		return ""
+	var scheme := current_url.left(scheme_end)
+	var authority_start := scheme_end + 3
+	var path_start := current_url.find("/", authority_start)
+	var authority := (
+		current_url.substr(authority_start)
+		if path_start < 0
+		else current_url.substr(authority_start, path_start - authority_start)
+	)
+	if target.begins_with("//"):
+		return "%s:%s" % [scheme, target]
+	if target.begins_with("/"):
+		return "%s://%s%s" % [scheme, authority, target]
+	var base_path := "/"
+	if path_start >= 0:
+		base_path = current_url.substr(path_start)
+	var directory_end := base_path.rfind("/")
+	var directory := "/" if directory_end < 0 else base_path.left(directory_end + 1)
+	return "%s://%s%s%s" % [scheme, authority, directory, target]
 
 
 static func _error(code: String, message: String) -> Dictionary:

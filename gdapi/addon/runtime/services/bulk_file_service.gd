@@ -332,10 +332,19 @@ static func _hash_plan(value: Variant) -> String:
 static func _rollback_manifest(manifest: Array) -> void:
 	for index in range(manifest.size() - 1, -1, -1):
 		var entry: Dictionary = manifest[index]
-		DirAccess.rename_absolute(
-			ProjectSettings.globalize_path(entry.trash),
-			ProjectSettings.globalize_path(entry.source)
-		)
+		if FileAccess.file_exists(ProjectSettings.globalize_path(entry.trash)):
+			DirAccess.rename_absolute(
+				ProjectSettings.globalize_path(entry.trash),
+				ProjectSettings.globalize_path(entry.source)
+			)
+		if (
+			entry.has("uid_trash")
+			and FileAccess.file_exists(ProjectSettings.globalize_path(entry.uid_trash))
+		):
+			DirAccess.rename_absolute(
+				ProjectSettings.globalize_path(entry.uid_trash),
+				ProjectSettings.globalize_path(entry.uid_source)
+			)
 
 
 static func _error(code: String, message: String) -> Dictionary:
