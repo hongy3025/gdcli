@@ -60,7 +60,6 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 		return _error(ErrorCodes.GODOT_ERROR, "plugin is unavailable")
 	var node := HTTPRequest.new()
 	node.timeout = float(spec.timeout_ms) / 1000.0
-	node.body_size_limit = spec.max_response_bytes
 	node.max_redirects = 0
 	plugin.add_child(node)
 	var request_headers: PackedStringArray = []
@@ -82,11 +81,12 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 		func(result, response_code, headers, body):
 			if state.done:
 				return
-			if (
-				result == HTTPRequest.RESULT_SUCCESS
-				and response_code >= 300
-				and response_code < 400
-			):
+			var is_redirect = response_code >= 300 and response_code < 400
+			if is_redirect:
+				result = HTTPRequest.RESULT_SUCCESS
+			elif result != HTTPRequest.RESULT_SUCCESS:
+				is_redirect = false
+			if result == HTTPRequest.RESULT_SUCCESS and is_redirect:
 				var location := _resolve_redirect_url(
 					String(state.current_url), _header_value(headers, "location")
 				)
@@ -118,6 +118,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 				state.redirects += 1
 				state.visited[target.url] = true
 				state.current_url = target.url
+				node.cancel_request()
 				var redirect_error := node.request(
 					target.url, state.headers, state.method, state.body
 				)
@@ -154,6 +155,10 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 				)
 			else:
 				state["outcome"] = {"ok": true, "code": "", "summary": "HTTP request completed"}
+				var truncated := false
+				if body.size() > spec.max_response_bytes:
+					body = body.slice(0, spec.max_response_bytes)
+					truncated = true
 				var context := HashingContext.new()
 				context.start(HashingContext.HASH_SHA256)
 				context.update(body)
@@ -167,7 +172,8 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 						"body_base64": encoded,
 						"size": body.size(),
 						"sha256": digest,
-						"redirects": 0,
+						"redirects": state.redirects,
+						"truncated": truncated,
 						"undoable": false
 					}
 				)

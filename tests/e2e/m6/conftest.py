@@ -5,7 +5,9 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -20,31 +22,91 @@ from e2e.m3.conftest import attach_editor, command_doc, exec_error, exec_ok, det
 
 M6_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m6_project"
 
+M6_HTTP_PORT: int = 18923
+
 M6_EVAL_POLICY = {
-    "runtime_eval": {
-        "enabled": True, "max_source_bytes": 16384,
-        "allowed_input_keys": ["runtime_marker"],
-    },
-    "editor_eval": {
-        "enabled": True, "max_source_bytes": 16384,
-        "allowed_input_keys": ["runtime_marker"],
-    },
-    "process_run": {
-        "enabled": True, "executables": ["sleep"], "cwd_roots": ["res://tools"],
-        "max_timeout_ms": 5000, "max_output_bytes": 65536,
-    },
-    "filesystem_batch": {
-        "enabled": True, "roots": ["res://bulk"],
-    },
-    "network_http_request": {
-        "enabled": True, "schemes": ["http"], "hosts": ["127.0.0.1", "localhost"],
-        "ports": [80, 443], "max_timeout_ms": 5000, "max_response_bytes": 1048576,
-        "max_redirects": 5, "allow_private": True,
-    },
-    "export_android_deploy_many": {
-        "enabled": True, "apk_root": "res://build", "package": "org.example",
+    "version": 1,
+    "capabilities": {
+        "runtime_eval": {
+            "enabled": True, "max_source_bytes": 16384,
+            "allowed_input_keys": ["runtime_marker"],
+        },
+        "editor_eval": {
+            "enabled": True, "max_source_bytes": 16384,
+            "allowed_input_keys": ["runtime_marker"],
+        },
+        "process": {
+            "enabled": True, "executables": ["sleep", "sleep.cmd", "echo_args", "echo_args.cmd", "echo_args.py"],
+            "cwd_roots": ["res://tools"],
+            "max_timeout_ms": 5000, "max_output_bytes": 65536,
+        },
+        "network": {
+            "enabled": True, "schemes": ["http"], "hosts": ["127.0.0.1", "localhost"],
+            "ports": [80, 443], "max_timeout_ms": 5000, "max_response_bytes": 1048576,
+            "max_redirects": 5, "allow_private": True,
+        },
     },
 }
+
+
+class _EchoHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/ok":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"payload-ok")
+        elif self.path == "/large":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"x" * 2048)
+            self.wfile.flush()
+        elif self.path == "/delay":
+            time.sleep(10)
+            self.send_response(200)
+            self.end_headers()
+        elif self.path == "/redirect-ok":
+            self.send_response(302)
+            self.send_header("Location", "/ok")
+            self.send_header("Connection", "close")
+            self.end_headers()
+        elif self.path == "/redirect-private":
+            self.send_response(302)
+            self.send_header("Location", "http://10.0.0.1/")
+            self.send_header("Connection", "close")
+            self.end_headers()
+        elif self.path == "/redirect-loop":
+            self.send_response(302)
+            self.send_header("Location", "/redirect-loop")
+            self.send_header("Connection", "close")
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+
+class _ServerRef:
+    def __init__(self, port: int) -> None:
+        self.port = port
+
+    def url(self, path: str) -> str:
+        return f"http://127.0.0.1:{self.port}{path}"
+
+
+@pytest.fixture(scope="module")
+def local_http_server() -> _ServerRef:
+    server = HTTPServer(("127.0.0.1", M6_HTTP_PORT), _EchoHandler)
+    port: int = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield _ServerRef(port)
+    finally:
+        server.shutdown()
 
 
 @pytest.fixture(scope="module")
@@ -79,6 +141,42 @@ def latest_audit(env: dict[str, Any], route: str) -> dict[str, Any]:
     if not matching:
         raise AssertionError(f"No audit entries found for route {route}")
     return matching[-1]
+
+
+def audit_for_route(env: dict[str, Any], route: str) -> list[dict[str, Any]]:
+    entries = exec_ok(env, "gdapi/audit/list", {"limit": 100}).get("entries", [])
+    return [e for e in entries if e.get("route") == route]
+
+
+@pytest.fixture(scope="module")
+def m6_editor_process(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    godot_bin = resolve_godot_bin()
+    require_godot_47(godot_bin)
+    project = tmp_path_factory.mktemp("m6_editor_process") / "project"
+    shutil.copytree(M6_FIXTURE_SOURCE, project)
+    policy_dir = project / ".godot"
+    policy_dir.mkdir(parents=True, exist_ok=True)
+    (policy_dir / "gdapi-policy.json").write_text(
+        json.dumps(M6_EVAL_POLICY), encoding="utf-8"
+    )
+    install = subprocess.run(
+        [str(gdcli_bin()), "install", "--project", str(project), "--force"],
+        capture_output=True, encoding="utf-8", errors="replace",
+    )
+    assert install.returncode == 0, install.stderr
+    log_path = project / ".godot" / "godot.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = log_path.open("w", encoding="utf-8")
+    env: dict[str, Any] = {"project": project, "godot_bin": godot_bin,
+                            "gdcli": gdcli_bin(), "godot_log": log_handle,
+                            "godot_log_path": log_path}
+    godot, meta = attach_editor(project, godot_bin, log_handle)
+    env.update({"godot": godot, "meta": meta})
+    try:
+        yield env
+    finally:
+        detach_editor(env)
+        log_handle.close()
 
 
 @pytest.fixture(scope="module")
@@ -141,6 +239,52 @@ def _wait_stopped(env: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
+def m6_editor_network(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    godot_bin = resolve_godot_bin()
+    require_godot_47(godot_bin)
+    project = tmp_path_factory.mktemp("m6_editor_network") / "project"
+    shutil.copytree(M6_FIXTURE_SOURCE, project)
+    policy_dir = project / ".godot"
+    policy_dir.mkdir(parents=True, exist_ok=True)
+    network_policy = {
+        "version": 1,
+        "capabilities": {
+            "network": {
+                "enabled": True,
+                "schemes": ["http"],
+                "hosts": ["127.0.0.1", "localhost"],
+                "ports": [80, 443, M6_HTTP_PORT],
+                "allow_private": True,
+                "max_redirects": 5,
+                "max_timeout_ms": 5000,
+                "max_response_bytes": 1048576,
+            },
+        },
+    }
+    (policy_dir / "gdapi-policy.json").write_text(
+        json.dumps(network_policy), encoding="utf-8"
+    )
+    install = subprocess.run(
+        [str(gdcli_bin()), "install", "--project", str(project), "--force"],
+        capture_output=True, encoding="utf-8", errors="replace",
+    )
+    assert install.returncode == 0, install.stderr
+    log_path = project / ".godot" / "godot.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = log_path.open("w", encoding="utf-8")
+    env: dict[str, Any] = {"project": project, "godot_bin": godot_bin,
+                            "gdcli": gdcli_bin(), "godot_log": log_handle,
+                            "godot_log_path": log_path}
+    godot, meta = attach_editor(project, godot_bin, log_handle)
+    env.update({"godot": godot, "meta": meta})
+    try:
+        yield env
+    finally:
+        detach_editor(env)
+        log_handle.close()
+
+
+@pytest.fixture(scope="module")
 def m6_runtime_eval_running(m6_editor_eval: dict[str, Any]) -> dict[str, Any]:
     project_run(m6_editor_eval)
     _wait_for_game_running(m6_editor_eval)
@@ -193,7 +337,8 @@ def stop_game(env: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "command_doc", "exec_error", "exec_ok", "latest_audit",
-    "m6_editor", "m6_editor_eval", "m6_runtime_eval_running",
+    "audit_for_route", "command_doc", "exec_error", "exec_ok", "latest_audit",
+    "local_http_server", "m6_editor", "m6_editor_eval",
+    "m6_editor_network", "m6_editor_process", "m6_runtime_eval_running",
     "start_async_exec", "stop_game",
 ]

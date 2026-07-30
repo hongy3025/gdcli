@@ -88,6 +88,11 @@ func _task_outcome(task: Dictionary) -> Dictionary:
 	var outcome: Variant = task.get("outcome", null)
 	if typeof(outcome) == TYPE_DICTIONARY:
 		return outcome
+	var state: Variant = task.get("state", null)
+	if typeof(state) == TYPE_DICTIONARY:
+		outcome = state.get("outcome", null)
+		if typeof(outcome) == TYPE_DICTIONARY:
+			return outcome
 	return {"ok": _response_is_sent(task["response"]), "code": "", "summary": "completed"}
 
 

@@ -39,7 +39,12 @@ static func authorize(
 		var pattern := String(item)
 		if pattern.begins_with("*.") and host.ends_with("." + pattern.trim_prefix("*.")):
 			allowed = true
-	if not allowed or not policy.get("ports", []).has(port):
+	var port_allowed := false
+	for p in policy.get("ports", []):
+		if int(p) == port:
+			port_allowed = true
+			break
+	if not allowed or not port_allowed:
 		return _error(ErrorCodes.PERMISSION_DENIED, "network target is not allowed")
 	var addresses: Array = []
 	if resolver.is_valid():
