@@ -55,7 +55,6 @@ static func resolve(path: String) -> Dictionary:
 static func describe_tree(node: Node, max_depth: int, depth: int = 0) -> Dictionary:
 	var item := {
 		"name": node.name,
-		"path": str(node.get_path()),
 		"type": node.get_class(),
 		"scene_file_path": node.scene_file_path,
 		"children": [],
