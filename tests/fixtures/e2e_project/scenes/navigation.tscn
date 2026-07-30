@@ -1,0 +1,12 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_domain"]
+vertices = PackedVector2Array(-50, -50, 150, -50, 150, 50, -50, 50)
+polygons = [PackedInt32Array(0, 1, 2, 3)]
+
+[node name="NavigationDomain" type="Node2D"]
+
+[node name="Region" type="NavigationRegion2D" parent="."]
+navigation_polygon = SubResource("NavigationPolygon_domain")
+
+[node name="Agent" type="NavigationAgent2D" parent="."]

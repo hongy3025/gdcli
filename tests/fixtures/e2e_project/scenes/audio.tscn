@@ -1,0 +1,5 @@
+[gd_scene format=3]
+
+[node name="AudioDomain" type="Node"]
+
+[node name="Tone" type="AudioStreamPlayer" parent="."]

@@ -1,0 +1,7 @@
+[gd_resource type="AudioStreamWAV" format=3]
+
+[resource]
+format = 1
+mix_rate = 44100.0
+stereo = false
+data = PackedByteArray()

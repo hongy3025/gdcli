@@ -1,0 +1,36 @@
+; Unified E2E fixture — merges M2–M6 assets under one project root.
+;
+; One project powers the entire pytest session: every capability is enabled by
+; default, and tests that need to deny a capability use the temporary_policy
+; context manager from tests/e2e/shared_fixture.py.
+config_version=5
+
+[application]
+
+config/name="gdcli_e2e_fixture"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+GdApiRuntimeProbe="*res://addons/gdapi/runtime/runtime_probe.gd"
+M5FixtureState="*res://fixtures/state.gd"
+
+[display]
+
+window/size/viewport_width=320
+window/size/viewport_height=180
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdapi/plugin.cfg", "res://addons/gdapi_test/plugin.cfg")
+
+[gdapi]
+
+runtime_force_file_transport=true
+runtime_probe_hello_delay_ms=250
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
