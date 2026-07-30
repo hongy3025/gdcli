@@ -609,6 +609,18 @@ def finalize_m3_session(env: dict[str, Any]) -> None:
 _noop_attach  # type: ignore[func-returns-value]
 
 
+
+
+@pytest.fixture(autouse=True)
+def reset_shared_m3_data_plane(request: pytest.FixtureRequest):
+    """Reset the shared game before each test that requests m3_running."""
+    if "m3_running" in request.fixturenames:
+        env = request.getfixturevalue("m3_running")
+        from .conftest import reset_fixture
+        reset_fixture(env)
+    yield
+
+
 __all__ = [
     "DIAGNOSTIC_FIELDS",
     "HarnessFailure",
@@ -629,6 +641,7 @@ __all__ = [
     "project_run",
     "project_stop",
     "reset_fixture",
+    "reset_shared_m3_data_plane",
     "reset_shared_state",
     "runtime_counter",
     "runtime_route_source",

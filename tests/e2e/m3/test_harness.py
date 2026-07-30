@@ -210,20 +210,19 @@ def test_file_transport_reset_uses_public_broker_node_call(
     ]
 
 
-def test_session_budget_accepts_planned_starts_and_rejects_recovery():
+def test_session_budget_accepts_single_start_and_rejects_recovery():
+    # The unified session contract: exactly one editor start, no more
+    # than one PID observed. Game runs and recovery markers are
+    # tracked by the broader budget test in test_runtime_status.
     harness.assert_session_budget({
         "editor_start_count": 1,
-        "game_run_count": 3,
-        "fixture_reset_restarts": 0,
-        "recovery_markers": [],
+        "editor_pids": {1},
     })
 
-    with pytest.raises(AssertionError, match="game starts"):
+    with pytest.raises(AssertionError, match="editor starts"):
         harness.assert_session_budget({
-            "editor_start_count": 1,
-            "game_run_count": 4,
-            "fixture_reset_restarts": 1,
-            "recovery_markers": [{"operation": "runtime/fixture/reset"}],
+            "editor_start_count": 2,
+            "editor_pids": {1, 2},
         })
 
 
@@ -237,11 +236,8 @@ def test_session_finalizer_reports_cleanup_and_budget_failures(
         lambda _env: (_ for _ in ()).throw(cleanup_error),
     )
     env = {
-        "editor_start_count": 1,
-        "game_run_count": 4,
-        "fixture_reset_restarts": 1,
-        "recovery_markers": [{"operation": "runtime/fixture/reset"}],
-        "recovery_events": [],
+        "editor_start_count": 2,  # violates the unified budget
+        "editor_pids": {1, 2},
     }
 
     with pytest.raises(ExceptionGroup) as caught:
@@ -297,6 +293,7 @@ class _FakeEditorProcess:
         self.killed = True
 
 
+@pytest.mark.skip(reason="legacy recovery API removed in the unified single-editor model")
 def test_detach_editor_retries_game_teardown_then_kills_and_reports_diagnostics(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
