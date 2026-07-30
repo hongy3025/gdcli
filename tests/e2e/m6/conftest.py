@@ -239,6 +239,43 @@ def _wait_stopped(env: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
+def m6_editor_bulk(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    godot_bin = resolve_godot_bin()
+    require_godot_47(godot_bin)
+    project = tmp_path_factory.mktemp("m6_editor_bulk") / "project"
+    shutil.copytree(M6_FIXTURE_SOURCE, project)
+    policy_dir = project / ".godot"
+    policy_dir.mkdir(parents=True, exist_ok=True)
+    (policy_dir / "gdapi-policy.json").write_text(
+        json.dumps({
+            "version": 1,
+            "capabilities": {
+                "bulk_files": {"enabled": True},
+            },
+        }),
+        encoding="utf-8",
+    )
+    install = subprocess.run(
+        [str(gdcli_bin()), "install", "--project", str(project), "--force"],
+        capture_output=True, encoding="utf-8", errors="replace",
+    )
+    assert install.returncode == 0, install.stderr
+    log_path = project / ".godot" / "godot.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = log_path.open("w", encoding="utf-8")
+    env: dict[str, Any] = {"project": project, "godot_bin": godot_bin,
+                            "gdcli": gdcli_bin(), "godot_log": log_handle,
+                            "godot_log_path": log_path}
+    godot, meta = attach_editor(project, godot_bin, log_handle)
+    env.update({"godot": godot, "meta": meta})
+    try:
+        yield env
+    finally:
+        detach_editor(env)
+        log_handle.close()
+
+
+@pytest.fixture(scope="module")
 def m6_editor_network(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     godot_bin = resolve_godot_bin()
     require_godot_47(godot_bin)
@@ -330,15 +367,85 @@ def start_async_exec(
 
 
 def stop_game(env: dict[str, Any]) -> dict[str, Any]:
-    project_stop(env)
-    result = _wait_stopped(env)
-    env["game_attached"] = False
-    return result
+	project_stop(env)
+	result = _wait_stopped(env)
+	env["game_attached"] = False
+	return result
+
+
+# ── bulk file test helpers ─────────────────────────────────────────────
+
+def project_file(env: dict[str, Any], rel: str) -> Path:
+	return Path(env["project"]) / rel
+
+
+def replace_plan(
+	env: dict[str, Any], root: str, find: str, replace: str,
+) -> dict[str, Any]:
+	plan = exec_ok(env, "filesystem/batch/replace", {
+		"root": root, "find": find, "replace": replace,
+		"dry_run": True, "force": True,
+	})
+	plan["_root"] = root
+	plan["_find"] = find
+	plan["_replace"] = replace
+	return plan
+
+
+def apply_replace(env: dict[str, Any], plan: dict) -> dict[str, Any]:
+	return _exec_raw(env, "filesystem/batch/replace", {
+		"root": plan["_root"], "find": plan["_find"],
+		"replace": plan["_replace"],
+		"plan_hash": plan["plan_hash"], "force": True,
+	})
+
+
+def inject_apply_failure(env: dict[str, Any], fail_after: int) -> None:
+	exec_ok(env, "filesystem/write", {
+		"path": "res://.gdapi-debug-apply-fail",
+		"content": str(fail_after),
+		"force": True,
+	})
+
+
+def bulk_digest(env: dict[str, Any]) -> str:
+	import hashlib
+	bulk_dir = project_file(env, "bulk")
+	if not bulk_dir.is_dir():
+		return hashlib.sha256(b"").hexdigest()
+	files = sorted(bulk_dir.iterdir(), key=lambda p: p.name)
+	h = hashlib.sha256()
+	for f in files:
+		if f.is_file():
+			h.update(f.name.encode())
+			h.update(b"\x00")
+			h.update(f.read_bytes())
+	return h.hexdigest()
+
+
+def delete_plan(env: dict[str, Any], paths: list[str]) -> dict[str, Any]:
+	plan = exec_ok(env, "filesystem/batch/delete", {
+		"paths": paths, "dry_run": True, "force": True,
+	})
+	plan["_paths"] = paths
+	return plan
+
+
+def apply_delete(env: dict[str, Any], plan: dict) -> dict[str, Any]:
+	return _exec_raw(env, "filesystem/batch/delete", {
+		"paths": plan["_paths"],
+		"plan_hash": plan["plan_hash"], "force": True,
+	})
 
 
 __all__ = [
-    "audit_for_route", "command_doc", "exec_error", "exec_ok", "latest_audit",
-    "local_http_server", "m6_editor", "m6_editor_eval",
-    "m6_editor_network", "m6_editor_process", "m6_runtime_eval_running",
-    "start_async_exec", "stop_game",
+	"apply_delete", "apply_replace",
+	"audit_for_route", "bulk_digest",
+	"command_doc", "delete_plan",
+	"exec_error", "exec_ok",
+	"inject_apply_failure", "latest_audit",
+	"local_http_server", "m6_editor", "m6_editor_bulk", "m6_editor_eval",
+	"m6_editor_network", "m6_editor_process", "m6_runtime_eval_running",
+	"project_file", "replace_plan",
+	"start_async_exec", "stop_game",
 ]

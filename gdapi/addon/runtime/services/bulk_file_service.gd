@@ -135,8 +135,13 @@ static func replace(body: Dictionary) -> Dictionary:
 		operation["backup"] = stage_root.path_join("backups").path_join("%d" % index)
 		matches[index] = operation
 		changed += int(operation.replacements)
+	var debug_fail_after := _debug_fail_after()
 	var applied: Array = []
 	for index in range(matches.size()):
+		if debug_fail_after >= 0 and index >= debug_fail_after:
+			_rollback_replace(matches, applied)
+			_cleanup_replace_stage(stage_root)
+			return _error(ErrorCodes.GODOT_ERROR, "injected failure for testing")
 		var operation: Dictionary = matches[index]
 		if (
 			DirAccess.rename_absolute(
@@ -346,6 +351,20 @@ static func _rollback_manifest(manifest: Array) -> void:
 				ProjectSettings.globalize_path(entry.uid_trash),
 				ProjectSettings.globalize_path(entry.uid_source)
 			)
+
+
+static func _debug_fail_after() -> int:
+	var path := ProjectSettings.globalize_path("res://.gdapi-debug-apply-fail")
+	if not FileAccess.file_exists(path):
+		return -1
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return -1
+	var text := f.get_as_text().strip_edges()
+	f.close()
+	if text.is_empty() or not text.is_valid_int():
+		return -1
+	return int(text)
 
 
 static func _error(code: String, message: String) -> Dictionary:
