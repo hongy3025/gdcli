@@ -57,7 +57,8 @@ def pytest_collection_modifyitems(items):
     """Bound deadlocks and reorder collected tests by wall-time bucket."""
     timeout_marker = pytest.mark.timeout(E2E_DEADLOCK_TIMEOUT_SECONDS)
     for item in items:
-        item.add_marker(timeout_marker)
+        if item.get_closest_marker("budget") is None:
+            item.add_marker(timeout_marker)
     # Reorder the items in place by wall-time bucket so fast contract /
     # lightweight tests fire first and slow paths sit at the back. See
     # `tests/e2e/test_collection_order.py` for the contract.

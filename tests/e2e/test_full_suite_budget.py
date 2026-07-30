@@ -3,7 +3,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+
 BUDGET_SECONDS = 6 * 60
+pytestmark = [
+    pytest.mark.budget,
+    pytest.mark.timeout(BUDGET_SECONDS + 30),
+]
 
 
 def test_full_suite_under_budget():
