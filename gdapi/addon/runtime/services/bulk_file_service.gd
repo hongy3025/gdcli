@@ -7,6 +7,7 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const MAX_FILES := 1000
 const MAX_REPLACEMENTS := 10000
 const TRASH_ROOT := "res://.godot/gdapi-trash"
+const REPLACE_STAGE_ROOT := "res://.godot/gdapi-replace"
 
 
 static func delete(body: Dictionary) -> Dictionary:
@@ -101,10 +102,17 @@ static func replace(body: Dictionary) -> Dictionary:
 		return _error(ErrorCodes.UNSAFE_OPERATION, "batch replace requires force:true")
 	if String(body.get("plan_hash", "")) != plan.plan_hash:
 		return _error(ErrorCodes.CONFLICT, "plan_hash does not match current files")
+	var operation_id := "%s-%s" % [Time.get_unix_time_from_system(), randi()]
+	var stage_root := "%s/%s" % [REPLACE_STAGE_ROOT, operation_id]
+	var stage_dir := ProjectSettings.globalize_path(stage_root)
+	DirAccess.make_dir_recursive_absolute(stage_dir.path_join("staged"))
+	DirAccess.make_dir_recursive_absolute(stage_dir.path_join("backups"))
 	var changed := 0
-	for operation in matches:
+	for index in range(matches.size()):
+		var operation: Dictionary = matches[index]
 		var file := FileAccess.open(ProjectSettings.globalize_path(operation.path), FileAccess.READ)
 		if file == null:
+			_cleanup_replace_stage(stage_root)
 			return _error(ErrorCodes.CONFLICT, "source changed during apply")
 		var text := file.get_as_text()
 		file.close()
@@ -112,22 +120,45 @@ static func replace(body: Dictionary) -> Dictionary:
 			FileAccess.get_sha256(ProjectSettings.globalize_path(operation.path))
 			!= operation.sha256
 		):
+			_cleanup_replace_stage(stage_root)
 			return _error(ErrorCodes.CONFLICT, "source changed during apply")
 		var output := text.replace(find_text, replacement)
-		var tmp := operation.path + ".gdcli-replace-tmp"
-		var out := FileAccess.open(ProjectSettings.globalize_path(tmp), FileAccess.WRITE)
+		var staged := stage_root.path_join("staged").path_join("%d" % index)
+		var out := FileAccess.open(ProjectSettings.globalize_path(staged), FileAccess.WRITE)
 		if out == null:
+			_cleanup_replace_stage(stage_root)
 			return _error(ErrorCodes.GODOT_ERROR, "cannot stage replacement")
 		out.store_string(output)
 		out.close()
+		operation["staged"] = staged
+		operation["backup"] = stage_root.path_join("backups").path_join("%d" % index)
+		matches[index] = operation
+		changed += int(operation.replacements)
+	var applied: Array = []
+	for index in range(matches.size()):
+		var operation: Dictionary = matches[index]
 		if (
 			DirAccess.rename_absolute(
-				ProjectSettings.globalize_path(tmp), ProjectSettings.globalize_path(operation.path)
+				ProjectSettings.globalize_path(operation.path),
+				ProjectSettings.globalize_path(operation.backup)
 			)
 			!= OK
 		):
-			return _error(ErrorCodes.GODOT_ERROR, "cannot apply replacement")
-		changed += int(operation.replacements)
+			_rollback_replace(matches, applied)
+			_cleanup_replace_stage(stage_root)
+			return _error(ErrorCodes.GODOT_ERROR, "batch replace rolled back")
+		if (
+			DirAccess.rename_absolute(
+				ProjectSettings.globalize_path(operation.staged),
+				ProjectSettings.globalize_path(operation.path)
+			)
+			!= OK
+		):
+			_rollback_replace(matches, applied + [index])
+			_cleanup_replace_stage(stage_root)
+			return _error(ErrorCodes.GODOT_ERROR, "batch replace rolled back")
+		applied.append(index)
+	_cleanup_replace_stage(stage_root)
 	return {
 		"ok": true,
 		"changed": changed > 0,
@@ -136,6 +167,37 @@ static func replace(body: Dictionary) -> Dictionary:
 		"replacements": changed,
 		"plan_hash": plan.plan_hash
 	}
+
+
+static func _rollback_replace(matches: Array, applied: Array) -> void:
+	for raw_index in range(applied.size() - 1, -1, -1):
+		var index := int(applied[raw_index])
+		var operation: Dictionary = matches[index]
+		var target := ProjectSettings.globalize_path(operation.path)
+		var backup := ProjectSettings.globalize_path(operation.backup)
+		if FileAccess.file_exists(target):
+			DirAccess.remove_absolute(target)
+		if FileAccess.file_exists(backup):
+			DirAccess.rename_absolute(backup, target)
+
+
+static func _cleanup_replace_stage(stage_root: String) -> void:
+	_remove_tree(
+		ProjectSettings.globalize_path(stage_root),
+		ProjectSettings.globalize_path(REPLACE_STAGE_ROOT)
+	)
+
+
+static func _remove_tree(path: String, root: String) -> void:
+	if path != root and not path.begins_with(root + "/"):
+		return
+	var dir := DirAccess.open(path)
+	if dir != null:
+		for file_name in dir.get_files():
+			DirAccess.remove_absolute(path.path_join(file_name))
+		for dir_name in dir.get_directories():
+			_remove_tree(path.path_join(dir_name), root)
+	DirAccess.remove_absolute(path)
 
 
 static func recover(operation_id: String) -> Dictionary:
