@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn max_header_bytes_is_smaller_than_max_body() {
         assert_eq!(MAX_HEADER_BYTES, 32 * 1024);
-        assert!(MAX_HEADER_BYTES < MAX_BODY);
+        const _: () = assert!(MAX_HEADER_BYTES < MAX_BODY);
     }
 
     #[test]
