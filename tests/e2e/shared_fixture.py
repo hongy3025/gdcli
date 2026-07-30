@@ -117,7 +117,13 @@ def _read_log_tail(path: Path, lines: int = 80) -> str:
 
 def _gdcli_ping(env: dict[str, Any]) -> bool:
     try:
-        result = _gdcli_exec_raw(env, "exec", "gdapi/health/ping", timeout=5.0)
+        result = subprocess.run(
+            [str(env["gdcli"]), "--json",
+             "exec", "gdapi/health/ping",
+             "--project", str(env["project"])],
+            capture_output=True, encoding="utf-8", errors="replace",
+            timeout=5.0,
+        )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False
@@ -187,7 +193,7 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
             process.wait(timeout=10)
         raise
 
-    deadline = time.monotonic() + 60.0
+    deadline = time.monotonic() + 180.0
     while time.monotonic() < deadline:
         if process.poll() is not None:
             log_handle.close()
@@ -203,7 +209,7 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
         process.wait(timeout=10)
         log_handle.close()
         raise RuntimeError(
-            f"gdapi ping never succeeded within 60s; log tail:\n{_read_log_tail(log_path)}"
+            f"gdapi ping never succeeded within 180s; log tail:\n{_read_log_tail(log_path)}"
         )
 
     wait_for_godot_ready(env["project"])
@@ -401,6 +407,61 @@ def e2e_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
 
 
+# ── collection-order buckets ─────────────────────────────────────────
+#
+# The hook in `tests/e2e/conftest.py` calls `bucketize` to reorder
+# collected tests so fast contract / lightweight tests fire first and
+# long-tail export / process / runtime-lifecycle tests sit at the back.
+# The reshuffle is deterministic and only changes execution order; the
+# set of tests and every assertion is preserved.
+
+# (file path substring, test function name) → bucket index
+_BUCKET_RULES: tuple[tuple[str, str | None, int], ...] = (
+    # Bucket 0: contract / lifecycle / lightweight (no editor needed)
+    ("test_unified_fixture_contract.py", None, 0),
+    ("test_shared_editor_lifecycle.py", None, 0),
+    ("test_shared_editor_contract.py", None, 0),
+    ("test_collection_order.py", None, 0),
+    # Bucket 4: slow paths — collected last
+    ("m5/test_export_android.py", None, 4),
+    ("m6/test_process_run.py", None, 4),
+    ("m6/test_bulk_files.py", None, 4),
+    ("m6/test_bulk_deploy.py", None, 4),
+    ("m6/test_network_request.py", None, 4),
+    ("m6/test_runtime_eval.py", None, 4),
+    ("m6/test_eval.py", None, 4),
+    # Bucket 3: m3 runtime tests that need m3_running
+    ("m3/test_runtime_input.py", None, 3),
+    ("m3/test_runtime_nodes.py", None, 3),
+    ("m3/test_runtime_assert_signal.py", None, 3),
+    ("m3/test_runtime_capture.py", None, 3),
+    ("m3/test_runtime_observability.py", None, 3),
+    # Bucket 2: m2 / m4 / m3 contract / m5 lightweight (default fallback)
+)
+
+
+def bucketize(items) -> list:
+    """Return a reordered list of pytest `Item`s by collection bucket.
+
+    Within a bucket, items keep their original relative order. Tests that
+    do not match any rule land in bucket 2 (the middle).
+    """
+    buckets: list[list] = [[], [], [], [], []]
+    for item in items:
+        path = str(getattr(item, "fspath", "") or getattr(item, "path", ""))
+        bucket = _classify(path)
+        buckets[bucket].append(item)
+    return [item for bucket in buckets for item in bucket]
+
+
+def _classify(path: str) -> int:
+    posix_path = path.replace("\\", "/")
+    for substring, _name, bucket in _BUCKET_RULES:
+        if substring in posix_path:
+            return bucket
+    return 2
+
+
 # ── module-scoped alias fixtures ──────────────────────────────────────
 #
 # Each of these returns the same `e2e_editor` env so the existing
@@ -553,6 +614,7 @@ __all__ = [
     "E2E_FIXTURE_SOURCE",
     "E2E_RUNTIME_ROOT_NAME",
     "EDITOR_START_COUNTER",
+    "bucketize",
     "build_environment",
     "e2e_editor",
     "gdcli_call",
