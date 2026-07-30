@@ -1,3 +1,6 @@
+> 历史快照：2026-07-29 状态；自 2026-07-30 起被本目录中最新报告替代。
+> 最新报告：`docs/reports/2026-07-30-gdcli-full-capability-roadmap-remediation-closure.md`
+
 # gdcli 路线图 / Plan 实现状态分析报告
 
 日期：2026-07-29

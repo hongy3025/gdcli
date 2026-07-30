@@ -388,7 +388,7 @@ M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项�
 
 ### M3 运行时验证
 
-M3 增补 35 个 runtime 路由（以 `runtime/` 为前缀），这些路由需要项目处于运行状态：使用 `gdcli exec project/run` 启动游戏后通过 `runtime/status` 等待 `connected`。所有 runtime/* 请求均由后台的 EditorDebuggerPlugin ↔ EngineDebugger 双向通道承载，公共路由不直接调用 session API。
+M3 增补 35 个 runtime 路由（`runtime/...`）；M6 引入 `runtime/eval` 作为 v2 协议下运行进程内执行的能力，必须在 broker 协商 v2 后才能路由。这些路由需要项目处于运行状态：使用 `gdcli exec project/run` 启动游戏后通过 `runtime/status` 等待 `connected`。所有 runtime/* 请求均由后台的 EditorDebuggerPlugin ↔ EngineDebugger 双向通道承载，公共路由不直接调用 session API。
 
 | 分类 | 路由数 | 说明 |
 |---|---|---|

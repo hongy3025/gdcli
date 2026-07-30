@@ -536,22 +536,9 @@ report 列出的 Godot 4.7 headless `EngineDebugger` 限制被 file transport �
 
 实现证据：`gdapi/addon/runtime/services/{project_config,classdb_query,uid_repair,diagnostics,export_service,android_bridge}.gd`、`gdapi/addon/routes/{project,classdb,uid,diagnostics,export}/` 和 `tests/e2e/m5/`。M5 fixture 覆盖快照恢复、刻意未使用资源、依赖环、脚本语法错误、PCK/Android 导出预设及 Android parser；`tests/e2e/m5/test_m5_smoke.py` 锁定路由、安全拒绝和只读查询合同。
 
-### M6：高风险能力
+### M6：高风险能力 ✅ 已完成
 
-内容：
-
-- editor eval。
-- runtime eval。
-- process execution。
-- network request。
-- 批量删除、批量替换和部署类操作。
-
-验收：
-
-- 默认配置下所有高风险 route 均返回 `permission_denied` 或 `unsafe_operation`。
-- 显式启用但未传 `force:true` 时仍拒绝 mutation。
-- 只允许受控 fixture 目标执行；路径、URL、命令、超时和输出大小限制生效。
-- 每次成功、失败、超时和安全拒绝均产生去敏后的审计记录。
+（实际验收见 `docs/reports/2026-07-30-gdcli-full-capability-roadmap-remediation-closure.md`）
 
 ## E2E 验证策略
 
