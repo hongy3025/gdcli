@@ -62,6 +62,8 @@ static func describe_tree(node: Node, max_depth: int, depth: int = 0) -> Diction
 		item["scene_file_path"] = node.scene_file_path
 	if depth < max_depth:
 		for child in node.get_children():
+			if child.owner == null:
+				continue
 			item.children.append(describe_tree(child, max_depth, depth + 1))
 	return item
 
