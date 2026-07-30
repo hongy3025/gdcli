@@ -29,6 +29,7 @@ if str(_THIS_DIR.parent) not in _sys.path:
 from e2e.shared_fixture import (  # noqa: E402,F401 — re-export
     E2E_DEADLOCK_TIMEOUT_SECONDS,
     EDITOR_START_COUNTER,
+    build_editor_environment,
     build_environment,
     e2e_editor,
     gdcli_call,
@@ -173,7 +174,10 @@ def run_godot_script(
     if editor:
         command.append("--editor")
     command += ["--script", script]
-    process_env = os.environ.copy()
+    # Use isolated APPDATA/LOCALAPPDATA (same as the live editor) so that
+    # Godot can write app_userdata without crashing (SIGSEGV on dir-creation
+    # failure in headless mode).
+    process_env = build_editor_environment(env["project"])
     process_env.update(extra_env or {})
     return subprocess.run(
         command,
