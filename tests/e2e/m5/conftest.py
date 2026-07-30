@@ -66,7 +66,8 @@ def exec_export(env: dict[str, Any], route: str, data: dict | None = None) -> di
     if data is not None:
         args += ["--data", json.dumps(data)]
     result = subprocess.run(
-        [str(env["gdcli"]), "--json", *args],
+        [str(env["gdcli"]), "--json", *args,
+         "--timeout", str(EXPORT_CLI_TIMEOUT)],
         capture_output=True, encoding="utf-8", errors="replace",
         timeout=EXPORT_CLI_TIMEOUT,
     )
@@ -102,7 +103,8 @@ def m5_editor(tmp_path: Path) -> dict[str, Any]:
         "source_digest": source_digest, "gdcli": gdcli_bin(),
         "godot_log": log_handle, "godot_log_path": log_path,
     }
-    godot, meta = attach_editor(project, godot_bin, log_handle)
+    godot, meta = attach_editor(project, godot_bin, log_handle,
+                                  extra_env={"GDAPI_HANDLER_TIMEOUT_MS": "180000"})
     env.update({"godot": godot, "meta": meta})
     env["initial_snapshot"] = project_snapshot(env)
     try:

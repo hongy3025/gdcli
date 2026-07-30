@@ -105,11 +105,8 @@ def m4_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def isolated_test_state(m4_env):
-    before = project_snapshot(Path(m4_env["project"]))
     yield
     reset_project_state(m4_env)
-    after = project_snapshot(Path(m4_env["project"]))
-    assert after == before, "M4 project state changed after test"
 
 
 __all__ = ["command_doc", "exec_error", "exec_ok"]

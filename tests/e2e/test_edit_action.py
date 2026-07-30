@@ -52,8 +52,8 @@ def _isolated_project(tmp_path: Path) -> Path:
 
 
 def test_real_editor_undo_redo(tmp_path):
-    godot_bin = os.environ.get("GODOT_BIN", "godot")
-    require_godot_47(godot_bin)
+    from e2e.m2.helpers import resolve_godot_bin, require_godot_47
+    godot_bin = resolve_godot_bin()
     project = _isolated_project(tmp_path)
     process_env = os.environ.copy()
     process_env["GDAPI_RUN_EDITOR_TESTS"] = "1"

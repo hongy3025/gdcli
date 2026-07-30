@@ -1,4 +1,14 @@
-"""E2E test fixtures — Godot editor lifecycle management."""
+"""E2E test fixtures — Godot editor lifecycle management.
+
+The single Godot editor and unified project are owned by
+`tests/e2e/shared_fixture.py`. The session-scoped `e2e_editor` fixture and
+its module-scoped aliases (`m2_editor`, `m3_editor`, `m4_env`,
+`m5_editor`, `m6_editor*`) are re-exported here so any test in the
+`tests/e2e/` tree can request them by name.
+"""
+
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -9,6 +19,35 @@ import time
 from pathlib import Path
 
 import pytest
+
+import sys as _sys
+from pathlib import Path as _P
+_THIS_DIR = _P(__file__).resolve().parent
+if str(_THIS_DIR.parent) not in _sys.path:
+    _sys.path.insert(0, str(_THIS_DIR.parent))
+
+from e2e.shared_fixture import (  # noqa: E402,F401 — re-export
+    E2E_DEADLOCK_TIMEOUT_SECONDS,
+    EDITOR_START_COUNTER,
+    build_environment,
+    e2e_editor,
+    gdcli_call,
+    gdcli_expect_failure,
+    m2_editor,
+    m3_editor,
+    m3_lifecycle,
+    m3_running,
+    m4_env,
+    m5_editor,
+    m6_editor,
+    m6_editor_bulk,
+    m6_editor_eval,
+    m6_editor_network,
+    m6_editor_process,
+    reset_shared_state,
+    teardown_environment,
+    temporary_policy,
+)
 
 
 E2E_DEADLOCK_TIMEOUT_SECONDS = 180
@@ -75,14 +114,12 @@ def _fixture_runtime_root(fixture: Path) -> Path:
 
 
 def _cleanup_fixture_runtime(fixture: Path) -> None:
-    """Remove only the source fixture's known runtime transport root."""
     runtime_root = _fixture_runtime_root(fixture)
     if runtime_root.exists():
         shutil.rmtree(runtime_root)
 
 
 def _teardown_godot_fixture(godot: subprocess.Popen, fixture: Path) -> None:
-    """Stop the fixture editor before removing its exact runtime transport root."""
     try:
         godot.terminate()
         try:
@@ -94,89 +131,8 @@ def _teardown_godot_fixture(godot: subprocess.Popen, fixture: Path) -> None:
         _cleanup_fixture_runtime(fixture)
 
 
-@pytest.fixture(scope="session")
-def godot_env():
-    """Build, install addon, start Godot headless, yield metadata, stop Godot.
-
-    Skips the entire test session if GODOT_BIN is not available or build fails.
-    """
-    godot_bin = os.environ.get("GODOT_BIN", "godot")
-    try:
-        godot_version = require_godot_47(godot_bin)
-    except RuntimeError as exc:
-        pytest.fail(str(exc), pytrace=False)
-    root = _repo_root()
-    fixture = root / "tests" / "fixture_project"
-    meta = fixture / ".godot" / "gdapi.json"
-    addon_bin = fixture / "addons" / "gdapi" / "bin"
-    gdapi_lib = root / "target" / "debug" / (
-        "gdapi.dll" if sys.platform == "win32" else "libgdapi.so"
-    )
-
-    # Build workspace
-    build = subprocess.run(
-        ["cargo", "build", "--workspace"],
-        cwd=root, capture_output=True, encoding="utf-8", errors="replace",
-    )
-    if build.returncode != 0:
-        pytest.skip(f"cargo build failed:\n{build.stderr}")
-
-    # Install addon
-    install = _run_gdcli("install", "--project", str(fixture), "--force")
-    if install.returncode != 0:
-        pytest.skip(f"gdcli install failed:\n{install.stderr}")
-
-    # Setup bin links + link addon to fixture
-    subprocess.run(
-        [sys.executable, str(root / "scripts" / "setup-dev.py"), "--no-build"],
-        capture_output=True,
-    )
-
-    # Copy GDExtension lib on Windows
-    if sys.platform == "win32" and gdapi_lib.exists():
-        dest_dir = addon_bin / "windows"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(gdapi_lib, dest_dir / gdapi_lib.name)
-
-    # Remove stale metadata and the exact file-transport root before startup.
-    meta.unlink(missing_ok=True)
-    _cleanup_fixture_runtime(fixture)
-
-    # Start Godot
-    godot = subprocess.Popen(
-        [godot_bin, "--editor", "--headless", "--path", str(fixture)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    # Wait for meta
-    ready = False
-    for _ in range(45):
-        if meta.exists():
-            ready = True
-            break
-        time.sleep(1)
-
-    if not ready:
-        _teardown_godot_fixture(godot, fixture)
-        pytest.skip("gdapi.json never appeared within 45s")
-
-    meta_data = json.loads(meta.read_text(encoding="utf-8"))
-
-    yield {
-        "godot_bin": godot_bin,
-        "godot_version": godot_version,
-        "root": root,
-        "fixture": fixture,
-        "meta": meta_data,
-        "gdcli": _gdcli_bin(),
-    }
-
-    _teardown_godot_fixture(godot, fixture)
-
-
 def gdcli_json(env: dict, *args: str) -> dict:
-    """Run gdcli --json and return parsed response."""
+    """Run gdcli --json and return parsed response (legacy helper)."""
     result = subprocess.run(
         [str(env["gdcli"]), "--json", *args],
         capture_output=True, encoding="utf-8", errors="replace",
@@ -206,7 +162,7 @@ def run_godot_script(
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a Godot GDScript test through --headless --script."""
-    command = [env["godot_bin"], "--headless", "--path", str(env["fixture"])]
+    command = [env["godot_bin"], "--headless", "--path", str(env["project"])]
     if editor:
         command.append("--editor")
     command += ["--script", script]

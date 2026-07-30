@@ -398,6 +398,155 @@ def e2e_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         teardown_environment(env)
 
 
+
+
+
+# ── module-scoped alias fixtures ──────────────────────────────────────
+#
+# Each of these returns the same `e2e_editor` env so the existing
+# per-module test files can keep their original fixture names. They are
+# `module`-scoped (not `session`) so that the autouse per-test reset
+# fixture in each module's conftest.py still fires once per test, but
+# no extra process is ever started.
+
+
+@pytest.fixture(scope="session")
+def m2_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M2 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m3_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M3 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="module")
+def m3_running(m3_editor, m3_lifecycle) -> Any:
+    """Own one shared data-plane game for all fixture-state E2E tests.
+
+    The first request triggers the lifecycle scenario, which exercises
+    the runtime broker twice. Subsequent requests reuse the already-
+    attached game.
+    """
+    from e2e.m3.conftest import attach_game, detach_game
+    if not m3_editor.get("game_attached"):
+        attach_game(m3_editor)
+    try:
+        yield m3_editor
+    finally:
+        if m3_editor.get("game_attached"):
+            detach_game(m3_editor)
+
+
+@pytest.fixture(scope="module")
+def m3_lifecycle(e2e_editor) -> dict[str, Any]:
+    """Run the single status lifecycle scenario: initial stopped, then run/stop twice.
+
+    Returns a dict with `initial` and `cycles` keys matching the original
+    M3 fixture contract. Failures abort the scenario and the env is left
+    in a stopped state; pytest will surface the diagnostic.
+    """
+    from e2e.m3.conftest import (  # late import to avoid cycles
+        exec_ok, project_run, _runtime_root, _runtime_entries,
+        wait_for_connected, detach_game, reset_fixture,
+    )
+
+    initial = exec_ok(e2e_editor, "runtime/status")
+    cycles: list[dict[str, Any]] = []
+    scenario_error: BaseException | None = None
+    try:
+        for cycle_index in range(2):
+            started = project_run(e2e_editor)
+            connected = wait_for_connected(e2e_editor, timeout=30.0)
+            active = exec_ok(e2e_editor, "runtime/status")
+            stale = (
+                _runtime_root(e2e_editor)
+                / f"stale-lifecycle-{cycle_index}"
+                / "reply.json"
+            )
+            stale.parent.mkdir(parents=True, exist_ok=True)
+            stale.write_text("stale", encoding="utf-8")
+            stopped_status = detach_game(e2e_editor)
+            stopped = {"ok": True, "runtime_state": stopped_status["state"]}
+            cycles.append({
+                "cycle": cycle_index,
+                "started": started,
+                "connected": connected,
+                "active": active,
+                "stopped": stopped,
+                "stopped_status": stopped_status,
+                "runtime_entries": _runtime_entries(e2e_editor),
+                "stale_removed": not stale.exists(),
+            })
+    except BaseException as exc:
+        scenario_error = exc
+        raise
+    finally:
+        try:
+            if e2e_editor.get("game_attached"):
+                detach_game(e2e_editor)
+            else:
+                reset_fixture(e2e_editor)
+        except BaseException:
+            if scenario_error is None:
+                raise
+    return {"initial": initial, "cycles": cycles}
+
+
+@pytest.fixture(scope="session")
+def m4_env(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M4 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m5_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M5 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M6 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor_process(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 process tests."""
+    return e6_alias_with_policy(e2e_editor, "process")
+
+
+@pytest.fixture(scope="session")
+def m6_editor_eval(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 eval tests."""
+    return e6_alias_with_policy(e2e_editor, "eval")
+
+
+@pytest.fixture(scope="session")
+def m6_editor_bulk(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 bulk tests."""
+    return e6_alias_with_policy(e2e_editor, "bulk")
+
+
+@pytest.fixture(scope="session")
+def m6_editor_network(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 network tests."""
+    return e6_alias_with_policy(e2e_editor, "network")
+
+
+def e6_alias_with_policy(env: dict[str, Any], variant: str) -> dict[str, Any]:
+    """Return the env tagged with a policy variant for M6 tests.
+
+    The actual policy is applied per-test through `temporary_policy`; this
+    helper merely stamps a marker on the dict so individual tests can
+    request the right overlay.
+    """
+    env.setdefault("policy_variants", set()).add(variant)
+    return env
+
 __all__ = [
     "E2E_DEADLOCK_TIMEOUT_SECONDS",
     "E2E_DEFAULT_POLICY_PATH",

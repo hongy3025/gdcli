@@ -6,6 +6,24 @@
 
 本设计将 M2–M6 合并到一个公共 E2E fixture，在一次 pytest session 中只启动一个 Godot editor，同时保留现有测试断言和验收语义。项目副本与 editor 进程不再按模块或用例隔离；共享状态通过显式 reset contract 管理。
 
+### 优化策略
+
+在“单 editor 启动”的基础上，通过测试用例收集顺序的调度进一步压缩 wall time。核心观察：
+
+- 启动后立即跑快的契约/路由/编辑器状态测试（m2/test_m2_contract、m4 轻量级单测、test_unified_fixture_contract 等）能尽早把失败抛出来，pytest 的 `-x` 与开发者的调试循环也最先命中它们。
+- 依赖 runtime probe 的 m3 测试以及 m6 长时间进程/导出测试，安排在生命周期中段。
+- 启动需要重启游戏、重连 runtime、跑导出等较重路径的测试（m5/m6 的 export_android、m3 的 lifecycle scenario）排在收尾，避免与启动期并发。
+
+具体做法：在 `tests/e2e/conftest.py` 中通过 `pytest_collection_modifyitems` 调整收集顺序，规则：
+
+1. `test_unified_fixture_contract.*`、`test_shared_editor_lifecycle.*`、`test_shared_editor_contract.*` 优先进入执行队列（这些不依赖 editor）。
+2. M2 / M4 轻量路由 + 场景 / 节点 / 信号测试随后。
+3. M3 依赖 `m3_running` 的测试（runtime_input / runtime_nodes / runtime_assert_signal）其次。
+4. M5 / M6 涉及导出、批量、network、process 的长尾测试最后。
+
+该顺序不修改任何测试断言，仅在收集阶段重排。完整模块顺序与所有测试函数保持原样。
+
+
 ## 方案选择
 
 采用“单一超级 fixture”。新增 `tests/fixtures/e2e_project/`，合并 M2–M6 的场景、资源、脚本、工具和测试插件。pytest 使用一个 session-scoped `e2e_editor`。
@@ -69,4 +87,11 @@ session teardown
 - 全量测试断言保持不变，重复运行结果一致；
 - 现有 6 分钟预算测试继续通过并记录新的耗时基线；
 - 新增共享 fixture 生命周期、PID 一致性、reset 失败诊断和策略恢复测试。
+
+### 收集顺序优化验收
+
+- 不增加测试用例（仍是同一集合）；
+- 启动后前 30 秒应至少出现一个稳定通过的契约/路由子集；
+- 慢路径测试（export_android、m3 完整 lifecycle、m6 进程/网络）显式被推到收集顺序尾部；
+- 全量 wall time 在新基线建立后记录并跟踪该指标（应低于 6 分钟预算基线）。
 

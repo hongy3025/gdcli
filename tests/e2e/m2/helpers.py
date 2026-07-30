@@ -217,3 +217,12 @@ def editor_redo(env: dict) -> None:
     command.write_text(json.dumps({"action": "redo"}), encoding="utf-8")
     payload = wait_for_test_result(env)
     assert payload.get("ok") is True, payload
+
+
+def editor_clear_undo(env: dict) -> None:
+    result_path = env["project"] / ".godot" / "gdapi-test-result.json"
+    result_path.unlink(missing_ok=True)
+    command = env["project"] / ".godot" / "gdapi-test-command.json"
+    command.write_text(json.dumps({"action": "clear_undo"}), encoding="utf-8")
+    payload = wait_for_test_result(env)
+    assert payload.get("ok") is True, payload

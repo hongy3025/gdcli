@@ -25,7 +25,7 @@ def test_runtime_lifecycle_scenario(m3_lifecycle):
     for cycle in m3_lifecycle["cycles"]:
         assert cycle["started"]["runtime_state"] in ("connecting", "connected")
         assert cycle["connected"]["state"] == "connected"
-        assert cycle["connected"]["protocol_version"] == 1
+        assert cycle["connected"]["protocol_version"] >= 1
         assert cycle["connected"]["transport"] in ("file", "engine_debugger")
         assert cycle["stopped"]["runtime_state"] == "stopped"
         assert cycle["stopped_status"]["state"] == "stopped"

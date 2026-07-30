@@ -9,13 +9,24 @@
 **Tech Stack:** Python 3, pytest fixtures, subprocess, Godot 4.7 headless editor, gdcli JSON routes, existing GDScript fixture/plugin tests.
 
 ## Global Constraints
+**Goal:** Run the complete `tests/e2e/` suite against one merged fixture and exactly one Godot editor process while preserving all existing assertions and acceptance behavior.
+
+**Architecture:** Build one `tests/fixtures/e2e_project/` containing the M2–M6 assets and a unified project configuration. A session-scoped `e2e_editor` owns the temporary copy, addon installation, one Godot process, readiness checks, and teardown; legacy module fixture names become aliases returning that environment. A shared reset/policy helper restores deterministic state between tests without recreating projects or processes. A pytest-level collection-order hook reshuffles the run order so fast contract tests fire first and long-tail export/process tests sit at the back, shaving wall time without changing the test set.
+
+**Tech Stack:** Python 3, pytest fixtures, pytest collection hooks, subprocess, Godot 4.7 headless editor, gdcli JSON routes, existing GDScript fixture/plugin tests.
+
+## Global Constraints
 
 - Preserve all existing E2E assertions and the six-minute full-suite budget.
 - Start exactly one Godot editor process for a full `tests/e2e/` invocation.
 - Do not create per-module or per-test project copies; use one temporary copy of `e2e_project` for the session.
 - Keep all modified GDScript files formatted with `python scripts/format-gd.py` and linted with `gdlint` before tests.
 - Preserve Godot 4.7.x validation and existing failure diagnostics.
-
+- Use pytest collection order to optimize wall time:
+  - Contract / lifecycle / lightweight route tests run first so a broken fixture or editor surfaces within seconds.
+  - Runtime / m3 input / m4 game tests run in the middle.
+  - Slow paths (m5 export_android, m6 process / network / bulk, m3 lifecycle scenario) run last.
+  - The reshuffle MUST NOT change the set of test functions or any assertion; it only changes execution order.
 ---
 
 ### Task 1: Inventory and create the merged fixture
@@ -188,8 +199,47 @@
 - [ ] **Step 5: Run non-E2E regression checks.**
 
   Run `cargo test --workspace`, `cargo fmt --check`, and `cargo clippy --workspace`; expected result is PASS.
-
 - [ ] **Step 6: Commit the acceptance changes.**
 
   Commit with `test: enforce single-editor e2e acceptance`.
+
+### Task 6: Optimize wall time through pytest collection order
+
+**Files:**
+- Modify: `tests/e2e/conftest.py` — add `pytest_collection_modifyitems` ordering hook
+- Test: `tests/e2e/test_collection_order.py` (asserts the order policy fires)
+
+**Interfaces:**
+- `pytest_collection_modifyitems` reorders the collected `items` list before execution without dropping or adding any test.
+- Four ordered buckets:
+  1. contract / lifecycle / lightweight (no-editor): `test_unified_fixture_contract`, `test_shared_editor_lifecycle`, `test_shared_editor_contract`, `test_collection_order`.
+  2. M2 + M4 route / scene / node / signal / resource / script / filesystem tests.
+  3. M3 runtime tests that need `m3_running` (`runtime_input`, `runtime_nodes`, `runtime_assert_signal`, `runtime_capture`, `runtime_observability`).
+  4. M5 / M6 long-tail (`m5/test_export_android`, `m6/test_process_run`, `m6/test_bulk_files`, `m6/test_bulk_deploy`, `m6/test_network_request`, `m6/test_runtime_eval`, `m6/test_eval`, `m3/test_runtime_status::test_runtime_lifecycle_scenario`).
+- Tests within a bucket keep their original relative order.
+- The ordering hook MUST be deterministic and idempotent.
+
+- [ ] **Step 1: Add an ordering contract test that snapshots the bucketed sequence.**
+
+  Write a unit test that imports the bucket function, runs it over a hand-rolled list of node ids, and asserts the returned sequence matches the documented bucket order. The test runs without Godot.
+
+- [ ] **Step 2: Implement the `bucketize` helper and the `pytest_collection_modifyitems` hook.**
+
+  Move the bucket function into `shared_fixture.py` so both the hook and the test can import it. The hook iterates `items` once and places each item in the right bucket based on the test module path. Unknown modules fall into bucket 2.
+
+- [ ] **Step 3: Verify deterministic order with two consecutive collection runs.**
+
+  Run `python -m pytest tests/e2e --collect-only -q` twice in the same session; the listing must match exactly. The contract test in step 1 already covers this; add a second smaller assertion that diffs the two collections.
+
+- [ ] **Step 4: Run the full E2E suite with the new order.**
+
+  Run `uv run pytest tests/e2e/ -v --durations=20`. Expected result: PASS, one editor start, one PID, and total wall time at or below the 6-minute budget. The top `--durations=20` list should show the slow m5/m6/m3-lifecycle items at the back.
+
+- [ ] **Step 5: Capture the new wall-time baseline.**
+
+  Record the wall time in `docs/superpowers/specs/2026-07-30-single-editor-e2e-design.md` under “收集顺序优化验收” and commit the doc alongside the code.
+
+- [ ] **Step 6: Commit the ordering changes.**
+
+  Commit with `test: order e2e collection for wall time`.
 

@@ -33,7 +33,7 @@ M6_EVAL_POLICY = {
         },
         "editor_eval": {
             "enabled": True, "max_source_bytes": 16384,
-            "allowed_input_keys": ["runtime_marker"],
+            "allowed_input_keys": ["a", "b", "runtime_marker"],
         },
         "process": {
             "enabled": True, "executables": ["sleep", "sleep.cmd", "echo_args", "echo_args.cmd", "echo_args.py"],
@@ -183,7 +183,7 @@ def m6_editor_process(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any
 def m6_editor_eval(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     godot_bin = resolve_godot_bin()
     require_godot_47(godot_bin)
-    project = tmp_path_factory.mktemp("m6_editor_eval") / "project"
+    project = tmp_path_factory.mktemp("m6_editor") / "project"
     shutil.copytree(M6_FIXTURE_SOURCE, project)
     policy_dir = project / ".godot"
     policy_dir.mkdir(parents=True, exist_ok=True)
@@ -200,7 +200,8 @@ def m6_editor_eval(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     log_handle = log_path.open("w", encoding="utf-8")
     env: dict[str, Any] = {"project": project, "godot_bin": godot_bin,
                             "gdcli": gdcli_bin(), "godot_log": log_handle,
-                            "godot_log_path": log_path}
+                            "godot_log_path": log_path,
+                            "game_run_count": 0, "game_stop_count": 0}
     godot, meta = attach_editor(project, godot_bin, log_handle)
     env.update({"godot": godot, "meta": meta})
     try:
@@ -216,11 +217,11 @@ def _wait_for_game_running(env: dict[str, Any], timeout: float = 15.0) -> dict[s
     while time.monotonic() < deadline:
         status = exec_ok(env, "runtime/status")
         last_status = status
-        if status.get("state") not in (None, "stopped"):
+        if status.get("state") == "connected" and status.get("transport") != "none":
             return status
         time.sleep(0.2)
     raise RuntimeError(
-        f"game never started within {timeout}s (last status: {last_status})"
+        f"game never fully connected within {timeout}s (last status: {last_status})"
     )
 
 
@@ -265,7 +266,8 @@ def m6_editor_bulk(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     log_handle = log_path.open("w", encoding="utf-8")
     env: dict[str, Any] = {"project": project, "godot_bin": godot_bin,
                             "gdcli": gdcli_bin(), "godot_log": log_handle,
-                            "godot_log_path": log_path}
+                            "godot_log_path": log_path,
+                            "game_run_count": 0, "game_stop_count": 0}
     godot, meta = attach_editor(project, godot_bin, log_handle)
     env.update({"godot": godot, "meta": meta})
     try:
@@ -311,7 +313,8 @@ def m6_editor_network(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any
     log_handle = log_path.open("w", encoding="utf-8")
     env: dict[str, Any] = {"project": project, "godot_bin": godot_bin,
                             "gdcli": gdcli_bin(), "godot_log": log_handle,
-                            "godot_log_path": log_path}
+                            "godot_log_path": log_path,
+                            "game_run_count": 0, "game_stop_count": 0}
     godot, meta = attach_editor(project, godot_bin, log_handle)
     env.update({"godot": godot, "meta": meta})
     try:

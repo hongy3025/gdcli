@@ -100,7 +100,7 @@ def test_reset_failure_preserves_last_runtime_status_payload(
     result = subprocess.CompletedProcess(
         ["gdcli", "--json", *args], 1, stdout='{"ok":false,"state":"connected","pending":2,"code":"conflict"}', stderr=""
     )
-    monkeypatch.setattr(harness, "_run_cli", lambda _env, _args, timeout=35: result)
+    monkeypatch.setattr(harness, "_run_cli", lambda _env, _args, timeout=35, **kwargs: result)
     env = {"project": tmp_path, "gdcli": "gdcli", "godot_log_path": tmp_path / "godot.log"}
 
     with pytest.raises(harness.HarnessFailure) as caught:
