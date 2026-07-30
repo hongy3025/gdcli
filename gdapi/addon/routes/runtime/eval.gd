@@ -2,7 +2,6 @@
 extends "res://addons/gdapi/runtime/runtime_route.gd"
 
 const Policy := preload("res://addons/gdapi/runtime/capability_policy.gd")
-const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 const ROUTE := "runtime/eval"
 
 

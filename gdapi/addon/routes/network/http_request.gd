@@ -29,6 +29,8 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if not started.ok:
 		res.error(started.error, started.code, ErrorCodes.http_status(started.code))
 		return
+	var terminal := func(outcome):
+		AuditLog.record(ROUTE, "dangerous", {"url": checked.url}, outcome.ok, outcome.code)
 	var plugin = Engine.get_meta("gdapi_plugin", null)
 	if (
 		plugin == null
@@ -38,11 +40,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
 				"tick": func(_now): return bool(started.state.done),
 				"cancel": func(_reason): started.state.node.cancel_request(),
-				"terminal":
-				func(outcome):
-					AuditLog.record(
-						ROUTE, "dangerous", {"url": checked.url}, outcome.ok, outcome.code
-					)
+				"terminal": terminal
 			}
 		)
 	):

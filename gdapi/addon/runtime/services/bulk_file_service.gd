@@ -57,11 +57,12 @@ static func delete(body: Dictionary) -> Dictionary:
 				)
 				!= OK
 			):
-			_rollback_manifest(manifest)
-			DirAccess.rename_absolute(
-				ProjectSettings.globalize_path(destination), ProjectSettings.globalize_path(source)
-			)
-			return _error(ErrorCodes.GODOT_ERROR, "batch delete rolled back")
+				_rollback_manifest(manifest)
+				DirAccess.rename_absolute(
+					ProjectSettings.globalize_path(destination),
+					ProjectSettings.globalize_path(source)
+				)
+				return _error(ErrorCodes.GODOT_ERROR, "batch delete rolled back")
 		manifest.append(manifest_entry)
 	var mf := FileAccess.open(
 		ProjectSettings.globalize_path(trash + "/manifest.json"), FileAccess.WRITE

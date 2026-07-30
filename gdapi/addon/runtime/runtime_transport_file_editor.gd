@@ -237,11 +237,19 @@ func _hello_generation(hello: Dictionary) -> String:
 
 func _hello_versions(hello: Dictionary) -> Array:
 	var result: Variant = hello.get("result", {})
-	return (
-		result.get("supported_versions", [Protocol.VERSION])
-		if typeof(result) == TYPE_DICTIONARY
-		else [Protocol.VERSION]
-	)
+	if typeof(result) != TYPE_DICTIONARY:
+		return [Protocol.VERSION]
+	var raw_versions: Variant = result.get("supported_versions", [Protocol.VERSION])
+	if typeof(raw_versions) != TYPE_ARRAY:
+		return [Protocol.VERSION]
+	var versions: Array = []
+	for raw_version in raw_versions:
+		if typeof(raw_version) == TYPE_INT:
+			versions.append(int(raw_version))
+		elif typeof(raw_version) == TYPE_FLOAT and is_finite(float(raw_version)):
+			if float(raw_version) == floor(float(raw_version)):
+				versions.append(int(raw_version))
+	return versions if not versions.is_empty() else [Protocol.VERSION]
 
 
 # gdlint: ignore=max-returns
@@ -255,7 +263,15 @@ func _valid_hello(hello: Dictionary) -> bool:
 	var result: Variant = hello.get("result", null)
 	if typeof(result) != TYPE_DICTIONARY:
 		return false
-	return _valid_hello_result(result)
+	if not _valid_hello_result(result):
+		return false
+	var broker_generation := ""
+	if _broker != null and _broker.has_method("status"):
+		broker_generation = String(_broker.call("status").get("generation", ""))
+	var generation := _hello_generation(hello)
+	# 本轮尚未有 broker generation 时，第一条结构合法 hello 负责绑定它；
+	# 一旦绑定，后续 hello 必须精确匹配当前 generation。
+	return broker_generation.is_empty() or generation == broker_generation
 
 
 func _valid_hello_result(result: Dictionary) -> bool:
@@ -272,13 +288,6 @@ func _valid_hello_result(result: Dictionary) -> bool:
 	var transport := String(result.get("transport", ""))
 	valid = valid and (transport == "file" or transport == "engine_debugger")
 	return valid
-	var broker_generation := ""
-	if _broker != null and _broker.has_method("status"):
-		broker_generation = String(_broker.call("status").get("generation", ""))
-	var generation := _hello_generation(hello)
-	# 本轮尚未有 broker generation 时，第一条结构合法 hello 负责绑定它；
-	# 一旦绑定，后续 hello 必须精确匹配当前 generation。
-	return broker_generation.is_empty() or generation == broker_generation
 
 
 func _hello_matches_probe(probe_id: String, hello: Dictionary) -> bool:
