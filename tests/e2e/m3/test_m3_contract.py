@@ -26,8 +26,11 @@ def test_runtime_manifest_match(m3_editor):
 
 
 def test_runtime_manifest_has_no_aliases(m3_editor):
-    routes = [route for route in exec_ok(m3_editor, "gdapi/routes")["routes"] if route.startswith("runtime/")]
-    assert len(routes) == len(set(routes)) == 35
+    runtime_routes = sorted(
+        route for route in exec_ok(m3_editor, "gdapi/routes")["routes"]
+        if route.startswith("runtime/")
+    )
+    assert runtime_routes == sorted(M3_RUNTIME_ROUTES | {"runtime/eval"})
 
 
 def test_runtime_route_documentation_is_complete(m3_editor):
