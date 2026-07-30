@@ -59,7 +59,7 @@ func doc() -> GdApiRouteDoc:
 			{
 				"ok": "bool",
 				"path": "String, 实际查询的 res:// 路径",
-				"root": "Dictionary 递归节点描述 {name,type,scene_file_path?,uid?,children}",
+				"root": "Dictionary 递归节点描述 {name,type,scene_file_path?,children}",
 				"undoable": "bool, 始终为 false",
 			}
 		)

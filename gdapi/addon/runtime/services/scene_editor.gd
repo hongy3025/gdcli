@@ -60,8 +60,6 @@ static func describe_tree(node: Node, max_depth: int, depth: int = 0) -> Diction
 	}
 	if node.scene_file_path != "":
 		item["scene_file_path"] = node.scene_file_path
-	if node.scene_unique_id != 0:
-		item["uid"] = node.scene_unique_id
 	if depth < max_depth:
 		for child in node.get_children():
 			if child.owner == null:
