@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import concurrent.futures
+import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +16,35 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from e2e.m2.helpers import gdcli_bin, repo_root, require_godot_47, resolve_godot_bin
-from e2e.m3.conftest import attach_editor, command_doc, exec_error, exec_ok, detach_editor
+from e2e.m3.conftest import attach_editor, command_doc, exec_error, exec_ok, detach_editor, project_run, project_stop
 
 M6_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m6_project"
+
+M6_EVAL_POLICY = {
+    "runtime_eval": {
+        "enabled": True, "max_source_bytes": 16384,
+        "allowed_input_keys": ["runtime_marker"],
+    },
+    "editor_eval": {
+        "enabled": True, "max_source_bytes": 16384,
+        "allowed_input_keys": ["runtime_marker"],
+    },
+    "process_run": {
+        "enabled": True, "executables": ["sleep"], "cwd_roots": ["res://tools"],
+        "max_timeout_ms": 5000, "max_output_bytes": 65536,
+    },
+    "filesystem_batch": {
+        "enabled": True, "roots": ["res://bulk"],
+    },
+    "network_http_request": {
+        "enabled": True, "schemes": ["http"], "hosts": ["127.0.0.1", "localhost"],
+        "ports": [80, 443], "max_timeout_ms": 5000, "max_response_bytes": 1048576,
+        "max_redirects": 5, "allow_private": True,
+    },
+    "export_android_deploy_many": {
+        "enabled": True, "apk_root": "res://build", "package": "org.example",
+    },
+}
 
 
 @pytest.fixture(scope="module")
@@ -44,4 +73,127 @@ def m6_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         log_handle.close()
 
 
-__all__ = ["command_doc", "exec_error", "exec_ok", "m6_editor"]
+def latest_audit(env: dict[str, Any], route: str) -> dict[str, Any]:
+    entries = exec_ok(env, "gdapi/audit/list", {"limit": 100}).get("entries", [])
+    matching = [e for e in entries if e.get("route") == route]
+    if not matching:
+        raise AssertionError(f"No audit entries found for route {route}")
+    return matching[-1]
+
+
+@pytest.fixture(scope="module")
+def m6_editor_eval(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    godot_bin = resolve_godot_bin()
+    require_godot_47(godot_bin)
+    project = tmp_path_factory.mktemp("m6_editor_eval") / "project"
+    shutil.copytree(M6_FIXTURE_SOURCE, project)
+    policy_dir = project / ".godot"
+    policy_dir.mkdir(parents=True, exist_ok=True)
+    (policy_dir / "gdapi-policy.json").write_text(
+        json.dumps(M6_EVAL_POLICY), encoding="utf-8"
+    )
+    install = subprocess.run(
+        [str(gdcli_bin()), "install", "--project", str(project), "--force"],
+        capture_output=True, encoding="utf-8", errors="replace",
+    )
+    assert install.returncode == 0, install.stderr
+    log_path = project / ".godot" / "godot.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = log_path.open("w", encoding="utf-8")
+    env: dict[str, Any] = {"project": project, "godot_bin": godot_bin,
+                            "gdcli": gdcli_bin(), "godot_log": log_handle,
+                            "godot_log_path": log_path}
+    godot, meta = attach_editor(project, godot_bin, log_handle)
+    env.update({"godot": godot, "meta": meta})
+    try:
+        yield env
+    finally:
+        detach_editor(env)
+        log_handle.close()
+
+
+def _wait_for_game_running(env: dict[str, Any], timeout: float = 15.0) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_status: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        status = exec_ok(env, "runtime/status")
+        last_status = status
+        if status.get("state") not in (None, "stopped"):
+            return status
+        time.sleep(0.2)
+    raise RuntimeError(
+        f"game never started within {timeout}s (last status: {last_status})"
+    )
+
+
+def _wait_stopped(env: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_status: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        status = exec_ok(env, "runtime/status")
+        last_status = status
+        if status.get("state") == "stopped" and status.get("pending", 0) == 0:
+            return status
+        time.sleep(0.1)
+    raise RuntimeError(
+        f"game did not stop within {timeout}s (last status: {last_status})"
+    )
+
+
+@pytest.fixture(scope="module")
+def m6_runtime_eval_running(m6_editor_eval: dict[str, Any]) -> dict[str, Any]:
+    project_run(m6_editor_eval)
+    _wait_for_game_running(m6_editor_eval)
+    m6_editor_eval["game_attached"] = True
+    try:
+        yield m6_editor_eval
+    finally:
+        if m6_editor_eval.get("game_attached"):
+            try:
+                project_stop(m6_editor_eval)
+                _wait_stopped(m6_editor_eval)
+            finally:
+                m6_editor_eval["game_attached"] = False
+
+
+def _exec_raw(env: dict[str, Any], route: str, body: dict) -> dict[str, Any]:
+    args = ["exec", route, "--project", str(env["project"]), "--data", json.dumps(body)]
+    result = subprocess.run(
+        [str(env["gdcli"]), "--json", *args],
+        capture_output=True, encoding="utf-8", errors="replace",
+        timeout=35,
+    )
+    for raw in (result.stdout, result.stderr):
+        if not raw:
+            continue
+        for candidate in (raw.strip(), raw.split(": ", 1)[-1].strip()):
+            try:
+                payload = json.loads(candidate)
+                if isinstance(payload, dict):
+                    return payload
+            except json.JSONDecodeError:
+                continue
+    return {"code": "unknown", "error": result.stderr or result.stdout}
+
+
+def start_async_exec(
+    env: dict[str, Any], route: str, body: dict,
+) -> concurrent.futures.Future[dict[str, Any]]:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_exec_raw, env, route, body)
+    future._executor = executor
+    return future
+
+
+def stop_game(env: dict[str, Any]) -> dict[str, Any]:
+    project_stop(env)
+    result = _wait_stopped(env)
+    env["game_attached"] = False
+    return result
+
+
+__all__ = [
+    "command_doc", "exec_error", "exec_ok", "latest_audit",
+    "m6_editor", "m6_editor_eval", "m6_runtime_eval_running",
+    "start_async_exec", "stop_game",
+]
