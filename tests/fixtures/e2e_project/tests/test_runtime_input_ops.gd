@@ -45,21 +45,22 @@ func _assert_invalid(result: Dictionary, context: String) -> void:
 
 
 func _integer_case(field_name: String, value: Variant) -> Dictionary:
+	var result: Dictionary = {"ok": true}
 	match field_name:
 		"keycode":
-			return InputOps.key({"keycode": value})
+			result = InputOps.key({"keycode": value})
 		"mouse.button":
-			return InputOps.mouse({"kind": "button", "button": value})
+			result = InputOps.mouse({"kind": "button", "button": value})
 		"gamepad.device":
-			return InputOps.gamepad({"kind": "button", "device": value, "button": 0})
+			result = InputOps.gamepad({"kind": "button", "device": value, "button": 0})
 		"gamepad.button":
-			return InputOps.gamepad({"kind": "button", "device": 0, "button": value})
+			result = InputOps.gamepad({"kind": "button", "device": 0, "button": value})
 		"gamepad.axis":
-			return InputOps.gamepad({"kind": "axis", "device": 0, "axis": value, "value": 0.0})
+			result = InputOps.gamepad({"kind": "axis", "device": 0, "axis": value, "value": 0.0})
 		"touch.index":
-			return InputOps.touch({"index": value})
+			result = InputOps.touch({"index": value})
 		"sequence.after_ms":
-			return await (
+			result = await (
 				InputOps
 				. sequence(
 					{
@@ -75,7 +76,7 @@ func _integer_case(field_name: String, value: Variant) -> Dictionary:
 					}
 				)
 			)
-	return {"ok": true}
+	return result
 
 
 func test_all_integer_fields_reject_non_integral_and_unsafe_numbers() -> void:

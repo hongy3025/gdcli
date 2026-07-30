@@ -1,3 +1,5 @@
+# gdlint: ignore=max-public-methods
+
 ## GdApiRuntimeBroker 单元测试
 ##
 ## 测试运行期 broker 的状态机、pending 回调、disconnect/timeout 清理。

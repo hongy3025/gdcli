@@ -1,3 +1,5 @@
+# gdlint: ignore=max-public-methods
+
 ## GdApiRequest 单元测试
 ##
 ## 测试 HTTP 请求封装类的各个功能，包括：

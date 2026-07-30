@@ -24,6 +24,8 @@ SKIP_DIRECTORIES = {
 SKIP_FILES = {
     "tests/fixtures/m2_project/scripts/broken.gd",
     "tests/fixtures/m5_project/fixtures/broken.gd",
+    "tests/fixtures/e2e_project/fixtures/broken.gd",
+    "tests/fixtures/e2e_project/scripts/broken.gd",
 }
 MAX_BATCH_FILES = 10
 

@@ -1,3 +1,5 @@
+# gdlint: ignore=max-public-methods
+
 ## GdApiRuntimeRoute 单元测试
 ##
 ## 使用内存 broker/server/plugin 验证 HTTP adapter 的行为边界，不启动真实游戏进程。
