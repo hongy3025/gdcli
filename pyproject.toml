@@ -8,10 +8,9 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/e2e"]
 pythonpath = ["."]
-addopts = "-v -m 'not budget'"
+addopts = "-v"
 markers = [
-    "e2e: requires Godot editor running (deselect with '-m not e2e')",
-    "budget: runs the nested full-suite walltime acceptance test",
+    "e2e: requires Godot editor running (only runs when '-m e2e' is passed)",
+    "budget: runs the nested full-suite walltime acceptance test (excluded by default; use '-m budget' to run)",
 ]

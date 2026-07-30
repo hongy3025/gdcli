@@ -29,21 +29,47 @@ cargo build -p gdapi
 # 一键开发环境搭建（构建 + 符号链接 addon 到 fixture_project）
 python scripts/setup-dev.py          # 跨平台
 
-# 运行所有测试（单元测试 + 集成测试，不需要 Godot）
+# Lint 和格式检查（无专用配置，使用默认规则）
+cargo clippy --workspace
+cargo fmt --check
+```
+
+### 测试集分类
+
+测试集分为三类，日常开发迭代**只跑单元测试集**，E2E 和预算测试仅在显式提及时才启动。
+
+#### 1. 单元测试集（日常开发）
+
+Rust 单元测试 + 集成测试，不需要 Godot，速度快。
+
+```bash
+# 运行所有单元测试
 cargo test --workspace
 
 # 运行单个 crate 的测试
 cargo test -p gdcli
 cargo test -p gdapi
+```
 
-# Lint 和格式检查（无专用配置，使用默认规则）
-cargo clippy --workspace
-cargo fmt --check
+#### 2. E2E 测试集（需要 Godot）
 
-# E2E 测试（需要 Godot，用 uv 管理 Python venv）
-uv run pytest tests/e2e/ -v              # 运行所有 E2E
-uv run pytest tests/e2e/ -v -m e2e       # 仅运行 e2e 标记的测试
-uv run pytest tests/e2e/ -v -m "not e2e" # 跳过 e2e 测试
+pytest E2E 测试，需要 Godot 编辑器运行（用 uv 管理 Python venv）。预算测试默认排除。
+
+```bash
+# 运行核心 E2E 套件（排除预算测试）
+uv run pytest tests/e2e/ -v
+
+# 仅运行 e2e 标记的测试
+uv run pytest tests/e2e/ -v -m e2e
+```
+
+#### 3. 预算测试集（需要 Godot，耗时约 6 分钟）
+
+全套件 walltime 验收测试，嵌套运行核心 E2E 套件并检查耗时不超过 360 秒。
+
+```bash
+# 运行预算验收测试
+uv run pytest tests/e2e/test_full_suite_budget.py -m budget -v
 ```
 
 ## GDScript 格式化与 lint 强制门禁
