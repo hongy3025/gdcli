@@ -98,7 +98,7 @@ class FakeTask:
 			"deadline_ms": deadline_ms,
 			"tick": tick,
 			"cancel": cancel,
-			"terminal": terminal,
+			"finish": terminal,
 		}
 
 	func tick(_now_ms: int) -> bool:

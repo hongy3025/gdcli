@@ -40,7 +40,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
 				"tick": func(_now): return bool(started.state.done),
 				"cancel": func(_reason): started.state.node.cancel_request(),
-				"terminal": terminal
+				"finish": terminal
 			}
 		)
 	):

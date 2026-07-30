@@ -79,7 +79,7 @@ func _emit_terminal(task: Dictionary, outcome: Dictionary) -> void:
 	if bool(task.get("terminal_written", false)):
 		return
 	task["terminal_written"] = true
-	var callback: Variant = task.get("terminal", null)
+	var callback: Variant = task.get("finish", task.get("terminal", null))
 	if typeof(callback) == TYPE_CALLABLE and callback.is_valid():
 		callback.call(outcome)
 
