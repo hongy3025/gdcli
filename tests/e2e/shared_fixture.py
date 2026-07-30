@@ -250,6 +250,56 @@ def _runtime_root(project: Path) -> Path:
 # ── reset contract ────────────────────────────────────────────────────
 
 
+def restore_file_state(env: dict[str, Any], baseline: dict[str, bytes]) -> None:
+    """Restore every file that differs from the captured baseline."""
+    project = env["project"]
+    current_files: dict[str, Path] = {}
+    for path in project.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(project)).replace("\\", "/")
+        if (
+            rel.startswith(".godot/")
+            or rel.startswith("addons/gdapi/")
+            or rel == "project.godot"
+        ):
+            continue
+        current_files[rel] = path
+    for rel, path in current_files.items():
+        if rel not in baseline:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+    for rel, data in baseline.items():
+        destination = project / rel
+        if rel in current_files and current_files[rel].read_bytes() == data:
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            destination.write_bytes(data)
+        except OSError:
+            pass
+
+
+def snapshot_files(env: dict[str, Any]) -> dict[str, bytes]:
+    """Snapshot every non-generated file in the project for later restore."""
+    project = env["project"]
+    baseline: dict[str, bytes] = {}
+    for path in project.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(project)).replace("\\", "/")
+        if (
+            rel.startswith(".godot/")
+            or rel.startswith("addons/gdapi/")
+            or rel == "project.godot"
+        ):
+            continue
+        baseline[rel] = path.read_bytes()
+    return baseline
+
+
 def reset_shared_state(env: dict[str, Any], *, reason: str) -> None:
     """Deterministically restore the shared editor to a known baseline.
 
@@ -270,7 +320,13 @@ def reset_shared_state(env: dict[str, Any], *, reason: str) -> None:
             )
 
     _run("project/stop", "project/stop", None)
-    _run("scene/open", "scene/open", {"scene_path": "res://main.tscn"})
+    # Close and re-open the M2 baseline scene so signal connections and
+    # other in-memory mutations from a previous test do not survive.
+    try:
+        gdcli_call(env, "scene/close", None)
+    except BaseException:
+        pass
+    _run("scene/open", "scene/open", {"path": "res://scenes/main.tscn"})
     _run("editor/selection/set", "editor/selection/set", {"nodes": []})
     _run("gdapi/audit/clear", "gdapi/audit/clear", {"force": True})
     try:
@@ -369,12 +425,35 @@ def build_environment(
         "godot_version": godot_version,
         "gdcli": gdcli_bin(),
         "game_attached": False,
+        # M3 harness counters and recovery state — initialised here so
+        # the M3 tests can read/write them through the shared env.
+        "build_count": 1,
+        "install_count": 1,
+        "editor_start_count": 1,
+        "game_run_count": 0,
+        "game_stop_count": 0,
+        "fixture_reset_count": 0,
+        "fixture_reset_restarts": 0,
+        "recovery_markers": [],
+        "recovery_events": [],
+        "setup_events": ["build", "install", "editor_start"],
+        "pre_attach_stale_removed": True,
+        "editor_pids": set(),
     }
 
     _copy_native_library(env)
     EDITOR_START_COUNTER["starts"] += 1
     process = _start_editor(env)
     EDITOR_START_COUNTER["pids"].add(process.pid)
+    env.setdefault("editor_pids", set()).add(process.pid)
+    env["file_baseline"] = snapshot_files(env)
+    # Open the M2 baseline scene so editor-state assertions like
+    # `test_editor_starts_with_main_scene` see the same root scene the
+    # M2 fixture used to provide.
+    try:
+        gdcli_call(env, "scene/open", {"path": "res://scenes/main.tscn"})
+    except AssertionError:
+        pass
     return env
 
 
@@ -608,6 +687,140 @@ def e6_alias_with_policy(env: dict[str, Any], variant: str) -> dict[str, Any]:
     env.setdefault("policy_variants", set()).add(variant)
     return env
 
+
+
+
+# ── module-scoped alias fixtures ──────────────────────────────────────
+#
+# Each of these returns the same `e2e_editor` env so the existing
+# per-module test files can keep their original fixture names. They are
+# `module`-scoped (not `session`) so that the autouse per-test reset
+# fixture in each module's conftest.py still fires once per test, but
+# no extra process is ever started.
+
+
+@pytest.fixture(scope="session")
+def m2_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M2 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m3_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M3 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="module")
+def m3_running(m3_editor, m3_lifecycle) -> Any:
+    """Own one shared data-plane game for all fixture-state E2E tests."""
+    from e2e.m3.conftest import attach_game, detach_game
+    if not m3_editor.get("game_attached"):
+        attach_game(m3_editor)
+    try:
+        yield m3_editor
+    finally:
+        if m3_editor.get("game_attached"):
+            detach_game(m3_editor)
+
+
+@pytest.fixture(scope="module")
+def m3_lifecycle(e2e_editor) -> dict[str, Any]:
+    """Run the single status lifecycle scenario: initial stopped, then run/stop twice."""
+    from e2e.m3.conftest import (  # late import to avoid cycles
+        exec_ok, project_run, _runtime_root, _runtime_entries,
+        wait_for_connected, detach_game, reset_fixture,
+    )
+
+    initial = exec_ok(e2e_editor, "runtime/status")
+    cycles: list[dict[str, Any]] = []
+    scenario_error: BaseException | None = None
+    try:
+        for cycle_index in range(2):
+            started = project_run(e2e_editor)
+            connected = wait_for_connected(e2e_editor, timeout=30.0)
+            active = exec_ok(e2e_editor, "runtime/status")
+            stale = (
+                _runtime_root(e2e_editor)
+                / f"stale-lifecycle-{cycle_index}"
+                / "reply.json"
+            )
+            stale.parent.mkdir(parents=True, exist_ok=True)
+            stale.write_text("stale", encoding="utf-8")
+            stopped_status = detach_game(e2e_editor)
+            stopped = {"ok": True, "runtime_state": stopped_status["state"]}
+            cycles.append({
+                "cycle": cycle_index,
+                "started": started,
+                "connected": connected,
+                "active": active,
+                "stopped": stopped,
+                "stopped_status": stopped_status,
+                "runtime_entries": _runtime_entries(e2e_editor),
+                "stale_removed": not stale.exists(),
+            })
+    except BaseException as exc:
+        scenario_error = exc
+        raise
+    finally:
+        try:
+            if e2e_editor.get("game_attached"):
+                detach_game(e2e_editor)
+            else:
+                reset_fixture(e2e_editor)
+        except BaseException:
+            if scenario_error is None:
+                raise
+    return {"initial": initial, "cycles": cycles}
+
+
+@pytest.fixture(scope="session")
+def m4_env(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M4 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m5_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M5 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M6 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor_process(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 process tests."""
+    return e6_alias_with_policy(e2e_editor, "process")
+
+
+@pytest.fixture(scope="session")
+def m6_editor_eval(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 eval tests."""
+    return e6_alias_with_policy(e2e_editor, "eval")
+
+
+@pytest.fixture(scope="session")
+def m6_editor_bulk(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 bulk tests."""
+    return e6_alias_with_policy(e2e_editor, "bulk")
+
+
+@pytest.fixture(scope="session")
+def m6_editor_network(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 network tests."""
+    return e6_alias_with_policy(e2e_editor, "network")
+
+
+def e6_alias_with_policy(env: dict[str, Any], variant: str) -> dict[str, Any]:
+    """Return the env tagged with a policy variant for M6 tests."""
+    env.setdefault("policy_variants", set()).add(variant)
+    return env
+
 __all__ = [
     "E2E_DEADLOCK_TIMEOUT_SECONDS",
     "E2E_DEFAULT_POLICY_PATH",
@@ -620,6 +833,8 @@ __all__ = [
     "gdcli_call",
     "gdcli_expect_failure",
     "reset_shared_state",
+    "restore_file_state",
+    "snapshot_files",
     "teardown_environment",
     "temporary_policy",
 ]
