@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from .conftest import exec_error, exec_ok
+from .conftest import exec_error, exec_export
 
 
 def test_export_run_returns_matching_artifact_digest(m5_editor):
     output = Path(m5_editor["project"]) / "build" / "m5.pck"
     try:
-        result = exec_ok(m5_editor, "export/run", {
+        result = exec_export(m5_editor, "export/run", {
             "preset": "M5 PCK", "path": "res://build/m5.pck", "force": True,
         })
         assert output.is_file()

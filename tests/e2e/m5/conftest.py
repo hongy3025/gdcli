@@ -18,6 +18,7 @@ from e2e.m2.helpers import gdcli_bin, repo_root, require_godot_47, resolve_godot
 from e2e.m3.conftest import attach_editor, command_doc, detach_editor, exec_error, exec_ok
 
 M5_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m5_project"
+EXPORT_CLI_TIMEOUT = 180
 SNAPSHOT_NAMES = ("project.godot", "export_presets.cfg", "default_bus_layout.tres")
 
 
@@ -57,6 +58,24 @@ def restore_snapshot(env: dict[str, Any]) -> None:
             os.replace(temporary_path, destination)
         finally:
             temporary_path.unlink(missing_ok=True)
+
+
+def exec_export(env: dict[str, Any], route: str, data: dict | None = None) -> dict[str, Any]:
+    import json
+    args = ["exec", route, "--project", str(env["project"])]
+    if data is not None:
+        args += ["--data", json.dumps(data)]
+    result = subprocess.run(
+        [str(env["gdcli"]), "--json", *args],
+        capture_output=True, encoding="utf-8", errors="replace",
+        timeout=EXPORT_CLI_TIMEOUT,
+    )
+    if result.returncode != 0:
+        from e2e.m3.conftest import _harness_failure, _command_args
+        raise _harness_failure(env, _command_args(env, route, data), result, f"{route}: expected success")
+    payload = json.loads(result.stdout)
+    assert payload.get("ok") is True, f"{route}: {payload}"
+    return payload
 
 
 def assert_snapshot_restored(env: dict[str, Any], before: dict[str, str]) -> None:
@@ -106,7 +125,7 @@ def read_only_project_file(m5_editor: dict[str, Any]):
 
 
 __all__ = [
-    "assert_snapshot_restored", "command_doc", "exec_error", "exec_ok",
+    "assert_snapshot_restored", "command_doc", "exec_error", "exec_export", "exec_ok",
     "m5_editor", "project_snapshot", "read_only_project_file", "restore_snapshot",
     "tree_digest",
 ]
