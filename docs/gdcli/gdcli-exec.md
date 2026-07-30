@@ -3,7 +3,7 @@
 通过 gdapi HTTP 插件与运行中的 Godot 编辑器通信。需要编辑器运行中且 gdapi 插件已启用。
 
 ```bash
-gdcli exec <command> [--data <json>] [--timeout <secs>] --project <path>
+gdcli exec <command> [--data <json>] [--timeout <secs>] [--project <path>]
 ```
 
 | 选项 | 默认 | 说明 |
