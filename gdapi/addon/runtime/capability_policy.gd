@@ -114,6 +114,7 @@ func _reload_if_changed() -> void:
 	if not _is_valid_policy(parsed):
 		return
 	_policy = parsed
+	_normalize_policy(_policy)
 	_valid = true
 
 
@@ -211,6 +212,16 @@ func _has_exact_keys(value: Dictionary, expected_keys: Array) -> bool:
 		if typeof(key) != TYPE_STRING or not expected_keys.has(key):
 			return false
 	return true
+
+
+func _normalize_policy(policy: Dictionary) -> void:
+	var capabilities: Dictionary = Dictionary(policy.get("capabilities", {}))
+	for cap_name in capabilities:
+		var cap: Dictionary = capabilities[cap_name]
+		if cap.has("ports"):
+			var ports: Array = cap["ports"]
+			for i in ports.size():
+				ports[i] = int(ports[i])
 
 
 func _denied(capability: String) -> Dictionary:

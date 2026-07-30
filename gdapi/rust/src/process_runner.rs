@@ -74,7 +74,8 @@ impl ProcessRunnerCore {
             return Err("max_output_bytes must be positive".to_string());
         }
 
-        let mut child = Command::new(executable)
+        let exe = resolve_executable(cwd, executable);
+        let mut child = Command::new(&exe)
             .args(args)
             .current_dir(cwd)
             .stdin(Stdio::null())
@@ -246,6 +247,21 @@ fn finish_job(job: &mut Job, status: Option<ExitStatus>, timed_out: bool, cancel
         stderr: String::from_utf8_lossy(&shared.stderr).into_owned(),
         truncated: shared.truncated,
     });
+}
+
+fn resolve_executable(cwd: &Path, executable: &str) -> String {
+    let direct = cwd.join(executable);
+    if direct.exists() {
+        return direct.to_string_lossy().to_string();
+    }
+    let exts = [".exe", ".com", ".bat", ".cmd"];
+    for ext in &exts {
+        let candidate = cwd.join(format!("{executable}{ext}"));
+        if candidate.exists() {
+            return candidate.to_string_lossy().to_string();
+        }
+    }
+    executable.to_string()
 }
 
 #[cfg(test)]
