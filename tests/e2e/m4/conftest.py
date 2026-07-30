@@ -1,37 +1,23 @@
-"""Isolated M4 editor fixture — module-scoped with per-test reset."""
+"""M4 E2E fixtures — session-scoped alias of the shared e2e_editor and
+per-test project snapshot/reset.
+
+The single Godot editor and unified project live in `tests/e2e/shared_fixture.py`,
+re-exported through the root `tests/e2e/conftest.py` as `m4_env` and friends.
+This module only re-exports `exec_ok` / `exec_error` / `command_doc` for
+backward compatibility and provides the per-test isolation hook.
+"""
 
 from __future__ import annotations
 
 import hashlib
-import json
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-_THIS_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _THIS_DIR.parent.parent.parent
-_TESTS_DIR = _REPO_ROOT / "tests"
-if str(_TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TESTS_DIR))
-
-from e2e.m3.conftest import (
-    attach_editor,
-    command_doc,
-    detach_editor,
-    exec_error,
-    exec_ok,
-    gdcli_bin,
-    repo_root,
-    require_godot_47,
-    resolve_godot_bin,
-)
-
-
-M4_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m4_project"
+from e2e.m3.conftest import command_doc, exec_error, exec_ok  # noqa: F401
+from e2e.shared_fixture import m4_env  # noqa: F401 — re-export
+from e2e.shared_fixture import reset_shared_state, restore_file_state
 
 
 def project_snapshot(project: Path) -> str:
@@ -40,7 +26,11 @@ def project_snapshot(project: Path) -> str:
         if not path.is_file():
             continue
         rel = str(path.relative_to(project)).replace("\\", "/")
-        if rel.startswith(".godot/") or rel.startswith("addons/gdapi/bin/"):
+        if (
+            rel.startswith(".godot/")
+            or rel.startswith("addons/gdapi/")
+            or rel == "project.godot"
+        ):
             continue
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
@@ -50,63 +40,27 @@ def project_snapshot(project: Path) -> str:
 
 
 def reset_project_state(env: dict[str, Any]) -> None:
-    project = Path(env["project"])
-    shutil.copytree(M4_FIXTURE_SOURCE, project, dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns(".godot"))
-    subprocess.run(
-        [str(env["gdcli"]), "--json", "exec", "project/stop", "--project", str(project)],
-        capture_output=True, check=False,
-    )
-    subprocess.run(
-        [str(env["gdcli"]), "--json", "exec", "editor/selection/set",
-         "--project", str(project), "--data", json.dumps({"nodes": []})],
-        capture_output=True, check=False,
-    )
-    subprocess.run(
-        [str(env["gdcli"]), "--json", "exec", "gdapi/audit/clear",
-         "--project", str(project), "--data", json.dumps({"force": True})],
-        capture_output=True, check=False,
-    )
-    subprocess.run(
-        [str(env["gdcli"]), "install", "--project", str(project), "--force"],
-        capture_output=True, check=False,
-    )
-
-
-@pytest.fixture(scope="module")
-def m4_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    """Module-scoped editor for all M4 tests."""
-    godot_bin = resolve_godot_bin()
-    require_godot_47(godot_bin)
-    project = tmp_path_factory.mktemp("m4") / "project"
-    shutil.copytree(M4_FIXTURE_SOURCE, project)
-    install = subprocess.run(
-        [str(gdcli_bin()), "install", "--project", str(project), "--force"],
-        capture_output=True, encoding="utf-8", errors="replace",
-    )
-    assert install.returncode == 0, install.stderr
-    godot_dir = project / ".godot"
-    godot_dir.mkdir(exist_ok=True)
-    log_handle = (godot_dir / "godot.log").open("w", encoding="utf-8")
-    env: dict[str, Any] = {
-        "project": project,
-        "gdcli": gdcli_bin(),
-        "godot_log": log_handle,
-        "godot_log_path": godot_dir / "godot.log",
-        "game_attached": False,
-    }
-    godot, meta = attach_editor(project, godot_bin, log_handle)
-    env.update({"godot": godot, "meta": meta})
-    try:
-        yield env
-    finally:
-        detach_editor(env)
+    """Restore the file baseline and runtime state captured at fixture setup."""
+    baseline = env.get("file_baseline")
+    if baseline is not None:
+        restore_file_state(env, baseline)
+    reset_shared_state(env, reason="m4 autouse")
 
 
 @pytest.fixture(autouse=True)
 def isolated_test_state(m4_env):
+    before = project_snapshot(Path(m4_env["project"]))
     yield
     reset_project_state(m4_env)
+    after = project_snapshot(Path(m4_env["project"]))
+    assert after == before, "M4 project state changed after test"
 
 
-__all__ = ["command_doc", "exec_error", "exec_ok"]
+__all__ = [
+    "command_doc",
+    "exec_error",
+    "exec_ok",
+    "m4_env",
+    "project_snapshot",
+    "reset_project_state",
+]

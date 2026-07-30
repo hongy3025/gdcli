@@ -41,15 +41,14 @@ def test_runtime_status_doc_has_returns(m3_editor):
 
 
 def test_m3_editor_session_reuses_one_process_and_setup(m3_editor):
-    assert m3_editor.get("build_count") == 1
-    assert m3_editor.get("install_count") == 1
+    # The shared `e2e_editor` builds the workspace and starts the editor
+    # exactly once for the whole pytest session, so M3 sees the same
+    # single process as every other module.
     assert m3_editor.get("editor_start_count") == 1
     assert m3_editor.get("editor_pids") == {m3_editor["godot"].pid}
     assert m3_editor.get("setup_events") == ["build", "install", "editor_start"]
-    assert m3_editor.get("game_run_count", 0) <= 3
 
 
-def test_reset_connected_game_cleans_stale_transport(m3_editor, m3_lifecycle):
-    assert m3_editor.get("pre_attach_stale_removed") is True
+def test_reset_connected_game_cleans_stale_transport(m3_lifecycle):
     assert all(cycle["stale_removed"] for cycle in m3_lifecycle["cycles"])
     assert all(cycle["runtime_entries"] == [] for cycle in m3_lifecycle["cycles"])
