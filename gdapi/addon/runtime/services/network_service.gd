@@ -45,6 +45,8 @@ static func validate(body: Dictionary, policy: Dictionary) -> Dictionary:
 		"method": method,
 		"timeout_ms": timeout,
 		"max_response_bytes": cap,
+		"max_redirects": clampi(int(policy.get("max_redirects", 0)), 0, 5),
+		"redirect_policy": policy.duplicate(true),
 		"headers": body.get("headers", {}),
 		"body": String(body.get("body", ""))
 	}
@@ -59,10 +61,69 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 	node.body_size_limit = spec.max_response_bytes
 	node.max_redirects = 0
 	plugin.add_child(node)
-	var state := {"node": node, "response": response, "done": false}
+	var request_headers: PackedStringArray = []
+	for key in spec.headers:
+		request_headers.append("%s: %s" % [key, spec.headers[key]])
+	var state := {
+		"node": node,
+		"response": response,
+		"done": false,
+		"redirects": 0,
+		"visited": {spec.url: true},
+		"headers": request_headers,
+		"method": HTTPClient.METHOD_GET if spec.method == "GET" else HTTPClient.METHOD_HEAD,
+		"body": spec.body,
+		"spec": spec,
+	}
 	node.request_completed.connect(
 		func(result, response_code, headers, body):
 			if state.done:
+				return
+			if (
+				result == HTTPRequest.RESULT_SUCCESS
+				and response_code >= 300
+				and response_code < 400
+			):
+				var location := _header_value(headers, "location")
+				if location.is_empty() or int(state.redirects) >= int(spec.max_redirects):
+					state.done = true
+					state["outcome"] = {
+						"ok": false,
+						"code": ErrorCodes.CONFLICT,
+						"summary": "redirect limit reached"
+					}
+					response.error("redirect limit reached", ErrorCodes.CONFLICT, 409)
+					node.queue_free()
+					return
+				var target := TargetGuard.authorize(location, spec.redirect_policy)
+				if not target.ok or state.visited.has(target.url):
+					state.done = true
+					state["outcome"] = {
+						"ok": false,
+						"code": target.code if not target.ok else ErrorCodes.CONFLICT,
+						"summary": "redirect target rejected"
+					}
+					response.error(
+						"redirect target rejected",
+						String(state.outcome.code),
+						ErrorCodes.http_status(String(state.outcome.code))
+					)
+					node.queue_free()
+					return
+				state.redirects += 1
+				state.visited[target.url] = true
+				var redirect_error := node.request(
+					target.url, state.headers, state.method, state.body
+				)
+				if redirect_error != OK:
+					state.done = true
+					state["outcome"] = {
+						"ok": false,
+						"code": ErrorCodes.GODOT_ERROR,
+						"summary": "redirect request could not start"
+					}
+					response.error("redirect request could not start", ErrorCodes.GODOT_ERROR, 500)
+					node.queue_free()
 				return
 			state.done = true
 			if result != HTTPRequest.RESULT_SUCCESS:
@@ -106,15 +167,19 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 				)
 			node.queue_free()
 	)
-	var headers: PackedStringArray = []
-	for key in spec.headers:
-		headers.append("%s: %s" % [key, spec.headers[key]])
-	var method := HTTPClient.METHOD_GET if spec.method == "GET" else HTTPClient.METHOD_HEAD
-	var err := node.request(spec.url, headers, method, spec.body)
+	var err := node.request(spec.url, request_headers, state.method, spec.body)
 	if err != OK:
 		node.queue_free()
 		return _error(ErrorCodes.GODOT_ERROR, "HTTP request could not start")
 	return {"ok": true, "state": state}
+
+
+static func _header_value(headers: PackedStringArray, wanted: String) -> String:
+	for header in headers:
+		var separator := header.find(":")
+		if separator > 0 and header.left(separator).strip_edges().to_lower() == wanted:
+			return header.substr(separator + 1).strip_edges()
+	return ""
 
 
 static func _error(code: String, message: String) -> Dictionary:
