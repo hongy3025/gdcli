@@ -24,6 +24,9 @@ func doc() -> GdApiRouteDoc:
 			"部署结果", {"ok": "bool", "serial": "String", "installed": "bool", "launched": "bool"}
 		)
 		. example(
-			'{"serial":"emulator-5554","apk_path":"res://build/app.apk","package":"org.example.app","activity":"com.godot.game.GodotApp","force":true}'
+			(
+				'{"serial":"emulator-5554","apk_path":"res://build/app.apk",'
+				+ '"package":"org.example.app","activity":"com.godot.game.GodotApp","force":true}'
+			)
 		)
 	)

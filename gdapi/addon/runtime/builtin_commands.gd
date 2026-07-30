@@ -24,7 +24,7 @@ func set_routes(routes: Dictionary) -> void:
 ##
 ## @param req 请求对象
 ## @param res 响应对象
-func handle(req: GdApiRequest, res: GdApiResponse) -> void:
+func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 	res.json({"ok": true, "commands": _build_list()})
 
 

@@ -38,7 +38,10 @@ func doc() -> GdApiRouteDoc:
 		. param("text", "String", true, "替换内容")
 		. param("force", "bool", false, "无变化时也写盘需 true", "false")
 		. example(
-			'{"path":"res://scripts/player.gd","start_line":2,"end_line":2,"text":"var speed := 20","force":true}'
+			(
+				'{"path":"res://scripts/player.gd","start_line":2,"end_line":2,'
+				+ '"text":"var speed := 20","force":true}'
+			)
 		)
 		. returns(
 			"patch 结果",

@@ -64,7 +64,10 @@ func doc() -> GdApiRouteDoc:
 		. param("target_path", "String", true, "目标节点路径")
 		. param("method", "String", true, "目标方法名")
 		. example(
-			'{"source_path":"/root/Main/Player","signal":"health_changed","target_path":"/root/Main/Target","method":"_on_health_changed"}'
+			(
+				'{"source_path":"/root/Main/Player","signal":"health_changed",'
+				+ '"target_path":"/root/Main/Target","method":"_on_health_changed"}'
+			)
 		)
 		. returns(
 			"disconnect",

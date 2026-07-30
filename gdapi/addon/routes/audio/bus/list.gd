@@ -3,7 +3,7 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 const Editor := preload("res://addons/gdapi/runtime/services/audio_editor.gd")
 
 
-func handle(req: GdApiRequest, res: GdApiResponse) -> void:
+func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 	_send(res, Editor.list_buses())
 
 

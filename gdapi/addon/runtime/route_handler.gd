@@ -16,6 +16,8 @@ extends RefCounted
 ## - 通过 res.error() 返回错误响应
 ## - 不要使用返回值
 
+const RouteDoc := preload("res://addons/gdapi/runtime/route_doc.gd")
+
 
 ## 处理请求的虚函数，子类必须实现
 ##
@@ -25,15 +27,11 @@ func handle(_req: GdApiRequest, _res: GdApiResponse) -> void:
 	push_error("handler not implemented")
 
 
-## 路由帮助文档预加载（供 doc() 默认实现使用）
-const _RouteDoc := preload("res://addons/gdapi/runtime/route_doc.gd")
-
-
 ## 返回该路由的帮助文档
 ##
 ## 子类可选重载：未重载时返回 summary 为空的占位文档，路由仍可正常工作，
 ## 仅在 `command/doc` 详情列表中显示为空描述。
 ##
 ## @return GdApiRouteDoc 实例
-func doc() -> _RouteDoc:
-	return _RouteDoc.make("")
+func doc() -> RouteDoc:
+	return RouteDoc.make("")

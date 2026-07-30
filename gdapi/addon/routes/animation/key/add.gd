@@ -39,7 +39,10 @@ func doc() -> GdApiRouteDoc:
 		. param("time", "float", true, "秒", "")
 		. param("value", "Variant", true, "key 值", "")
 		. example(
-			'{"player_path":"AnimationPlayer","name":"idle","track_index":0,"time":0.5,"value":{"x":10,"y":20}}'
+			(
+				'{"player_path":"AnimationPlayer","name":"idle",'
+				+ '"track_index":0,"time":0.5,"value":{"x":10,"y":20}}'
+			)
 		)
 		. returns("key 结果", {"key_index": "int", "undoable": "bool, true"})
 	)

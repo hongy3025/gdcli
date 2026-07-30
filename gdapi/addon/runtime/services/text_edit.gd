@@ -177,10 +177,10 @@ static func attach_script(node_path: String, path: String) -> Dictionary:
 			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "script/attach requires editor"
 		}
 	# import NodeEditor 是循环依赖,使用延迟查找
-	var EditorInterfaceRef := (
+	var editor_interface_ref := (
 		Engine.get_singleton("EditorInterface") if Engine.has_singleton("EditorInterface") else null
 	)
-	if EditorInterfaceRef == null:
+	if editor_interface_ref == null:
 		return {
 			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "EditorInterface unavailable"
 		}
@@ -223,6 +223,7 @@ static func attach_script(node_path: String, path: String) -> Dictionary:
 
 
 ## detach script.接 UndoRedo.
+# gdlint: disable=duplicated-load
 static func detach_script(node_path: String) -> Dictionary:
 	var NodeEditor := load("res://addons/gdapi/runtime/services/node_editor.gd")
 	var lookup: Dictionary = NodeEditor.find(node_path)
@@ -244,6 +245,9 @@ static func detach_script(node_path: String) -> Dictionary:
 	manager.add_undo_method(node, "set_script", previous_script)
 	manager.commit_action()
 	return {"ok": true, "changed": true, "undoable": true, "node_path": lookup.node_path}
+
+
+# gdlint: enable=duplicated-load
 
 
 ## 校验 GDScript 语法.不修改文件,使用 GDScript 解析.

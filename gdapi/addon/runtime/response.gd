@@ -148,28 +148,21 @@ func _send(body: PackedByteArray) -> void:
 ## @param ext 文件扩展名（小写）
 ## @return 对应的 MIME 类型字符串
 func _get_mime_type(ext: String) -> String:
-	match ext:
-		"png":
-			return "image/png"
-		"jpg", "jpeg":
-			return "image/jpeg"
-		"gif":
-			return "image/gif"
-		"svg":
-			return "image/svg+xml"
-		"json":
-			return "application/json"
-		"txt":
-			return "text/plain"
-		"html":
-			return "text/html"
-		"css":
-			return "text/css"
-		"js":
-			return "application/javascript"
-		"gdshader", "shader":
-			return "text/plain"
-		"tscn", "tres", "gd":
-			return "text/plain"
-		_:
-			return "application/octet-stream"
+	var mime_types := {
+		"png": "image/png",
+		"jpg": "image/jpeg",
+		"jpeg": "image/jpeg",
+		"gif": "image/gif",
+		"svg": "image/svg+xml",
+		"json": "application/json",
+		"txt": "text/plain",
+		"html": "text/html",
+		"css": "text/css",
+		"js": "application/javascript",
+		"gdshader": "text/plain",
+		"shader": "text/plain",
+		"tscn": "text/plain",
+		"tres": "text/plain",
+		"gd": "text/plain",
+	}
+	return mime_types.get(ext, "application/octet-stream")

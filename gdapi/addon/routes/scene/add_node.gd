@@ -15,6 +15,7 @@ const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const ROUTE := "scene/add_node"
 
 
+# gdlint: disable=max-returns
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var scene_path: String = req.get_body("scene_path", "")
 	var node_type: String = req.get_body("node_type", "")
@@ -143,7 +144,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"parent": parent_path,
 			}
 		)
-	)
+	)  # gdlint: enable=max-returns
 
 
 func doc() -> GdApiRouteDoc:

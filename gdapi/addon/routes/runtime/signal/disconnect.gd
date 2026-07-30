@@ -18,7 +18,10 @@ func doc() -> GdApiRouteDoc:
 		. param("target", "String", true, "目标节点路径", "")
 		. param("method", "String", true, "目标方法名", "")
 		. example(
-			'{"node_path":"/root/RuntimeMain/ProbeTarget","signal":"counted","target":"/root/RuntimeMain/ProbeTarget","method":"increment"}'
+			(
+				'{"node_path":"/root/RuntimeMain/ProbeTarget","signal":"counted",'
+				+ '"target":"/root/RuntimeMain/ProbeTarget","method":"increment"}'
+			)
 		)
 		. returns("结果", {"disconnected": "bool"})
 	)

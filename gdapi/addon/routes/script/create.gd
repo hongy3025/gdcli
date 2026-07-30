@@ -31,7 +31,10 @@ func doc() -> GdApiRouteDoc:
 		. param("content", "String", true, "完整脚本内容")
 		. param("force", "bool", false, "目标已存在时需为 true", "false")
 		. example(
-			'{"path":"res://scripts/generated.gd","content":"extends Node2D\\nvar speed := 10\\n","force":true}'
+			(
+				'{"path":"res://scripts/generated.gd",'
+				+ '"content":"extends Node2D\\nvar speed := 10\\n","force":true}'
+			)
 		)
 		. returns(
 			"创建结果",

@@ -13,6 +13,7 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const ROUTE := "scene/load_sprite"
 
 
+# gdlint: disable=max-returns
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var scene_path: String = req.get_body("scene_path", "")
 	var node_path: String = req.get_body("node_path", "")
@@ -133,7 +134,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"texture": texture_path,
 			}
 		)
-	)
+	)  # gdlint: enable=max-returns
 
 
 func doc() -> GdApiRouteDoc:
@@ -146,7 +147,10 @@ func doc() -> GdApiRouteDoc:
 		. param("texture_path", "String", true, "纹理资源路径")
 		. param("force", "bool", true, "必须为 true 才执行")
 		. example(
-			'{"scene_path":"res://test.tscn","node_path":"root/Sprite2D","texture_path":"res://icon.svg","force":true}'
+			(
+				'{"scene_path":"res://test.tscn","node_path":"root/Sprite2D",'
+				+ '"texture_path":"res://icon.svg","force":true}'
+			)
 		)
 		. returns(
 			"设置结果",

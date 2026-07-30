@@ -160,10 +160,10 @@ static func set_param(path: Variant, name: Variant, value: Variant, force: Varia
 
 static func parse_uniforms(source: String) -> Array:
 	var regex := RegEx.new()
-	(
-		regex
-		. compile(
-			"^\\s*uniform\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?::[^=;]+)?(?:=\\s*([^;]+))?\\s*;"
+	regex.compile(
+		(
+			"^\\s*uniform\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)"
+			+ "\\s*(?::[^=;]+)?(?:=\\s*([^;]+))?\\s*;"
 		)
 	)
 	var result: Array = []

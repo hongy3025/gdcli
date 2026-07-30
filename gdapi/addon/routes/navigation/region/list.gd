@@ -4,7 +4,7 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 const Editor := preload("res://addons/gdapi/runtime/services/navigation_editor.gd")
 
 
-func handle(req: GdApiRequest, res: GdApiResponse) -> void:
+func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 	var result := Editor.list_regions()
 	if result.ok:
 		res.json(result)

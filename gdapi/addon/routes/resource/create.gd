@@ -33,7 +33,10 @@ func doc() -> GdApiRouteDoc:
 		. param("properties", "Dictionary<String, Variant>", false, "要设置的属性表")
 		. param("force", "bool", false, "覆盖已有文件需为 true", "false")
 		. example(
-			'{"path":"res://resources/generated.tres","type":"Resource","properties":{"resource_name":"Generated"}}'
+			(
+				'{"path":"res://resources/generated.tres","type":"Resource",'
+				+ '"properties":{"resource_name":"Generated"}}'
+			)
 		)
 		. returns(
 			"create",

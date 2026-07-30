@@ -23,7 +23,8 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		signal_names.append(s.name)
 	signal_names.sort()
 	var connections: Array = []
-	for c in node.get_signal_connection_list(""):  # placeholder; get_signal_connection_list needs signal name
+	# placeholder; get_signal_connection_list needs signal name
+	for c in node.get_signal_connection_list(""):
 		pass
 	# Iterate signal names then per-signal connections
 	var per_signal := {}

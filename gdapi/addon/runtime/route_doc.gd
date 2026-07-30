@@ -1,7 +1,8 @@
 ## 路由帮助文档对象
 ##
 ## 通过 GdApiRouteDoc.make("...").desc("...").param(...).returns(...) 链式构造。
-## 由 route handler 的 doc() 方法返回，内置 `command/list` / `command/doc` 路由调用 to_dict()/to_summary_dict() 序列化。
+## 由 route handler 的 doc() 方法返回，内置 `command/list` / `command/doc`
+## 路由调用 to_dict()/to_summary_dict() 序列化。
 
 @tool
 class_name GdApiRouteDoc
@@ -27,6 +28,7 @@ var examples: Array[String] = []
 ##
 ## @param summary_ 一句话功能描述
 ## @return 新建的 GdApiRouteDoc 实例
+# gdlint: disable=function-argument-name
 static func make(summary_: String) -> GdApiRouteDoc:
 	var d := GdApiRouteDoc.new()
 	d.summary = summary_
@@ -50,6 +52,7 @@ func desc(text: String) -> GdApiRouteDoc:
 ## @param description_ 参数说明
 ## @param default_ 默认值（null 表示无默认值）
 ## @return self 以便链式调用
+# gdlint: disable=function-argument-name
 func param(
 	name_: String, type_: String, required_: bool, description_: String, default_ = null
 ) -> GdApiRouteDoc:
@@ -68,6 +71,7 @@ func param(
 ## @param desc_ 返回值整体说明
 ## @param fields_ 字段字典，键为字段名，值为类型+说明字符串
 ## @return self 以便链式调用
+# gdlint: disable=function-argument-name
 func returns(desc_: String, fields_: Dictionary = {}) -> GdApiRouteDoc:
 	returns_desc = desc_
 	returns_fields = fields_

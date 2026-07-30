@@ -4,10 +4,10 @@
 class_name GdApiRuntimeDebuggerRegistration
 extends RefCounted
 
+var registered: bool = false
 var _plugin: Object = null
 var _add: Callable = Callable()
 var _remove: Callable = Callable()
-var registered: bool = false
 
 
 func setup(plugin: Object, add: Callable, remove: Callable) -> void:

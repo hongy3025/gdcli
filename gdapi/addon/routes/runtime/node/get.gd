@@ -13,7 +13,10 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("读取运行期节点属性")
 		. desc(
-			"node_path 是绝对路径;property 必须是已声明属性。值通过 VariantCodec 编码,Vector/Color/NodePath/Resource 等会保留 type 字段。"
+			(
+				"node_path 是绝对路径;property 必须是已声明属性。"
+				+ "值通过 VariantCodec 编码,Vector/Color/NodePath/Resource 等会保留 type 字段。"
+			)
 		)
 		. param("node_path", "String", true, "节点路径", "")
 		. param("property", "String", true, "属性名", "")

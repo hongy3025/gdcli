@@ -13,6 +13,7 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const ROUTE := "scene/save"
 
 
+# gdlint: disable=max-returns
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var scene_path: String = req.get_body("scene_path", "")
 	var new_path: String = req.get_body("new_path", "")
@@ -93,7 +94,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"path": save_path,
 			}
 		)
-	)
+	)  # gdlint: enable=max-returns
 
 
 func doc() -> GdApiRouteDoc:

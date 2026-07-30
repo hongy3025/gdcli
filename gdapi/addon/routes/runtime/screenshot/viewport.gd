@@ -15,7 +15,10 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("截主视口当前帧")
 		. desc(
-			"等 RenderingServer.frame_post_draw 后取 SceneTree.root viewport 纹理。源尺寸超过 1920x1080 时在 CPU readback 前拒绝；否则返回 PNG 的 base64 编码加 sha256。"
+			(
+				"等 RenderingServer.frame_post_draw 后取 SceneTree.root viewport 纹理。"
+				+ "源尺寸超过 1920x1080 时在 CPU readback 前拒绝；否则返回 PNG 的 base64 编码加 sha256。"
+			)
 		)
 		. returns(
 			"截图结果",

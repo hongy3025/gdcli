@@ -27,13 +27,19 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("设置节点属性接 UndoRedo")
 		. desc(
-			"通过 VariantCodec.decode 解码输入,EditAction.commit_property 提交。保留属性 script/source_code 返回 permission_denied。"
+			(
+				"通过 VariantCodec.decode 解码输入,EditAction.commit_property 提交。"
+				+ "保留属性 script/source_code 返回 permission_denied。"
+			)
 		)
 		. param("node_path", "String", true, "节点路径")
 		. param("property", "String", true, "属性名")
 		. param("value", "Variant 编码", true, "Variant 编码字典或裸值")
 		. example(
-			'{"node_path":"/root/Main/Player","property":"position","value":{"type":"Vector2","value":[24,32]}}'
+			(
+				'{"node_path":"/root/Main/Player","property":"position",'
+				+ '"value":{"type":"Vector2","value":[24,32]}}'
+			)
 		)
 		. returns(
 			"set 结果",

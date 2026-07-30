@@ -13,6 +13,7 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const ROUTE := "scene/export_mesh_library"
 
 
+# gdlint: disable=max-returns
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var scene_path: String = req.get_body("scene_path", "")
 	var output_path: String = req.get_body("output_path", "")
@@ -131,7 +132,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"item_count": item_id,
 			}
 		)
-	)
+	)  # gdlint: enable=max-returns
 
 
 func doc() -> GdApiRouteDoc:
