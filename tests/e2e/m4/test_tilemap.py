@@ -37,13 +37,24 @@ def test_tilemap_cell_set_is_undoable_and_persists(m4_env):
     assert exec_ok(m4_env, "tilemap/cell/get", {"layer_path": "TileMapLayer", "cell": {"x": 1, "y": 2}})["source_id"] == 0
 
 
-def test_tilemap_rejects_invalid_cell_and_clear_without_force(m4_env):
-    """Out-of-range coordinates and destructive clears must fail before mutation."""
+def test_tilemap_rejects_invalid_cell(m4_env):
+    """Out-of-range coordinates must fail before mutation."""
     exec_ok(m4_env, "scene/open", {"path": "res://scenes/tilemap.tscn"})
     invalid = exec_error(m4_env, "tilemap/cell/set", {"layer_path": "TileMapLayer", "cell": {"x": 32768, "y": 0}, "source_id": 0, "atlas_coords": {"x": 0, "y": 0}})
     assert invalid["code"] == "invalid_param"
-    unsafe = exec_error(m4_env, "tilemap/layer/clear", {"layer_path": "TileMapLayer"})
-    assert unsafe["code"] == "unsafe_operation"
+
+
+def test_tilemap_clear_without_force_succeeds(m4_env):
+    """Clear must commit immediately, not require force."""
+    exec_ok(m4_env, "scene/open", {"path": "res://scenes/tilemap.tscn"})
+    exec_ok(
+        m4_env,
+        "tilemap/cell/set",
+        {"layer_path": "TileMapLayer", "cell": {"x": 0, "y": 0}, "source_id": 0, "atlas_coords": {"x": 0, "y": 0}},
+    )
+    cleared = exec_ok(m4_env, "tilemap/layer/clear", {"layer_path": "TileMapLayer"})
+    assert cleared["changed"] is True
+    assert cleared["undoable"] is True
 
 
 def test_tilemap_fill_and_used_cells_are_sorted(m4_env):

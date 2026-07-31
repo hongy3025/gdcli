@@ -16,7 +16,7 @@ def test_navigation_routes_are_discoverable_and_documented(m4_env):
         assert command_doc(m4_env, route)["summary"]
 
 
-def test_navigation_regions_bake_to_project_local_resource_with_force(m4_env):
+def test_navigation_regions_bake_to_project_local_resource(m4_env):
     exec_ok(m4_env, "scene/open", {"path": "res://scenes/navigation.tscn"})
     regions = exec_ok(m4_env, "navigation/region/list")
     assert regions["regions"] == [{
@@ -29,14 +29,13 @@ def test_navigation_regions_bake_to_project_local_resource_with_force(m4_env):
     baked = exec_ok(m4_env, "navigation/mesh/bake", {
         "region_path": "/root/NavigationDomain/Region", "path": target,
     })
+    assert baked["path"] == target
     assert baked["undoable"] is False
     assert exec_ok(m4_env, "resource/info", {"path": target})["class"] == "NavigationPolygon"
-    assert exec_error(m4_env, "navigation/mesh/bake", {
+    overwritten = exec_ok(m4_env, "navigation/mesh/bake", {
         "region_path": "/root/NavigationDomain/Region", "path": target,
-    })["code"] == "unsafe_operation"
-    assert exec_ok(m4_env, "navigation/mesh/bake", {
-        "region_path": "/root/NavigationDomain/Region", "path": target, "force": True,
-    })["path"] == target
+    })
+    assert overwritten["path"] == target
 
     save_reopen(m4_env, "res://scenes/navigation.tscn")
     assert exec_ok(m4_env, "resource/info", {"path": target})["class"] == "NavigationPolygon"

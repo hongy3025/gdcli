@@ -3,8 +3,8 @@ class_name GdApiTilemapEditor
 extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
+const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
-const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.gd")
 
 const CELL_LIMIT := 32767
 const MAX_FILL_CELLS := 4096
@@ -123,19 +123,19 @@ static func fill_rect(
 	)
 
 
-static func clear(path: String, force: bool) -> Dictionary:
-	if not force:
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "tilemap/layer/clear requires force:true"
-		}
+static func clear(path: String) -> Dictionary:
 	var found := layer(path)
 	if not found.ok:
 		return found
 	var target: TileMapLayer = found.layer
 	var cells: Array = target.get_used_cells()
-	return _commit_cells(target, cells, -1, Vector2i(-1, -1), 0, "gdcli: clear tilemap layer")
+	var committed := _commit_cells(
+		target, cells, -1, Vector2i(-1, -1), 0, "gdcli: clear tilemap layer"
+	)
+	if not committed.ok:
+		return committed
+	AuditLog.record("tilemap/layer/clear", "dangerous", {"layer_path": path}, true, "")
+	return committed
 
 
 static func used_cells(path: String) -> Dictionary:

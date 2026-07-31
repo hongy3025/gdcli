@@ -34,24 +34,13 @@ static func add_bus(name: Variant) -> Dictionary:
 	return {"ok": true, "changed": true, "name": bus_name, "undoable": false}
 
 
-static func remove_bus(name: Variant, force: Variant) -> Dictionary:
+static func remove_bus(name: Variant) -> Dictionary:
 	if typeof(name) != TYPE_STRING or String(name).strip_edges().is_empty():
 		return _error(ErrorCodes.MISSING_PARAM, "name is required")
 	var bus_name := String(name).strip_edges()
 	var index := _bus_index(bus_name)
 	if index < 0:
 		return _error(ErrorCodes.NOT_FOUND, "audio bus not found")
-	if bus_name == "Master" or index == 0:
-		return _error(ErrorCodes.PERMISSION_DENIED, "Master bus cannot be removed")
-	if typeof(force) != TYPE_BOOL or not force:
-		AuditLog.record(
-			"audio/bus/remove",
-			"dangerous",
-			{"name": bus_name, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return _error(ErrorCodes.UNSAFE_OPERATION, "audio/bus/remove requires force:true")
 	AudioServer.remove_bus(index)
 	var saved := _save_layout("audio/bus/remove")
 	if not saved.ok:

@@ -84,25 +84,21 @@ static func assign(node_path: Variant, path: Variant) -> Dictionary:
 	return result
 
 
-static func save(
-	node_path: Variant, path: Variant, force: Variant, route: String = "material/save"
-) -> Dictionary:
+static func save(node_path: Variant, path: Variant, route: String = "material/save") -> Dictionary:
 	var material := _material(node_path)
 	if not material.ok:
 		return material
-	return _save_resource(material.material, path, force, route)
+	return _save_resource(material.material, path, route)
 
 
-static func duplicate_material(
-	node_path: Variant, path: Variant, force: Variant = false
-) -> Dictionary:
+static func duplicate_material(node_path: Variant, path: Variant) -> Dictionary:
 	var material := _material(node_path)
 	if not material.ok:
 		return material
 	var copy: Variant = material.material.duplicate(true)
 	if not copy is Material:
 		return _error(ErrorCodes.GODOT_ERROR, "material duplication failed")
-	return _save_resource(copy, path, force, "material/duplicate")
+	return _save_resource(copy, path, "material/duplicate")
 
 
 static func _node(node_path: Variant) -> Dictionary:
@@ -151,27 +147,11 @@ static func _matches_type(value: Variant, expected: int) -> bool:
 	return typeof(value) == expected
 
 
-static func _save_resource(
-	resource: Material, path: Variant, force: Variant, route: String
-) -> Dictionary:
+static func _save_resource(resource: Material, path: Variant, route: String) -> Dictionary:
 	var checked := _project_path(path, "write")
 	if not checked.ok:
 		AuditLog.record(route, "file", {"path": path}, false, checked.code)
 		return checked
-	if typeof(force) != TYPE_BOOL:
-		AuditLog.record(route, "file", {"path": checked.path}, false, ErrorCodes.INVALID_PARAM)
-		return _error(ErrorCodes.INVALID_PARAM, "force must be a bool")
-	if FileAccess.file_exists(ProjectSettings.globalize_path(checked.path)) and not force:
-		AuditLog.record(
-			route,
-			"file",
-			{"path": checked.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return _error(
-			ErrorCodes.UNSAFE_OPERATION, route + " requires force:true for an existing target"
-		)
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(checked.path).get_base_dir()
 	)
@@ -179,7 +159,7 @@ static func _save_resource(
 	if save_error != OK:
 		AuditLog.record(route, "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR)
 		return _error(ErrorCodes.GODOT_ERROR, "ResourceSaver.save failed: " + str(save_error))
-	AuditLog.record(route, "file", {"path": checked.path, "force": force}, true)
+	AuditLog.record(route, "file", {"path": checked.path}, true)
 	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": checked.path}
 
 

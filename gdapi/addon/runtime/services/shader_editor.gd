@@ -22,7 +22,7 @@ static func read(path: Variant) -> Dictionary:
 	}
 
 
-static func write(path: Variant, source: Variant, force: Variant) -> Dictionary:
+static func write(path: Variant, source: Variant) -> Dictionary:
 	var checked := _shader_path(path, "write")
 	if not checked.ok:
 		AuditLog.record("shader/write", "file", {"path": path}, false, checked.code)
@@ -33,22 +33,6 @@ static func write(path: Variant, source: Variant, force: Variant) -> Dictionary:
 		)
 		return _error(
 			ErrorCodes.INVALID_PARAM, "source must be shader source containing shader_type"
-		)
-	if typeof(force) != TYPE_BOOL:
-		AuditLog.record(
-			"shader/write", "file", {"path": checked.path}, false, ErrorCodes.INVALID_PARAM
-		)
-		return _error(ErrorCodes.INVALID_PARAM, "force must be a bool")
-	if FileAccess.file_exists(checked.path) and not force:
-		AuditLog.record(
-			"shader/write",
-			"file",
-			{"path": checked.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return _error(
-			ErrorCodes.UNSAFE_OPERATION, "shader/write requires force:true for an existing target"
 		)
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(checked.path).get_base_dir()
@@ -62,10 +46,7 @@ static func write(path: Variant, source: Variant, force: Variant) -> Dictionary:
 	file.store_string(source)
 	file.close()
 	AuditLog.record(
-		"shader/write",
-		"file",
-		{"path": checked.path, "bytes": String(source).length(), "force": force},
-		true
+		"shader/write", "file", {"path": checked.path, "bytes": String(source).length()}, true
 	)
 	return {
 		"ok": true,
@@ -89,7 +70,7 @@ static func uniforms(path: Variant) -> Dictionary:
 	}
 
 
-static func create_material(shader_path: Variant, path: Variant, force: Variant) -> Dictionary:
+static func create_material(shader_path: Variant, path: Variant) -> Dictionary:
 	var shader_checked := _shader_path(shader_path, "read")
 	if not shader_checked.ok:
 		return shader_checked
@@ -102,10 +83,10 @@ static func create_material(shader_path: Variant, path: Variant, force: Variant)
 		return _error(ErrorCodes.GODOT_ERROR, "failed to load shader")
 	var material := ShaderMaterial.new()
 	material.shader = shader
-	return _save_material(material, path, force, "shader/material/create")
+	return _save_material(material, path, "shader/material/create")
 
 
-static func set_param(path: Variant, name: Variant, value: Variant, force: Variant) -> Dictionary:
+static func set_param(path: Variant, name: Variant, value: Variant) -> Dictionary:
 	var checked := _material_path(path, "write")
 	if not checked.ok:
 		AuditLog.record("shader/param/set", "file", {"path": path}, false, checked.code)
@@ -114,17 +95,6 @@ static func set_param(path: Variant, name: Variant, value: Variant, force: Varia
 		return _error(ErrorCodes.MISSING_PARAM, "name is required")
 	if not FileAccess.file_exists(checked.path):
 		return _error(ErrorCodes.NOT_FOUND, "shader material not found")
-	if typeof(force) != TYPE_BOOL:
-		return _error(ErrorCodes.INVALID_PARAM, "force must be a bool")
-	if not force:
-		AuditLog.record(
-			"shader/param/set",
-			"file",
-			{"path": checked.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return _error(ErrorCodes.UNSAFE_OPERATION, "shader/param/set requires force:true")
 	var material := ResourceLoader.load(
 		checked.path, "ShaderMaterial", ResourceLoader.CACHE_MODE_IGNORE
 	)
@@ -208,26 +178,11 @@ static func _decode_uniform_value(value: Variant, type: String) -> Dictionary:
 	return {"ok": true, "value": decoded.value}
 
 
-static func _save_material(
-	material: ShaderMaterial, path: Variant, force: Variant, route: String
-) -> Dictionary:
+static func _save_material(material: ShaderMaterial, path: Variant, route: String) -> Dictionary:
 	var checked := _material_path(path, "write")
 	if not checked.ok:
 		AuditLog.record(route, "file", {"path": path}, false, checked.code)
 		return checked
-	if typeof(force) != TYPE_BOOL:
-		return _error(ErrorCodes.INVALID_PARAM, "force must be a bool")
-	if FileAccess.file_exists(checked.path) and not force:
-		AuditLog.record(
-			route,
-			"file",
-			{"path": checked.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return _error(
-			ErrorCodes.UNSAFE_OPERATION, route + " requires force:true for an existing target"
-		)
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(checked.path).get_base_dir()
 	)
@@ -235,7 +190,7 @@ static func _save_material(
 	if saved != OK:
 		AuditLog.record(route, "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR)
 		return _error(ErrorCodes.GODOT_ERROR, "ResourceSaver.save failed: " + str(saved))
-	AuditLog.record(route, "file", {"path": checked.path, "force": force}, true)
+	AuditLog.record(route, "file", {"path": checked.path}, true)
 	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": checked.path}
 
 

@@ -1,6 +1,7 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 const Editor := preload("res://addons/gdapi/runtime/services/physics_editor.gd")
+const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
@@ -18,8 +19,19 @@ func _send(res: GdApiResponse, r: Dictionary) -> void:
 	if r.ok:
 		res.json(r)
 	else:
-		res.error(r.error, r.code, 501 if r.code == "not_supported" else 400)
+		res.error(r.error, r.code, ErrorCodes.http_status(r.code))
 
 
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("创建 2D 物理关节").returns("joint", {"undoable": "true"})
+	return (
+		GdApiRouteDoc
+		. make("创建 2D 物理关节")
+		. desc(
+			"在当前编辑场景中创建 PinJoint2D/GrooveJoint2D/DampedSpringJoint2D 并挂到 parent_path 下，接入 UndoRedo。"
+		)
+		. param("parent_path", "String", true, "父节点绝对路径")
+		. param("type", "String", true, "关节类型")
+		. param("name", "String", false, "新节点名称", "Joint")
+		. example('{"parent_path":"/root/PhysicsDomain","type":"PinJoint2D","name":"Pivot"}')
+		. returns("joint", {"undoable": "true"})
+	)

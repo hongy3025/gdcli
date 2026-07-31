@@ -18,7 +18,7 @@ static func list_regions() -> Dictionary:
 	return {"ok": true, "regions": regions, "undoable": false}
 
 
-static func bake(region_path: Variant, path: Variant, force: Variant) -> Dictionary:
+static func bake(region_path: Variant, path: Variant) -> Dictionary:
 	if typeof(region_path) != TYPE_STRING:
 		return _error(ErrorCodes.INVALID_PARAM, "region_path must be a string")
 	var root := SceneEditor.current_root()
@@ -34,28 +34,13 @@ static func bake(region_path: Variant, path: Variant, force: Variant) -> Diction
 	if not checked.ok:
 		return checked
 	var target := ProjectSettings.globalize_path(checked.path)
-	if FileAccess.file_exists(target) and (typeof(force) != TYPE_BOOL or not force):
-		AuditLog.record(
-			"navigation/mesh/bake",
-			"dangerous",
-			{"path": checked.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return _error(
-			ErrorCodes.UNSAFE_OPERATION,
-			"navigation/mesh/bake requires force:true for an existing target"
-		)
 	var copy: NavigationPolygon = polygon.duplicate(true)
 	DirAccess.make_dir_recursive_absolute(target.get_base_dir())
 	var error := ResourceSaver.save(copy, checked.path)
 	if error != OK:
 		return _error(ErrorCodes.GODOT_ERROR, "failed to save navigation polygon")
 	AuditLog.record(
-		"navigation/mesh/bake",
-		"file",
-		{"region_path": region_path, "path": checked.path, "force": force},
-		true
+		"navigation/mesh/bake", "file", {"region_path": region_path, "path": checked.path}, true
 	)
 	return {
 		"ok": true,

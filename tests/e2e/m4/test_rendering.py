@@ -18,14 +18,15 @@ def test_rendering_routes_are_discoverable_and_documented(m4_env):
         assert command_doc(m4_env, route)["summary"]
 
 
-def test_shader_write_requires_force_for_existing_project_file(m4_env):
-    """Removing overwrite protection would overwrite the checked-in shader."""
-    error = exec_error(
+def test_shader_write_overwrites_without_force(m4_env):
+    """Removing overwrite protection would fail to update the checked-in shader."""
+    written = exec_ok(
         m4_env,
         "shader/write",
-        {"path": "res://shaders/basic.gdshader", "source": "shader_type canvas_item;"},
+        {"path": "res://shaders/basic.gdshader", "source": "shader_type canvas_item;\n"},
     )
-    assert error["code"] == "unsafe_operation"
+    assert written["ok"] is True
+    assert written["written"] is True
 
 
 def test_canvas_material_is_edited_with_undo_and_persists_assignment(m4_env):
@@ -82,8 +83,7 @@ def test_shader_file_uniform_and_parameter_contracts(m4_env):
     source = "shader_type canvas_item;\nuniform float strength = 0.5;\n"
     shader_file = m4_env["project"] / "shaders" / "basic.gdshader"
     before = source_digest(shader_file)
-
-    written = exec_ok(m4_env, "shader/write", {"path": shader_path, "source": source, "force": True})
+    written = exec_ok(m4_env, "shader/write", {"path": shader_path, "source": source})
     assert written["undoable"] is False
     assert source_digest(shader_file) != before
     assert exec_ok(m4_env, "shader/read", {"path": shader_path})["source"] == source
@@ -96,13 +96,13 @@ def test_shader_file_uniform_and_parameter_contracts(m4_env):
     changed = exec_ok(
         m4_env,
         "shader/param/set",
-        {"path": material_path, "name": "strength", "value": 0.75, "force": True},
+        {"path": material_path, "name": "strength", "value": 0.75},
     )
     assert changed["undoable"] is False
     assert exec_error(
         m4_env,
         "shader/param/set",
-        {"path": material_path, "name": "missing", "value": 1.0, "force": True},
+        {"path": material_path, "name": "missing", "value": 1.0},
     )["code"] == "not_found"
     entries = exec_ok(m4_env, "gdapi/audit/list", {"since": 0, "limit": 100})["entries"]
     assert any(entry["route"] == "shader/write" and entry["ok"] is True for entry in entries)
@@ -125,5 +125,5 @@ def test_rendering_rejects_invalid_material_values_and_unsafe_paths(m4_env):
     assert exec_error(
         m4_env,
         "shader/write",
-        {"path": "res://shaders/../outside.gdshader", "source": "shader_type canvas_item;", "force": True},
+        {"path": "res://shaders/../outside.gdshader", "source": "shader_type canvas_item;"},
     )["code"] == "invalid_path"
