@@ -6,12 +6,17 @@ from typing import Any
 
 import pytest
 
-from .conftest import exec_error, exec_ok, start_async_exec, stop_game
+from .conftest import exec_error, exec_ok, latest_audit, start_async_exec, stop_game
 
 
 def test_runtime_eval_requires_running_probe(m6_editor_eval: dict[str, Any]) -> None:
     error = exec_error(m6_editor_eval, "runtime/eval", {"source": "1 + 1"})
     assert error["code"] == "conflict"
+    # Mutations are audited under the public route name, even on failure
+    entry = latest_audit(m6_editor_eval, "runtime/eval")
+    assert entry["route"] == "runtime/eval"
+    assert entry["ok"] is False
+    assert entry["code"] == "conflict"
 
 
 def test_runtime_eval_runs_only_in_game_process(m6_runtime_eval_running: dict[str, Any]) -> None:

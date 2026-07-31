@@ -264,4 +264,10 @@ func _reject(
 
 
 func _audit(op: String, payload: Variant, result: Variant, ok: bool, code: String) -> void:
-	AuditLog.record_runtime(op, payload, result, ok, code)
+	var audit_payload: Variant = payload
+	if typeof(payload) == TYPE_DICTIONARY:
+		# Audit summaries must never echo the client-supplied force flag.
+		var payload_copy := (payload as Dictionary).duplicate(true)
+		payload_copy.erase("force")
+		audit_payload = payload_copy
+	AuditLog.record_runtime(op, audit_payload, result, ok, code)

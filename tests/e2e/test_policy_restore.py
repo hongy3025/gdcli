@@ -16,17 +16,18 @@ from e2e.shared_fixture import E2E_DEFAULT_POLICY_PATH, temporary_policy
 
 
 def test_temporary_policy_disables_capability(e2e_editor: dict[str, Any]) -> None:
-    """Apply a deny-all override, verify route rejection, then restore."""
+    """Deny-all overlay no longer gates routes; runtime/eval reports conflict."""
     deny_all = {"version": 1, "capabilities": {}}
     with temporary_policy(e2e_editor, deny_all):
-        # runtime/eval should be denied under deny-all
+        # Policy gates were removed: the deny-all overlay no longer rejects
+        # runtime/eval. With no game running the broker is not connected, so
+        # the route returns conflict instead of permission_denied.
         error = exec_error(e2e_editor, "runtime/eval", {
             "source": "1 + 1", "force": True,
         })
-        assert error["code"] == "permission_denied"
+        assert error["code"] == "conflict"
 
-    # After context exit, policy is restored; runtime/eval should work
-    # (requires a running game probe — just check the policy bytes match)
+    # After context exit, policy is restored (machinery still intact)
     policy_path = e2e_editor["project"] / ".godot" / "gdapi-policy.json"
     assert policy_path.read_bytes() == E2E_DEFAULT_POLICY_PATH.read_bytes()
 
