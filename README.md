@@ -256,7 +256,7 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 | 路由 | 说明 |
 |---|---|
 | `scene/current` | 获取当前编辑场景信息 |
-| `scene/current/save` | 保存当前编辑场景（可选另存为 `{path, force?}`） |
+| `scene/current/save` | 保存当前编辑场景（可选另存为 `{path?}`） |
 | `scene/open` | 在编辑器中打开场景 `{path}` |
 | `scene/close` | 关闭场景 `{path?}` |
 | `scene/tree` | 查询场景树结构 `{path?, max_depth?}` |
@@ -320,8 +320,8 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 |---|---|
 | `script/read` | 读取脚本文件内容 `{path}` |
 | `script/create` | 创建新脚本文件 `{path, content}` |
-| `script/write` | 覆盖写入脚本文件（需 `force:true`） |
-| `script/patch` | 行范围替换 `{path, start_line, end_line, text, force?}` |
+| `script/write` | 覆盖写入脚本文件 `{path, content}` |
+| `script/patch` | 行范围替换 `{path, start_line, end_line, text}` |
 | `script/attach` | 挂载脚本到节点 `{node_path, path}`（UndoRedo 支持） |
 | `script/detach` | 从节点卸载脚本（UndoRedo 支持） |
 | `script/current` | 获取当前编辑的脚本 |
@@ -334,7 +334,7 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 |---|---|
 | `filesystem/list` | 列出目录内容 `{path, offset?, limit?}` |
 | `filesystem/read` | 读取文件内容 `{path}` |
-| `filesystem/write` | 写入文件（需 `force:true`）`{path, content, force?}` |
+| `filesystem/write` | 写入文件 `{path, content}` |
 | `filesystem/search` | 按文件名搜索 `{pattern, root?, offset?, limit?}` |
 | `filesystem/grep` | 按内容搜索 `{root, pattern, glob?, case_sensitive?, offset?, limit?}` |
 | `filesystem/reimport` | 重新导入资源 `{paths}` |
@@ -346,10 +346,10 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 | `resource/info` | 资源元信息 `{path}` |
 | `resource/deps` | 资源依赖列表 `{path}` |
 | `resource/search` | 搜索资源 `{filter?, type?, offset?, limit?}` |
-| `resource/create` | 创建资源文件 `{path, type, properties, force?}` |
+| `resource/create` | 创建资源文件 `{path, type, properties}` |
 | `resource/assign` | 分配资源到节点属性（UndoRedo 支持）`{node_path, property, path}` |
-| `resource/delete` | 删除资源文件（需 `force:true`） |
-| `resource/move` | 移动/重命名资源 `{from, to, force?}` |
+| `resource/delete` | 删除资源文件 |
+| `resource/move` | 移动/重命名资源 `{from, to}` |
 | `resource/reimport` | 重新导入单个资源 |
 
 ### 编辑器 UI (editor)
@@ -362,7 +362,7 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 
 ### M4 游戏系统域
 
-M4 提供 51 条游戏系统路由，覆盖 Animation/AnimationTree、TileMap、Material/Shader、Audio、UI/Theme、2D Physics 与 2D Navigation。编辑器节点和属性修改返回 `undoable:true` 并接入 UndoRedo；资源、shader、Audio bus layout 与导航 bake 文件写入返回 `undoable:false`，覆盖已有目标必须显式传 `force:true`。
+M4 提供 51 条游戏系统路由，覆盖 Animation/AnimationTree、TileMap、Material/Shader、Audio、UI/Theme、2D Physics 与 2D Navigation。编辑器节点和属性修改返回 `undoable:true` 并接入 UndoRedo；资源、shader、Audio bus layout 与导航 bake 文件写入返回 `undoable:false`，覆盖已有文件直接生效（开发期工具，无 force 门禁），写入不可撤销。
 
 Physics 与 Navigation 当前只支持 2D。3D 节点、形状、地图或查询在 mutation 前返回 `not_supported`。`physics/raycast`、`navigation/path/get` 和 `navigation/agent/target` 通过运行中的游戏 probe 执行；停止游戏后请求会按 broker 清理语义失败。
 
@@ -370,7 +370,7 @@ Physics 与 Navigation 当前只支持 2D。3D 节点、形状、地图或查询
 
 ### M5 项目、诊断与发布
 
-M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项目诊断和受控导出路由。配置变更使用隔离 fixture 快照验证，持久化 mutation 返回 `undoable:false`，删除/修复/覆盖操作要求 `force:true`。
+M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项目诊断和受控导出路由。配置变更使用隔离 fixture 快照验证，持久化 mutation 返回 `undoable:false`，删除/修复/覆盖为不可撤销写入。
 
 诊断路由 `diagnostics/health`、`unused_resources`、`cycle_deps` 和 `script_errors` 返回稳定的 `{severity,code,message,path?,line?,details?}` finding，并支持 `roots`、`offset`、`limit` 分页。`uid/repair` 默认 dry-run。
 
@@ -381,7 +381,7 @@ M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项�
 | 类型 | UndoRedo | 覆盖保护 |
 |---|---|---|
 | 编辑器状态（节点/属性/信号/分组） | ✅ `undoable:true` | 不适用 |
-| 文件/资源操作 | ❌ `undoable:false` | 需 `force:true` |
+| 文件/资源操作 | ❌ `undoable:false` | 直接覆盖 |
 | 运行期 mutation（M3 runtime/*） | ❌ `undoable:false` | 不适用 |
 
 所有 mutation 响应包含 `ok`、`changed`、`undoable` 字段。危险操作记录审计日志。
@@ -402,7 +402,13 @@ M3 增补 35 个 runtime 路由（`runtime/...`）；M6 引入 `runtime/eval` �
 
 所有 runtime 请求默认 5 秒超时，可被 broker.tick 清理；stop/disconnect 会同步失败所有 pending 让 await/call 收到 `conflict`。
 
-M6 高风险能力默认关闭：`editor/eval`、`runtime/eval`、`process/run`、`network/http_request`、`filesystem/batch/delete`、`filesystem/batch/replace`、`filesystem/batch/recover` 和 `export/android/deploy_many` 只有在 `.godot/gdapi-policy.json` 显式启用并携带 `force:true` 后才会执行。策略格式、最小权限示例和审计脱敏边界见 [`docs/security/high-risk-capabilities.md`](docs/security/high-risk-capabilities.md)。
+M6 高风险能力（`editor/eval`、`runtime/eval`、`process/run`、`network/http_request`、
+`filesystem/batch/delete`、`filesystem/batch/replace`、`filesystem/batch/recover`、
+`export/android/deploy_many`）自 2026-08-01 起默认可用，不再需要
+`.godot/gdapi-policy.json` 配置或 `force:true`（gdcli 为开发期工具，鉴权由
+loopback + Bearer token 承担）。能力仍受内置硬上限约束：eval 源码 ≤16 KiB、
+process 超时 ≤60s/输出 ≤1 MiB、network 仅 http(s)/超时 ≤60s/响应 ≤4 MiB/
+重定向 ≤5、export 超时 ≤600s。所有危险操作保留审计日志（不含 secret）。
 
 ---
 

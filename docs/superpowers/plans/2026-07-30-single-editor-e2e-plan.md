@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **历史快照（2026-08-01 已废弃）**：本计划中描述的 `capability_policy` 机制、`.godot/gdapi-policy.json` 配置、`temporary_policy(env, override)` 上下文管理器以及 `force:true` 路由参数自 2026-08-01 起已全部移除。gdcli 仅作为开发期工具运行，高风险能力默认可用，受 service 内置硬上限约束（eval 源码 ≤16 KiB、process 超时 ≤60s/输出 ≤1 MiB、network 仅 http(s)/超时 ≤60s/响应 ≤4 MiB/重定向 ≤5、export 超时 ≤600s）。下方涉及的 policy 切换、覆盖与恢复步骤作为历史决策保留，E2E fixture 当前使用默认全能力项目配置，不再依赖策略覆盖。
+
 **Goal:** Run the complete `tests/e2e/` suite against one merged fixture and exactly one Godot editor process while preserving all existing assertions and acceptance behavior.
 
 **Architecture:** Build one `tests/fixtures/e2e_project/` containing the M2–M6 assets and a unified project configuration. A session-scoped `e2e_editor` owns the temporary copy, addon installation, one Godot process, readiness checks, and teardown; legacy module fixture names become aliases returning that environment. A shared reset/policy helper restores deterministic state between tests without recreating projects or processes.

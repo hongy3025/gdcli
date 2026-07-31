@@ -68,7 +68,9 @@ session teardown
 
 ## Capability policy
 
-统一 fixture 默认使用全能力策略。拒绝路径测试使用 `temporary_policy(env, override)` 上下文管理器：原子写入覆盖、通知 gdapi 重载、执行断言、无论成功失败均恢复默认策略，并验证恢复后的 capability 状态。策略切换不得启动第二个 editor。
+> **历史快照（2026-08-01 已废弃）**：2026-08-01 起 gdcli 取消 capability_policy 机制（`.godot/gdapi-policy.json`）与全部 `force:true` 要求——gdcli 仅作为开发期工具运行，高风险能力默认可用，受 service 内置硬上限约束（eval 源码 ≤16 KiB、process 超时 ≤60s/输出 ≤1 MiB、network 仅 http(s)/超时 ≤60s/响应 ≤4 MiB/重定向 ≤5、export 超时 ≤600s）。下方文字描述的 policy 切换与 `temporary_policy` 上下文管理器已不再适用；E2E fixture 不再依赖策略覆盖，只使用默认全能力项目配置。
+
+> 原文（保留为历史决策参考）：统一 fixture 默认使用全能力策略。拒绝路径测试使用 `temporary_policy(env, override)` 上下文管理器：原子写入覆盖、通知 gdapi 重载、执行断言、无论成功失败均恢复默认策略，并验证恢复后的 capability 状态。策略切换不得启动第二个 editor。
 
 ## 迁移与兼容性
 
@@ -76,19 +78,16 @@ session teardown
 
 新增契约断言：所有模块 fixture 观察到相同 editor PID、项目路径和 gdapi metadata。
 
-## 错误处理
-
-启动阶段在 metadata、ping 或 Godot 提前退出时失败，并保留日志；reset 阶段失败包含 reset 阶段名、命令、runtime 状态和日志尾部；策略恢复失败阻止后续测试继续执行，避免污染共享环境。
+启动阶段在 metadata、ping 或 Godot 提前退出时失败，并保留日志；reset 阶段失败包含 reset 阶段名、命令、runtime 状态和日志尾部；策略恢复失败（历史引用——capability_policy 已于 2026-08-01 移除）阻止后续测试继续执行，避免污染共享环境。
 
 ## 验收与测试
 
 - 全量 `tests/e2e/` 期间 Godot editor 启动次数恰好为 1；
 - M2–M6 观察到的 editor PID 相同；
-- 全量测试断言保持不变，重复运行结果一致；
+- 新增共享 fixture 生命周期、PID 一致性、reset 失败诊断和策略恢复测试（历史引用——capability_policy 已于 2026-08-01 移除，对应测试若仍存在应改为删除或标记 xfail）。
 - 现有 6 分钟预算测试继续通过并记录新的耗时基线；
-- 新增共享 fixture 生命周期、PID 一致性、reset 失败诊断和策略恢复测试。
-- `tests/e2e/shared_fixture.EDITOR_START_COUNTER["starts"]` 在完整 suite 中恰好为 1。
 - 任何模块 conftest 不得再调用 `subprocess.Popen` 启动 Godot editor；模块 fixture（`m2_editor` / `m3_editor` / `m4_env` / `m5_editor` / `m6_editor*`）必须返回 `e2e_editor` 的同一 env，不允许重建进程或项目副本。
+
 ### 收集顺序优化验收
 
 - 不增加测试用例（仍是同一集合）；
