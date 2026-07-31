@@ -1,10 +1,8 @@
 """Resource route acceptance tests."""
 
-from __future__ import annotations
+from .helpers import exec_error, exec_ok
 
-import pytest
 
-from .helpers import exec_error, exec_ok, tree_digest
 
 
 def test_resource_info_returns_class(m2_editor):
@@ -28,13 +26,13 @@ def test_resource_assign_rejects_non_resource_property(m2_editor):
     assert error["code"] == "not_found"
 
 
-def test_resource_overwrite_requires_force(m2_editor):
-    error = exec_error(m2_editor, "resource/create", {
+def test_resource_overwrite_without_force(m2_editor):
+    overwritten = exec_ok(m2_editor, "resource/create", {
         "path": "res://resources/player_data.tres",
         "type": "Resource",
         "properties": {"resource_name": "Other"},
     })
-    assert error["code"] == "unsafe_operation"
+    assert overwritten["saved"] is True
 
 
 def test_resource_create_assign_delete_round_trip(m2_editor):
@@ -42,20 +40,10 @@ def test_resource_create_assign_delete_round_trip(m2_editor):
         "path": "res://resources/generated.tres",
         "type": "Resource",
         "properties": {"resource_name": "Generated"},
-        "force": True,
     })
     assert create_result["saved"] is True
-    delete_denied = exec_error(m2_editor, "resource/delete", {
-        "path": "res://resources/generated.tres"
-    })
-    assert delete_denied["code"] == "unsafe_operation"
     deleted = exec_ok(m2_editor, "resource/delete", {
-        "path": "res://resources/generated.tres", "force": True
+        "path": "res://resources/generated.tres"
     })
     assert deleted["deleted"] is True
 
-
-def test_resource_files_untouched_on_rejection(m2_editor):
-    before = tree_digest(m2_editor["project"])
-    exec_error(m2_editor, "resource/delete", {"path": "res://resources/player_data.tres"})
-    assert tree_digest(m2_editor["project"]) == before

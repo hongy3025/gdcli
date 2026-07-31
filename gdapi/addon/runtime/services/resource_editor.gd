@@ -145,7 +145,7 @@ static func reimport(paths: Array) -> Dictionary:
 
 
 ## 创建新资源,要求 type 必须是 Resource 的子类
-static func create(path: String, type: String, properties: Dictionary, force: bool) -> Dictionary:
+static func create(path: String, type: String, properties: Dictionary) -> Dictionary:
 	var checked := PathGuard.validate(path, "write")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
@@ -160,20 +160,6 @@ static func create(path: String, type: String, properties: Dictionary, force: bo
 			"ok": false,
 			"code": ErrorCodes.INVALID_PARAM,
 			"error": "type cannot be instantiated: " + type
-		}
-	var abs_path := ProjectSettings.globalize_path(checked.path)
-	if FileAccess.file_exists(abs_path) and not force:
-		AuditLog.record(
-			"resource/create",
-			"file",
-			{"path": checked.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "resource/create requires force:true"
 		}
 	var instance: Resource = ClassDB.instantiate(type)
 	if instance == null:
@@ -199,9 +185,7 @@ static func create(path: String, type: String, properties: Dictionary, force: bo
 			"code": ErrorCodes.GODOT_ERROR,
 			"error": "ResourceSaver.save failed: " + str(err)
 		}
-	AuditLog.record(
-		"resource/create", "file", {"path": checked.path, "type": type, "force": force}, true, ""
-	)
+	AuditLog.record("resource/create", "file", {"path": checked.path, "type": type}, true, "")
 	return {
 		"ok": true,
 		"changed": true,
@@ -262,7 +246,7 @@ static func assign(node_path: String, property: String, path: String) -> Diction
 
 
 ## 在编辑器文件系统中移动资源文件
-static func move(from_path: String, to_path: String, force: bool) -> Dictionary:
+static func move(from_path: String, to_path: String) -> Dictionary:
 	if not Engine.is_editor_hint():
 		return {
 			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "resource/move requires editor"
@@ -273,19 +257,6 @@ static func move(from_path: String, to_path: String, force: bool) -> Dictionary:
 	var to_check := PathGuard.validate(to_path, "write")
 	if not to_check.ok:
 		return {"ok": false, "code": to_check.code, "error": to_check.error}
-	if FileAccess.file_exists(ProjectSettings.globalize_path(to_check.path)) and not force:
-		AuditLog.record(
-			"resource/move",
-			"file",
-			{"from": from_check.path, "to": to_check.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "resource/move requires force:true"
-		}
 	var fs := EditorInterface.get_resource_filesystem()
 	if fs == null:
 		return {
@@ -304,11 +275,7 @@ static func move(from_path: String, to_path: String, force: bool) -> Dictionary:
 			"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "move_file failed: " + str(err)
 		}
 	AuditLog.record(
-		"resource/move",
-		"file",
-		{"from": from_check.path, "to": to_check.path, "force": force},
-		true,
-		""
+		"resource/move", "file", {"from": from_check.path, "to": to_check.path}, true, ""
 	)
 	return {
 		"ok": true,
@@ -320,8 +287,8 @@ static func move(from_path: String, to_path: String, force: bool) -> Dictionary:
 	}
 
 
-## 删除资源: 引用计数由人工搜索确定;若存在 inbound 引用需要 force
-static func delete(path: String, force: bool) -> Dictionary:
+## 删除资源文件
+static func delete(path: String) -> Dictionary:
 	var checked := PathGuard.validate(path, "write")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
@@ -331,19 +298,6 @@ static func delete(path: String, force: bool) -> Dictionary:
 			"code": ErrorCodes.NOT_FOUND,
 			"error": "resource not found: " + checked.path
 		}
-	if not force:
-		AuditLog.record(
-			"resource/delete",
-			"file",
-			{"path": checked.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "resource/delete requires force:true"
-		}
 	var abs_path := ProjectSettings.globalize_path(checked.path)
 	var err: Error = DirAccess.remove_absolute(abs_path)
 	if err != OK:
@@ -351,7 +305,7 @@ static func delete(path: String, force: bool) -> Dictionary:
 			"resource/delete", "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR
 		)
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "remove failed: " + str(err)}
-	AuditLog.record("resource/delete", "file", {"path": checked.path, "force": force}, true, "")
+	AuditLog.record("resource/delete", "file", {"path": checked.path}, true, "")
 	return {
 		"ok": true,
 		"changed": true,

@@ -135,20 +135,15 @@ class TestPathGuard:
 # ── 审计日志 ─────────────────────────────────────────
 
 class TestAuditLog:
-    def test_audit_clear_requires_force(self, e2e_editor):
-        """audit/clear 无 force 参数被拒绝"""
-        _exec_fail(e2e_editor, "gdapi/audit/clear", "{}")
-
-    def test_audit_clear_with_force(self, e2e_editor):
-        """audit/clear 带 force:true 成功"""
-        resp = _exec(e2e_editor, "gdapi/audit/clear", '{"force":true}')
+    def test_audit_clear_without_force(self, e2e_editor):
+        """audit/clear 不需要 force:true"""
+        resp = _exec(e2e_editor, "gdapi/audit/clear")
         assert resp["ok"] is True
         assert resp["cleared"] is True
 
     def test_audit_list_returns_entries(self, e2e_editor):
-        """audit/list 返回条目（含刚才 clear 失败的记录）"""
-        # 先触发一次失败的 clear 来产生审计记录
-        _exec_fail(e2e_editor, "gdapi/audit/clear", "{}")
+        """audit/list 返回条目（含刚才 clear 的记录）"""
+        _exec(e2e_editor, "gdapi/audit/clear")
         resp = _exec(e2e_editor, "gdapi/audit/list", '{"limit":10}')
         assert resp["ok"] is True
         assert isinstance(resp["entries"], list)

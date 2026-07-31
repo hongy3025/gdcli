@@ -63,39 +63,29 @@ static func replace_lines(source: String, first: int, last: int, text: String) -
 	return {"ok": true, "text": "\n".join(new_lines)}
 
 
-## 写入新脚本文件.已存在需要 force.
-static func create_script(path: String, content: String, force: bool) -> Dictionary:
+## 写入新脚本文件（或覆盖已有文件）。
+static func create_script(
+	path: String, content: String, route: String = "script/create"
+) -> Dictionary:
 	var checked := PathGuard.validate(path, "write")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	if content.length() > MAX_SCRIPT_BYTES:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "content too large"}
-	var abs_path := ProjectSettings.globalize_path(checked.path)
-	if FileAccess.file_exists(abs_path) and not force:
-		AuditLog.record(
-			"script/create",
-			"file",
-			{"path": checked.path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "script/create requires force:true"
-		}
+	if not content.ends_with("\n"):
+		content += "\n"
 	var dir: String = checked.path.get_base_dir()
 	if dir != "res://" and !DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir)):
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
-	# 写入临时文件再 rename,避免半写入
-	var tmp := abs_path + ".gdcli-tmp"
+	var abs_path := ProjectSettings.globalize_path(checked.path)
+	var tmp := abs_path + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "cannot create temp file"}
 	f.store_string(content)
 	f.close()
 	DirAccess.rename_absolute(tmp, abs_path)
-	AuditLog.record("script/create", "file", {"path": checked.path, "force": force}, true, "")
+	AuditLog.record(route, "file", {"path": checked.path}, true, "")
 	return {
 		"ok": true,
 		"changed": true,
@@ -107,15 +97,15 @@ static func create_script(path: String, content: String, force: bool) -> Diction
 	}
 
 
-## 完整覆盖写入.需要 force.返回 undoable:false 并审计.
-static func write_script(path: String, content: String, force: bool) -> Dictionary:
-	return create_script(path, content, force)
+## 完整覆盖写入（等价于 create_script，审计名不同）。
+static func write_script(
+	path: String, content: String, route: String = "script/write"
+) -> Dictionary:
+	return create_script(path, content, route)
 
 
 ## 行级 patch.写入磁盘前先校验范围,失败时返回 invalid_param 且不动文件.
-static func patch_script(
-	path: String, first: int, last: int, text: String, force: bool
-) -> Dictionary:
+static func patch_script(path: String, first: int, last: int, text: String) -> Dictionary:
 	var checked := PathGuard.validate(path, "write")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
@@ -134,18 +124,19 @@ static func patch_script(
 	var patch_result := replace_lines(existing, first, last, text)
 	if not patch_result.ok:
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": patch_result.error}
-	# 覆盖已有文件需要 force:true
-	if not force:
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "script/patch requires force:true to overwrite"
-		}
-	# 检查是否真的是有变化的 patch
 	var new_text: String = patch_result.text
+	# 无变化:跳过写盘,直接返回成功
 	if new_text == existing:
-		return {"ok": false, "code": ErrorCodes.CONFLICT, "error": "patch is a no-op"}
-	var tmp := abs_path + ".gdcli-tmp"
+		return {
+			"ok": true,
+			"changed": false,
+			"saved": true,
+			"undoable": false,
+			"path": checked.path,
+			"first": first,
+			"last": last
+		}
+	var tmp := abs_path + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "cannot create temp file"}
@@ -153,11 +144,7 @@ static func patch_script(
 	f.close()
 	DirAccess.rename_absolute(tmp, abs_path)
 	AuditLog.record(
-		"script/patch",
-		"file",
-		{"path": checked.path, "first": first, "last": last, "force": force},
-		true,
-		""
+		"script/patch", "file", {"path": checked.path, "first": first, "last": last}, true, ""
 	)
 	return {
 		"ok": true,

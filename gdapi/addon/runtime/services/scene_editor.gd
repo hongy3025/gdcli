@@ -86,9 +86,8 @@ static func close_scene(path: String) -> Dictionary:
 	return {"ok": true, "changed": true, "undoable": false, "path": current}
 
 
-## 保存当前场景到指定路径或原路径.显式提供 path 且目标文件已存在时需要 force=true.
-## 未提供 path 时保存到当前场景路径不需要 force (按习惯保存编辑器中的当前场景)。
-static func save_scene(path: String, force: bool) -> Dictionary:
+## 保存当前场景到指定路径或原路径。目标文件存在时直接覆盖。
+static func save_scene(path: String) -> Dictionary:
 	var original_path := current_path()
 	if original_path == "":
 		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "no scene is currently open"}
@@ -99,20 +98,6 @@ static func save_scene(path: String, force: bool) -> Dictionary:
 		AuditLog.record("scene/current/save", "file", {"path": target}, false, checked.code)
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	target = checked.path
-	var target_exists := FileAccess.file_exists(ProjectSettings.globalize_path(target))
-	if explicit and target_exists and not force:
-		AuditLog.record(
-			"scene/current/save",
-			"file",
-			{"path": target, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "scene/current/save requires force:true to overwrite existing path",
-		}
 	var save_result: int
 	if target == current_path():
 		save_result = EditorInterface.save_scene()
@@ -128,7 +113,7 @@ static func save_scene(path: String, force: bool) -> Dictionary:
 			"code": ErrorCodes.GODOT_ERROR,
 			"error": "failed to save scene: " + str(save_result),
 		}
-	AuditLog.record("scene/current/save", "file", {"path": target, "force": force}, true, "")
+	AuditLog.record("scene/current/save", "file", {"path": target}, true, "")
 	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": target}
 
 

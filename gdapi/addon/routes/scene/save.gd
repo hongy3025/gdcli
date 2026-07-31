@@ -17,7 +17,6 @@ const ROUTE := "scene/save"
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var scene_path: String = req.get_body("scene_path", "")
 	var new_path: String = req.get_body("new_path", "")
-	var force: bool = req.get_body("force", false)
 
 	if scene_path.is_empty():
 		res.error("scene_path is required", ErrorCodes.MISSING_PARAM)
@@ -45,18 +44,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 			AuditLog.record(ROUTE, "dangerous", {"new_path": new_path}, false, checked.code)
 			res.error(checked.error, checked.code, checked.status)
 			return
-		save_path = checked.path
-		# 目标已存在时要求 force
-		if FileAccess.file_exists(ProjectSettings.globalize_path(save_path)):
-			if not ErrorCodes.require_force(res, force, ROUTE):
-				AuditLog.record(
-					ROUTE,
-					"dangerous",
-					{"target": save_path, "force": false},
-					false,
-					ErrorCodes.UNSAFE_OPERATION
-				)
-				return
 		# 自动创建目标目录
 		var new_dir := save_path.get_base_dir()
 		if new_dir != "res://":
@@ -101,11 +88,10 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("保存 Godot 场景文件")
-		. desc("支持保存到原路径或另存为新路径；另存目标已存在时需 force:true")
+		. desc("支持保存到原路径或另存为新路径；目标存在时直接覆盖")
 		. param("scene_path", "String", true, "场景路径")
 		. param("new_path", "String", false, "另存目标路径，留空则覆盖原路径", "")
-		. param("force", "bool", false, "另存目标已存在时需为 true")
-		. example('{"scene_path":"res://test.tscn","force":true}')
+		. example('{"scene_path":"res://test.tscn"}')
 		. returns(
 			"保存结果",
 			{

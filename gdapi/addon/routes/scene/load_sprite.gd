@@ -18,7 +18,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var scene_path: String = req.get_body("scene_path", "")
 	var node_path: String = req.get_body("node_path", "")
 	var texture_path: String = req.get_body("texture_path", "")
-	var force: bool = req.get_body("force", false)
 
 	if scene_path.is_empty():
 		res.error("scene_path is required", ErrorCodes.MISSING_PARAM)
@@ -28,18 +27,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 	if texture_path.is_empty():
 		res.error("texture_path is required", ErrorCodes.MISSING_PARAM)
-		return
-
-	# 始终要求 force
-	if not ErrorCodes.require_force(res, force, ROUTE):
-		AuditLog.record(
-			ROUTE,
-			"dangerous",
-			{"target": scene_path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return
 
 	# 校验路径
 	var checked := PathGuard.validate(scene_path, "write")
@@ -145,11 +132,10 @@ func doc() -> GdApiRouteDoc:
 		. param("scene_path", "String", true, "场景路径")
 		. param("node_path", "String", true, "精灵节点路径（如 root/Sprite2D）")
 		. param("texture_path", "String", true, "纹理资源路径")
-		. param("force", "bool", true, "必须为 true 才执行")
 		. example(
 			(
 				'{"scene_path":"res://test.tscn","node_path":"root/Sprite2D",'
-				+ '"texture_path":"res://icon.svg","force":true}'
+				+ '"texture_path":"res://icon.svg"}'
 			)
 		)
 		. returns(

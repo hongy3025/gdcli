@@ -18,7 +18,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var scene_path: String = req.get_body("scene_path", "")
 	var output_path: String = req.get_body("output_path", "")
 	var mesh_item_names: Array = req.get_body("mesh_item_names", [])
-	var force: bool = req.get_body("force", false)
 
 	if scene_path.is_empty():
 		res.error("scene_path is required", ErrorCodes.MISSING_PARAM)
@@ -41,18 +40,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		res.error(checked.error, checked.code, checked.status)
 		return
 	output_path = checked.path
-
-	# 目标已存在时要求 force
-	if FileAccess.file_exists(ProjectSettings.globalize_path(output_path)):
-		if not ErrorCodes.require_force(res, force, ROUTE):
-			AuditLog.record(
-				ROUTE,
-				"dangerous",
-				{"target": output_path, "force": false},
-				false,
-				ErrorCodes.UNSAFE_OPERATION
-			)
-			return
 
 	# 加载场景
 	var scene := load(scene_path)
@@ -142,11 +129,8 @@ func doc() -> GdApiRouteDoc:
 		. desc("从场景中的 MeshInstance3D 节点提取网格和碰撞形状，生成 MeshLibrary 资源")
 		. param("scene_path", "String", true, "源场景路径")
 		. param("output_path", "String", true, "MeshLibrary 输出路径")
-		. param("force", "bool", false, "输出目标已存在时需为 true")
 		. param("mesh_item_names", "Array", false, "要导出的网格项名称列表，留空则导出所有", [])
-		. example(
-			'{"scene_path":"res://test.tscn","output_path":"res://test.meshlib","force":true}'
-		)
+		. example('{"scene_path":"res://test.tscn","output_path":"res://test.meshlib"}')
 		. returns(
 			"导出结果",
 			{

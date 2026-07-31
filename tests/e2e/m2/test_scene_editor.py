@@ -44,17 +44,13 @@ def test_scene_current_save_persists_file_changes(m2_editor):
     assert result["path"] == "res://scenes/main.tscn"
 
 
-def test_scene_current_save_rejects_overwrite_without_force(m2_editor):
+def test_scene_current_save_overwrites_existing_without_force(m2_editor):
     # Step 1: save current to a fresh path - should succeed
     first = exec_ok(m2_editor, "scene/current/save", {"path": "res://scenes/main_backup.tscn"})
     assert first["saved"] is True
-    # Step 2: try again to the same existing path without force - should fail
-    error = exec_error(
-        m2_editor,
-        "scene/current/save",
-        {"path": "res://scenes/main_backup.tscn"},
-    )
-    assert error["code"] == "unsafe_operation"
+    # Step 2: save again to the same existing path - should succeed and overwrite
+    second = exec_ok(m2_editor, "scene/current/save", {"path": "res://scenes/main_backup.tscn"})
+    assert second["saved"] is True
 
 
 def test_scene_close_then_current_is_not_found(m2_editor):

@@ -359,7 +359,7 @@ def reset_shared_state(env: dict[str, Any], *, reason: str) -> None:
         pass
     _run("scene/open", "scene/open", {"path": "res://scenes/main.tscn"})
     _run("editor/selection/set", "editor/selection/set", {"nodes": []})
-    _run("gdapi/audit/clear", "gdapi/audit/clear", {"force": True})
+    _run("gdapi/audit/clear", "gdapi/audit/clear", {})
 
     # Restore default capability policy if it was overlaid by a prior test.
     default_policy = E2E_DEFAULT_POLICY_PATH.read_bytes()

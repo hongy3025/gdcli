@@ -4,6 +4,7 @@
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
 const TextEditService := preload("res://addons/gdapi/runtime/services/text_edit.gd")
+const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 const ROUTE := "script/patch"
 
@@ -13,16 +14,15 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var first: int = int(req.get_body("start_line", -1))
 	var last: int = int(req.get_body("end_line", -1))
 	var text: String = req.get_body("text", "")
-	var force: bool = req.get_body("force", false)
 	if path == "":
 		res.error("path is required", "missing_param")
 		return
 	if first < 1 or last < first:
 		res.error("start_line must be >= 1 and <= end_line", "invalid_param")
 		return
-	var result := TextEditService.patch_script(path, first, last, text, force)
+	var result := TextEditService.patch_script(path, first, last, text)
 	if not result.ok:
-		res.error(result.error, result.code, 400)
+		res.error(result.error, result.code, ErrorCodes.http_status(result.code))
 		return
 	res.json(result)
 
@@ -31,17 +31,13 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("替换脚本中 [start_line, end_line] 行区间")
-		. desc("1-based 闭区间替换;text 支持多行,通过换行拆分。写入磁盘使用 temp file + rename 原子化;无变化时仍写入需 force:true。")
+		. desc("1-based 闭区间替换;text 支持多行,通过换行拆分。写入磁盘使用 temp file + rename 原子化;无变化时直接返回成功不写盘。")
 		. param("path", "String", true, "res:// 路径")
 		. param("start_line", "int", true, "起始行号 (1-based, inclusive)")
 		. param("end_line", "int", true, "结束行号 (1-based, inclusive)")
 		. param("text", "String", true, "替换内容")
-		. param("force", "bool", false, "无变化时也写盘需 true", "false")
 		. example(
-			(
-				'{"path":"res://scripts/player.gd","start_line":2,"end_line":2,'
-				+ '"text":"var speed := 20","force":true}'
-			)
+			'{"path":"res://scripts/player.gd","start_line":2,"end_line":2,"text":"var speed := 20"}'
 		)
 		. returns(
 			"patch 结果",

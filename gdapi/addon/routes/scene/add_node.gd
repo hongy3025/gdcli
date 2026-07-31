@@ -22,7 +22,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var node_name: String = req.get_body("node_name", "")
 	var parent_path: String = req.get_body("parent_node_path", "root")
 	var properties: Dictionary = req.get_body("properties", {})
-	var force: bool = req.get_body("force", false)
 
 	# 验证必需参数
 	if scene_path.is_empty():
@@ -33,18 +32,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 	if node_name.is_empty():
 		res.error("node_name is required", ErrorCodes.MISSING_PARAM)
-		return
-
-	# 始终要求 force
-	if not ErrorCodes.require_force(res, force, ROUTE):
-		AuditLog.record(
-			ROUTE,
-			"dangerous",
-			{"target": scene_path, "force": false},
-			false,
-			ErrorCodes.UNSAFE_OPERATION
-		)
-		return
 
 	# 校验路径
 	var checked := PathGuard.validate(scene_path, "write")
@@ -155,12 +142,9 @@ func doc() -> GdApiRouteDoc:
 		. param("scene_path", "String", true, "场景路径")
 		. param("node_type", "String", true, "节点类型名称（如 Sprite2D、Node2D 等）")
 		. param("node_name", "String", true, "新节点名称")
-		. param("force", "bool", true, "必须为 true 才执行")
 		. param("parent_node_path", "String", false, "父节点路径，默认为 root", "root")
 		. param("properties", "Dictionary", false, "要设置的节点属性字典，支持 VariantCodec 编码", {})
-		. example(
-			'{"scene_path":"res://test.tscn","node_type":"Node2D","node_name":"Child","force":true}'
-		)
+		. example('{"scene_path":"res://test.tscn","node_type":"Node2D","node_name":"Child"}')
 		. returns(
 			"添加结果",
 			{
