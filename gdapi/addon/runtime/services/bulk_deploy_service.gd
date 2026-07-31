@@ -21,7 +21,7 @@ static func plan(body: Dictionary, bridge: Variant = null) -> Dictionary:
 		return _error(ErrorCodes.INVALID_PARAM, "serials is required")
 	var unique: Array = []
 	for serial in serials:
-		if typeof(serial) != TYPE_STRING or unique.has(serial):
+		if typeof(serial) != TYPE_STRING or String(serial).is_empty() or unique.has(serial):
 			return _error(ErrorCodes.INVALID_PARAM, "serials must be unique strings")
 		unique.append(serial)
 	unique.sort()
