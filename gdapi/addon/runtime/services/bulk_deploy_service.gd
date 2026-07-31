@@ -2,7 +2,6 @@
 class_name GdApiBulkDeployService
 extends RefCounted
 
-const Policy := preload("res://addons/gdapi/runtime/capability_policy.gd")
 const AndroidBridge := preload("res://addons/gdapi/runtime/services/android_bridge.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
@@ -73,8 +72,7 @@ static func apply(body: Dictionary, bridge: Variant = null) -> Dictionary:
 				"serial": serial,
 				"apk_path": String(body.get("apk_path", "")),
 				"package": body.get("package", ""),
-				"activity": body.get("activity", ""),
-				"force": true
+				"activity": body.get("activity", "")
 			},
 			bridge
 		)

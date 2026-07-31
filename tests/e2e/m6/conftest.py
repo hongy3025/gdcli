@@ -248,7 +248,7 @@ def replace_plan(
 ) -> dict[str, Any]:
     plan = exec_ok(env, "filesystem/batch/replace", {
         "root": root, "find": find, "replace": replace,
-        "dry_run": True, "force": True,
+        "dry_run": True,
     })
     plan["_root"] = root
     plan["_find"] = find
@@ -260,7 +260,7 @@ def apply_replace(env: dict[str, Any], plan: dict) -> dict[str, Any]:
     return _exec_raw(env, "filesystem/batch/replace", {
         "root": plan["_root"], "find": plan["_find"],
         "replace": plan["_replace"],
-        "plan_hash": plan["plan_hash"], "force": True,
+        "plan_hash": plan["plan_hash"],
     })
 
 
@@ -268,7 +268,6 @@ def inject_apply_failure(env: dict[str, Any], fail_after: int) -> None:
     exec_ok(env, "filesystem/write", {
         "path": "res://.gdapi-debug-apply-fail",
         "content": str(fail_after),
-        "force": True,
     })
 
 
@@ -289,7 +288,7 @@ def bulk_digest(env: dict[str, Any]) -> str:
 
 def delete_plan(env: dict[str, Any], paths: list[str]) -> dict[str, Any]:
     plan = exec_ok(env, "filesystem/batch/delete", {
-        "paths": paths, "dry_run": True, "force": True,
+        "paths": paths, "dry_run": True,
     })
     plan["_paths"] = paths
     return plan
@@ -298,7 +297,7 @@ def delete_plan(env: dict[str, Any], paths: list[str]) -> dict[str, Any]:
 def apply_delete(env: dict[str, Any], plan: dict) -> dict[str, Any]:
     return _exec_raw(env, "filesystem/batch/delete", {
         "paths": plan["_paths"],
-        "plan_hash": plan["plan_hash"], "force": True,
+        "plan_hash": plan["plan_hash"],
     })
 
 

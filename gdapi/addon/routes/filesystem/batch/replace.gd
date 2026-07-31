@@ -1,6 +1,5 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
-const Policy := preload("res://addons/gdapi/runtime/capability_policy.gd")
 const Service := preload("res://addons/gdapi/runtime/services/bulk_file_service.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
@@ -8,13 +7,6 @@ const ROUTE := "filesystem/batch/replace"
 
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var gate := Policy.new().authorize("bulk_files", ROUTE, req.body)
-	if not gate.ok:
-		AuditLog.record(
-			ROUTE, "dangerous", {"force": req.get_body("force", false)}, false, gate.code
-		)
-		res.error(gate.error, gate.code, ErrorCodes.http_status(gate.code))
-		return
 	var out := Service.replace(req.body)
 	AuditLog.record(
 		ROUTE,
@@ -40,7 +32,6 @@ func doc() -> GdApiRouteDoc:
 		. param("regex", "bool", false, "保留字段；当前仅支持字面模式")
 		. param("dry_run", "bool", true, "仅规划")
 		. param("plan_hash", "String", false, "计划哈希")
-		. param("force", "bool", true, "确认应用")
 		. returns("替换结果", {"plan_hash": "String", "files": "int", "replacements": "int"})
-		. example('{"root":"res://bulk","find":"old","replace":"new","dry_run":true,"force":true}')
+		. example('{"root":"res://bulk","find":"old","replace":"new","dry_run":true}')
 	)

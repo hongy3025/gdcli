@@ -19,8 +19,6 @@ static func delete(body: Dictionary) -> Dictionary:
 		return plan
 	if bool(body.get("dry_run", false)):
 		return plan
-	if not bool(body.get("force", false)):
-		return _error(ErrorCodes.UNSAFE_OPERATION, "batch delete requires force:true")
 	if String(body.get("plan_hash", "")) != plan.plan_hash:
 		return _error(ErrorCodes.CONFLICT, "plan_hash does not match current files")
 	var operation_id := "%s-%s" % [Time.get_unix_time_from_system(), randi()]
@@ -99,8 +97,6 @@ static func replace(body: Dictionary) -> Dictionary:
 	var plan := {"ok": true, "operations": matches, "plan_hash": _hash_plan(matches)}
 	if bool(body.get("dry_run", false)):
 		return plan
-	if not bool(body.get("force", false)):
-		return _error(ErrorCodes.UNSAFE_OPERATION, "batch replace requires force:true")
 	if String(body.get("plan_hash", "")) != plan.plan_hash:
 		return _error(ErrorCodes.CONFLICT, "plan_hash does not match current files")
 	var operation_id := "%s-%s" % [Time.get_unix_time_from_system(), randi()]
