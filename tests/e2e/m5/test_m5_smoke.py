@@ -11,10 +11,11 @@ def test_m5_route_families_are_registered(m5_editor):
         assert doc["summary"] and doc["returns"]["fields"]
 
 
-def test_m5_read_only_queries_and_safety_contracts(m5_editor):
+def test_m5_queries_uid_apply_and_safety_contracts(m5_editor):
     assert exec_ok(m5_editor, "classdb/class", {"class": "Node2D"})["parent"] == "CanvasItem"
     assert exec_ok(m5_editor, "diagnostics/cycle_deps", {"roots": ["res://fixtures"]})["items"]
     assert exec_ok(m5_editor, "diagnostics/script_errors", {"roots": ["res://fixtures"]})["items"]
     assert exec_ok(m5_editor, "export/presets")["presets"]
-    assert exec_error(m5_editor, "uid/repair", {"roots": ["res://fixtures"], "dry_run": False})["code"] == "unsafe_operation"
-    assert exec_error(m5_editor, "export/android/deploy", {"serial": "bad", "force": False})["code"] == "unsafe_operation"
+    assert exec_ok(m5_editor, "uid/repair", {"roots": ["res://fixtures"], "dry_run": False})["ok"] is True
+    # Task 8 removes android_bridge.gd's force guard; until then this remains unsafe_operation.
+    assert exec_error(m5_editor, "export/android/deploy", {"serial": "bad"})["code"] == "unsafe_operation"

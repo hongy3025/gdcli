@@ -90,7 +90,7 @@ func file(path: String) -> void:
 
 	var f := FileAccess.open(abs_path, FileAccess.READ)
 	if f == null:
-		error("cannot read file: " + path, "read_error", 500)
+		error("cannot read file: " + path, "godot_error", 500)
 		return
 
 	var buffer := f.get_buffer(f.get_length())

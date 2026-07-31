@@ -49,7 +49,7 @@ func doc() -> GdApiRouteDoc:
 				"path": "String, 当前场景的 res:// 路径",
 				"name": "String, 根节点名",
 				"type": "String, 根节点类名",
-				"edited": "bool, 是否未保存的临时场景(目前恒为 false)",
+				"edited": "bool, 场景未落盘(路径为空或未保存)时为 true",
 				"undoable": "bool, 始终为 false",
 			}
 		)

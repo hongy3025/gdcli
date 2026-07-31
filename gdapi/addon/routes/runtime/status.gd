@@ -33,6 +33,8 @@ func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 					"session_id": -1,
 					"pending": 0,
 					"broker_registered": false,
+					"session_started_at": 0.0,
+					"transport": "none",
 					"editor_playing": editor_playing,
 				}
 			)

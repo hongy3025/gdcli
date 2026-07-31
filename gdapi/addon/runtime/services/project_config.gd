@@ -55,9 +55,7 @@ static func set_setting(name: String, value: Variant) -> Dictionary:
 	return {"ok": true, "name": name, "value": value, "changed": true, "undoable": false}
 
 
-static func reset(name: String, force: bool) -> Dictionary:
-	if not force:
-		return _err(ErrorCodes.UNSAFE_OPERATION, "project/settings/reset requires force:true")
+static func reset(name: String) -> Dictionary:
 	if not _valid_setting(name):
 		return _err(ErrorCodes.PERMISSION_DENIED, "setting is not writable")
 	if not ProjectSettings.has_setting(name):
@@ -72,7 +70,7 @@ static func reset(name: String, force: bool) -> Dictionary:
 			"code": ErrorCodes.GODOT_ERROR,
 			"error": "project settings could not be saved"
 		}
-	AuditLog.record("project/settings/reset", "dangerous", {"name": name, "force": true}, true)
+	AuditLog.record("project/settings/reset", "dangerous", {"name": name}, true)
 	return {"ok": true, "name": name, "changed": true, "undoable": false}
 
 
@@ -104,11 +102,7 @@ static func add_action(name: String, deadzone: float) -> Dictionary:
 	return _save_input(name, true)
 
 
-static func remove_action(name: String, force: bool) -> Dictionary:
-	if not force:
-		return _err(
-			ErrorCodes.UNSAFE_OPERATION, "project/input_map/action/remove requires force:true"
-		)
+static func remove_action(name: String) -> Dictionary:
 	if not InputMap.has_action(name):
 		return _err(ErrorCodes.NOT_FOUND, "action not found")
 	InputMap.erase_action(name)
@@ -125,9 +119,7 @@ static func bind(name: String, event: Dictionary) -> Dictionary:
 	return _save_input(name, true)
 
 
-static func unbind(name: String, event: Dictionary, force: bool) -> Dictionary:
-	if not force:
-		return _err(ErrorCodes.UNSAFE_OPERATION, "project/input_map/unbind requires force:true")
+static func unbind(name: String, event: Dictionary) -> Dictionary:
 	if not InputMap.has_action(name):
 		return _err(ErrorCodes.NOT_FOUND, "action not found")
 	var parsed := _event(event)
@@ -175,9 +167,7 @@ static func add_autoload(name: String, path: String, singleton: bool) -> Diction
 	return _save_project(key)
 
 
-static func remove_autoload(name: String, force: bool) -> Dictionary:
-	if not force:
-		return _err(ErrorCodes.UNSAFE_OPERATION, "project/autoload/remove requires force:true")
+static func remove_autoload(name: String) -> Dictionary:
 	var key := "autoload/" + name
 	if not ProjectSettings.has_setting(key):
 		return _err(ErrorCodes.NOT_FOUND, "autoload not found")

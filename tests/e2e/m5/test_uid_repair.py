@@ -8,7 +8,7 @@ def test_uid_repair_dry_run_apply_is_idempotent(m5_editor):
     assert dry_run["changed"] is False
 
     applied = exec_ok(m5_editor, "uid/repair", {
-        "roots": ["res://fixtures"], "dry_run": False, "force": True,
+        "roots": ["res://fixtures"], "dry_run": False,
     })
     assert applied["changed"] is True
     second = exec_ok(m5_editor, "uid/repair", body)

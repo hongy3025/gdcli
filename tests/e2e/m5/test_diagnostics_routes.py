@@ -1,4 +1,4 @@
-from .conftest import exec_ok
+from .conftest import exec_error, exec_ok
 
 
 def _paths(items):
@@ -22,3 +22,8 @@ def test_diagnostics_match_m5_fixture_findings(m5_editor):
         "roots": ["res://fixtures"],
     })
     assert _paths(errors["items"]) == {"res://fixtures/broken.gd"}
+
+
+def test_diagnostics_health_propagates_invalid_root(m5_editor):
+    error = exec_error(m5_editor, "diagnostics/health", {"roots": ["../../outside"]})
+    assert error["code"] == "invalid_path"

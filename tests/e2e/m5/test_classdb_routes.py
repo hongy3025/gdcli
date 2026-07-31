@@ -1,4 +1,4 @@
-from .conftest import exec_ok
+from .conftest import exec_error, exec_ok
 
 
 def test_classdb_queries_are_sorted_filtered_and_paginated(m5_editor):
@@ -13,3 +13,10 @@ def test_classdb_queries_are_sorted_filtered_and_paginated(m5_editor):
     })["items"]
     assert methods == sorted(methods, key=lambda item: item["name"])
     assert all("get_" in item["name"] for item in methods)
+
+
+
+def test_classdb_member_routes_preserve_not_found(m5_editor):
+    for route in ("methods", "properties", "signals", "inheriters"):
+        error = exec_error(m5_editor, f"classdb/{route}", {"class": "DefinitelyMissingClass"})
+        assert error["code"] == "not_found"

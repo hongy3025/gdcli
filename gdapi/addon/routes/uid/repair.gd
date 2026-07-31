@@ -1,6 +1,7 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 const S := preload("res://addons/gdapi/runtime/services/uid_repair.gd")
+const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
@@ -8,7 +9,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if out.ok:
 		res.json(out)
 	else:
-		res.error(out.error, out.code, 400, out.get("changes", {}))
+		res.error(out.error, out.code, ErrorCodes.http_status(out.code), out.get("changes", {}))
 
 
 func doc() -> GdApiRouteDoc:
@@ -17,7 +18,6 @@ func doc() -> GdApiRouteDoc:
 		. make("扫描并修复资源 UID")
 		. param("roots", "Array[String]", false, "扫描根", ["res://"])
 		. param("dry_run", "bool", false, "只规划不写入", true)
-		. param("force", "bool", false, "确认写入", false)
 		. returns(
 			"UID 计划",
 			{

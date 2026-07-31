@@ -47,6 +47,8 @@ static func health(body: Dictionary) -> Dictionary:
 	}
 	for kind in ["unused_resources", "cycle_deps", "script_errors"]:
 		var out := analyze(kind, body)
+		if not out.ok:
+			return out
 		result.findings[kind] = int(out.get("total", 0))
 	return result
 

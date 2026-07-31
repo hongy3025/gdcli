@@ -68,6 +68,7 @@ def restore_snapshot(env: dict[str, Any]) -> None:
 def m5_editor(shared_m5_editor: dict[str, Any]):
     """Return the session editor while restoring M5 file state per test."""
     reset_shared_state(shared_m5_editor, reason="m5 setup")
+    restore_file_state(shared_m5_editor, shared_m5_editor["file_baseline"])
     shared_m5_editor["source_fixture"] = M5_FIXTURE_SOURCE
     shared_m5_editor["source_digest"] = tree_digest(M5_FIXTURE_SOURCE)
     shared_m5_editor["m5_file_baseline"] = project_snapshot(shared_m5_editor)

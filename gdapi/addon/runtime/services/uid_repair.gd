@@ -10,13 +10,6 @@ const EXTENSIONS := ["tscn", "tres", "res", "scn", "material", "mesh", "shader",
 
 static func repair(body: Dictionary) -> Dictionary:
 	var dry_run := bool(body.get("dry_run", true))
-	var force := bool(body.get("force", false))
-	if not dry_run and not force:
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "uid/repair requires force:true"
-		}
 	var paths: Array = []
 	for root in body.get("roots", ["res://"]):
 		var checked := PathGuard.validate(String(root), "read")
