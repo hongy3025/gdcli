@@ -5,50 +5,37 @@ extends RefCounted
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const TargetGuard := preload("res://addons/gdapi/runtime/services/network_target_guard.gd")
 
+const DEFAULT_TIMEOUT_MS := 30_000
+const MAX_TIMEOUT_MS := 60_000
+const DEFAULT_MAX_RESPONSE_BYTES := 4 * 1024 * 1024
+const MAX_RESPONSE_BYTES := 4 * 1024 * 1024
+const MAX_REDIRECTS := 5
 
-static func validate(
-	body: Dictionary, policy: Dictionary, resolver: Callable = Callable()
-) -> Dictionary:
+
+static func validate(body: Dictionary) -> Dictionary:
 	var url := String(body.get("url", ""))
-	var parts := url.split("://", true, 1)
-	if parts.size() != 2:
-		return _error(ErrorCodes.INVALID_PARAM, "URL scheme is required")
-	var authority := parts[1].split("/", true, 1)[0]
-	if authority.contains("@") or url.contains("#"):
-		return _error(ErrorCodes.INVALID_PARAM, "URL credentials and fragments are not allowed")
-	var host := authority
-	var port := 443 if parts[0].to_lower() == "https" else 80
-	if authority.contains(":"):
-		var fields := authority.rsplit(":", true, 1)
-		host = fields[0]
-		port = int(fields[1])
-	var target := TargetGuard.authorize(url, policy, resolver)
+	var target := TargetGuard.authorize(url)
 	if not target.ok:
 		return target
 	var method := String(body.get("method", "GET")).to_upper()
 	if method not in ["GET", "HEAD"]:
 		return _error(ErrorCodes.PERMISSION_DENIED, "HTTP method is not allowed")
-	var timeout := int(body.get("timeout_ms", 5000))
-	var cap := int(body.get("max_response_bytes", 1048576))
-	if (
-		timeout <= 0
-		or timeout > int(policy.get("max_timeout_ms", 0))
-		or cap <= 0
-		or cap > int(policy.get("max_response_bytes", 0))
-	):
-		return _error(ErrorCodes.INVALID_PARAM, "request limits exceed policy")
+	var timeout := int(body.get("timeout_ms", DEFAULT_TIMEOUT_MS))
+	var cap := int(body.get("max_response_bytes", DEFAULT_MAX_RESPONSE_BYTES))
+	if timeout <= 0 or timeout > MAX_TIMEOUT_MS:
+		return _error(ErrorCodes.INVALID_PARAM, "timeout_ms must be in 1..60000")
+	if cap <= 0 or cap > MAX_RESPONSE_BYTES:
+		return _error(ErrorCodes.INVALID_PARAM, "max_response_bytes must be in 1..4194304")
 	return {
 		"ok": true,
 		"url": target.url,
 		"scheme": target.scheme,
 		"host": target.host,
 		"port": target.port,
-		"addresses": target.addresses,
 		"method": method,
 		"timeout_ms": timeout,
 		"max_response_bytes": cap,
-		"max_redirects": clampi(int(policy.get("max_redirects", 0)), 0, 5),
-		"redirect_policy": policy.duplicate(true),
+		"max_redirects": clampi(int(body.get("max_redirects", MAX_REDIRECTS)), 0, MAX_REDIRECTS),
 		"headers": body.get("headers", {}),
 		"body": String(body.get("body", ""))
 	}
@@ -61,6 +48,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 	var node := HTTPRequest.new()
 	node.timeout = float(spec.timeout_ms) / 1000.0
 	node.max_redirects = 0
+	node.body_size_limit = spec.max_response_bytes
 	plugin.add_child(node)
 	var request_headers: PackedStringArray = []
 	for key in spec.headers:
@@ -81,6 +69,11 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 		func(result, response_code, headers, body):
 			if state.done:
 				return
+			var forced_truncated: bool = (
+				int(result) == int(HTTPRequest.RESULT_BODY_SIZE_LIMIT_EXCEEDED)
+			)
+			if forced_truncated:
+				result = HTTPRequest.RESULT_SUCCESS
 			var is_redirect = response_code >= 300 and response_code < 400
 			if is_redirect:
 				result = HTTPRequest.RESULT_SUCCESS
@@ -100,7 +93,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 					response.error("redirect limit reached", ErrorCodes.CONFLICT, 409)
 					node.queue_free()
 					return
-				var target := TargetGuard.authorize(location, spec.redirect_policy)
+				var target := TargetGuard.authorize(location)
 				if not target.ok or state.visited.has(target.url):
 					state.done = true
 					state["outcome"] = {
@@ -155,7 +148,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 				)
 			else:
 				state["outcome"] = {"ok": true, "code": "", "summary": "HTTP request completed"}
-				var truncated := false
+				var truncated := forced_truncated
 				if body.size() > spec.max_response_bytes:
 					body = body.slice(0, spec.max_response_bytes)
 					truncated = true

@@ -1,6 +1,5 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
-const Policy := preload("res://addons/gdapi/runtime/capability_policy.gd")
 const Service := preload("res://addons/gdapi/runtime/services/network_service.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
@@ -8,19 +7,7 @@ const ROUTE := "network/http_request"
 
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var policy := Policy.new()
-	var gate := policy.authorize("network", ROUTE, req.body)
-	if not gate.ok:
-		AuditLog.record(
-			ROUTE,
-			"dangerous",
-			{"url": req.get_body("url", ""), "force": req.get_body("force", false)},
-			false,
-			gate.code
-		)
-		res.error(gate.error, gate.code, ErrorCodes.http_status(gate.code))
-		return
-	var checked := Service.validate(req.body, policy.settings("network"))
+	var checked := Service.validate(req.body)
 	if not checked.ok:
 		AuditLog.record(ROUTE, "dangerous", {"url": req.get_body("url", "")}, false, checked.code)
 		res.error(checked.error, checked.code, ErrorCodes.http_status(checked.code))
@@ -51,14 +38,13 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
-		. make("策略约束的 HTTP 请求")
-		. desc("策略必须明确允许 scheme、host、port；默认拒绝私网目标并限制 GET/HEAD。")
+		. make("HTTP 请求")
+		. desc("仅 http/https，下载上限 4 MiB、重定向 ≤5、超时 ≤60s。")
 		. param("url", "String", true, "目标 URL")
 		. param("method", "String", false, "GET 或 HEAD")
 		. param("headers", "Dictionary", false, "请求头")
 		. param("timeout_ms", "int", false, "超时")
 		. param("max_response_bytes", "int", false, "响应上限")
-		. param("force", "bool", true, "确认请求")
 		. returns(
 			"HTTP 结果",
 			{
@@ -69,5 +55,5 @@ func doc() -> GdApiRouteDoc:
 				"undoable": "false"
 			}
 		)
-		. example('{"url":"https://allowed.example/","force":true}')
+		. example('{"url":"https://example.com/"}')
 	)

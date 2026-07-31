@@ -91,6 +91,7 @@ class _EchoHandler(BaseHTTPRequestHandler):
         elif self.path == "/large":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", "2048")
             self.end_headers()
             self.wfile.write(b"x" * 2048)
             self.wfile.flush()
