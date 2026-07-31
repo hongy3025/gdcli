@@ -40,8 +40,7 @@ static func run(body: Dictionary) -> Dictionary:
 	if not checked.path.begins_with("res://"):
 		return _err(ErrorCodes.INVALID_PATH, "export path must be inside the project")
 	var output := ProjectSettings.globalize_path(checked.path)
-	if FileAccess.file_exists(output) and not bool(body.get("force", false)):
-		return _err(ErrorCodes.CONFLICT, "export destination exists")
+
 	var parent := output.get_base_dir()
 	DirAccess.make_dir_recursive_absolute(parent)
 	var flag := "--export-pack" if String(found.platform) != "Android" else "--export-debug"
