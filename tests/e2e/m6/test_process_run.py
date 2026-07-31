@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
-from e2e.m6.conftest import audit_for_route, exec_error, exec_ok, start_async_exec
-
+from e2e.m6.conftest import audit_for_route, exec_error, exec_ok
 
 
 def test_process_run_no_shell_preserves_argv(m6_editor_process: dict[str, Any]) -> None:
