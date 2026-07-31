@@ -15,14 +15,14 @@ def test_signal_and_group_persist(m2_editor):
         "method": "_on_health_changed",
     }
     connect_result = exec_ok(m2_editor, "node/signal/connect", connection)
-    assert connect_result["undoable"] is False
+    assert connect_result["undoable"] is True
 
     group_add = exec_ok(m2_editor, "node/group/add", {
         "node_path": "/root/Main/Target",
         "group": "actors",
         "persistent": True,
     })
-    assert group_add["undoable"] is False
+    assert group_add["undoable"] is True
 
     exec_ok(m2_editor, "scene/current/save")
 

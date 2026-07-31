@@ -5,6 +5,7 @@ extends "res://addons/gdapi/runtime/route_handler.gd"
 
 const NodeEditor := preload("res://addons/gdapi/runtime/services/node_editor.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
+const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 
 const ROUTE := "node/group/remove"
 
@@ -13,24 +14,43 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var node_path: String = req.get_body("node_path", "")
 	var group: String = req.get_body("group", "")
 	if node_path == "" or group == "":
-		res.error("node_path and group are required", ErrorCodes.MISSING_PARAM)
+		res.error(
+			"node_path and group are required",
+			ErrorCodes.MISSING_PARAM,
+			ErrorCodes.http_status(ErrorCodes.MISSING_PARAM)
+		)
 		return
 	var lookup := NodeEditor.find(node_path)
 	if not lookup.ok:
-		res.error(lookup.error, lookup.code, 404)
+		res.error(lookup.error, lookup.code, ErrorCodes.http_status(lookup.code))
 		return
 	var node: Node = lookup.node
 	if not node.is_in_group(group):
-		res.error("node not in group: " + group, ErrorCodes.NOT_FOUND, 404)
+		res.error(
+			"node not in group: " + group,
+			ErrorCodes.NOT_FOUND,
+			ErrorCodes.http_status(ErrorCodes.NOT_FOUND)
+		)
 		return
-	node.remove_from_group(group)
+	var manager := EditAction.undo_redo()
+	if manager == null:
+		res.error(
+			"EditorUndoRedoManager is unavailable",
+			ErrorCodes.NOT_SUPPORTED,
+			ErrorCodes.http_status(ErrorCodes.NOT_SUPPORTED)
+		)
+		return
+	manager.create_action("gdcli: remove from group", UndoRedo.MERGE_DISABLE, node)
+	manager.add_do_method(node, "remove_from_group", group)
+	manager.add_undo_method(node, "add_to_group", group, true)
+	manager.commit_action()
 	(
 		res
 		. json(
 			{
 				"ok": true,
 				"changed": true,
-				"undoable": false,
+				"undoable": true,
 				"node_path": lookup.node_path,
 				"group": group,
 			}
@@ -51,7 +71,7 @@ func doc() -> GdApiRouteDoc:
 			{
 				"ok": "bool",
 				"changed": "bool",
-				"undoable": "bool, false",
+				"undoable": "bool, true",
 				"node_path": "String",
 				"group": "String",
 			}
