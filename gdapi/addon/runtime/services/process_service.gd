@@ -4,9 +4,13 @@ extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
+const DEFAULT_TIMEOUT_MS := 5000
+const MAX_TIMEOUT_MS := 60_000
+const DEFAULT_MAX_OUTPUT_BYTES := 65536
+const MAX_OUTPUT_BYTES := 1_048_576
 
 
-static func validate(body: Dictionary, policy: Dictionary) -> Dictionary:
+static func validate(body: Dictionary) -> Dictionary:
 	var executable := String(body.get("executable", ""))
 	var args: Array = body.get("args", [])
 	if executable.is_empty() or typeof(args) != TYPE_ARRAY:
@@ -18,33 +22,22 @@ static func validate(body: Dictionary, policy: Dictionary) -> Dictionary:
 	for arg in args:
 		if typeof(arg) != TYPE_STRING:
 			return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "args must be strings"}
-	var allowed: Array = policy.get("executables", [])
-	if not allowed.has(executable):
-		return {
-			"ok": false, "code": ErrorCodes.PERMISSION_DENIED, "error": "executable is not allowed"
-		}
 	var cwd := String(body.get("cwd", "res://"))
 	var checked := PathGuard.validate(cwd, "read")
 	if not checked.ok:
 		return checked
-	var roots: Array = policy.get("cwd_roots", [])
-	var under_root := false
-	for root in roots:
-		var normalized := String(root).trim_suffix("/")
-		if checked.path == normalized or checked.path.begins_with(normalized + "/"):
-			under_root = true
-	if not under_root:
+	var timeout := int(body.get("timeout_ms", DEFAULT_TIMEOUT_MS))
+	var cap := int(body.get("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES))
+	if timeout <= 0 or timeout > MAX_TIMEOUT_MS:
+		return {
+			"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "timeout_ms must be in 1..60000"
+		}
+	if cap <= 0 or cap > MAX_OUTPUT_BYTES:
 		return {
 			"ok": false,
-			"code": ErrorCodes.PERMISSION_DENIED,
-			"error": "cwd is outside policy roots"
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "max_output_bytes must be in 1..1048576"
 		}
-	var timeout := int(body.get("timeout_ms", 5000))
-	var cap := int(body.get("max_output_bytes", 65536))
-	if timeout <= 0 or timeout > int(policy.get("max_timeout_ms", 0)):
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "timeout exceeds policy"}
-	if cap <= 0 or cap > int(policy.get("max_output_bytes", 0)):
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "output cap exceeds policy"}
 	return {
 		"ok": true,
 		"executable": executable,
