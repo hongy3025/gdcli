@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from .helpers import exec_error, exec_ok, tree_digest
+from .helpers import exec_error, exec_ok
 
 
 def test_filesystem_query_contract(m2_editor):
@@ -21,6 +21,16 @@ def test_filesystem_query_contract(m2_editor):
     assert grep["items"][0]["line"] >= 1
 
 
+def test_filesystem_search_and_read_round_trip(m2_editor):
+    listed = exec_ok(m2_editor, "filesystem/search", {
+        "root": "res://scripts", "glob": "*.gd", "limit": 50
+    })
+    assert listed["items"]
+    target = listed["items"][0]
+    read_back = exec_ok(m2_editor, "filesystem/read", {"path": target})
+    assert read_back["bytes"] > 0
+
+
 def test_filesystem_write_overwrites_without_force(m2_editor):
     path = "res://notes/test.md"
     exec_ok(m2_editor, "filesystem/write", {"path": path, "content": "first"})
@@ -35,8 +45,12 @@ def test_filesystem_write_atomic(m2_editor):
         "path": target, "content": "first"
     })
     assert write1["written"] is True
+    write2 = exec_ok(m2_editor, "filesystem/write", {
+        "path": target, "content": "second"
+    })
+    assert write2["written"] is True
     after = exec_ok(m2_editor, "filesystem/read", {"path": target})
-    assert after["content"] == "first"
+    assert after["content"] == "second"
 
 
 @pytest.mark.parametrize("route,data,code", [

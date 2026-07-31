@@ -176,9 +176,9 @@ def test_pathcheck_rejects_unknown_mode(e2e_editor):
     assert error["code"] == "invalid_param"
 
 
-def test_uid_update_requires_force(e2e_editor):
-    error = _exec_error(e2e_editor, "uid/update_all", {"project_path": "res://tests"})
-    assert error["code"] == "unsafe_operation"
+def test_uid_update_without_force(e2e_editor):
+    resp = _exec(e2e_editor, "uid/update_all", '{"project_path":"res://tests"}')
+    assert resp["ok"] is True
 
 
 def test_uid_update_cannot_touch_protected_metadata(e2e_editor):

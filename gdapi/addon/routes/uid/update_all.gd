@@ -18,19 +18,14 @@ const ROUTE := "uid/update_all"
 ##
 ## 扫描项目目录，重新保存场景文件以更新 UID，
 ## 并为缺少 UID 的脚本文件生成新的 UID。
-## @param req 请求对象，包含可选的 project_path 和必需的 force
+## @param req 请求对象，包含可选的 project_path
 ## @param res 响应对象
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
-	var force: bool = req.get_body("force", false)
-	if not ErrorCodes.require_force(res, force, ROUTE):
-		AuditLog.record(ROUTE, "dangerous", {"force": false}, false, ErrorCodes.UNSAFE_OPERATION)
-		return
-
 	var project_path: String = req.get_body("project_path", "res://")
 	var checked := PathGuard.validate(project_path, "write")
 	if not checked.ok:
 		AuditLog.record(ROUTE, "dangerous", {"project_path": project_path}, false, checked.code)
-		res.error(checked.error, checked.code, checked.status)
+		res.error(checked.error, checked.code, ErrorCodes.http_status(checked.code))
 		return
 	project_path = checked.path
 	if not project_path.ends_with("/"):
@@ -128,9 +123,8 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("批量更新项目中所有资源的 UID")
 		. desc("扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题")
-		. param("force", "bool", true, "必须为 true 才执行危险操作")
 		. param("project_path", "String", false, "要扫描的项目子目录路径，默认为 res://", "res://")
-		. example('{"project_path":"res://tests","force":true}')
+		. example('{"project_path":"res://tests"}')
 		. returns(
 			"处理结果统计",
 			{

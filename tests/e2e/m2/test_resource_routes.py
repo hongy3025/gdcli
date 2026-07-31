@@ -1,8 +1,6 @@
 """Resource route acceptance tests."""
 
-from .helpers import exec_error, exec_ok
-
-
+from .helpers import exec_error, exec_ok, tree_digest
 
 
 def test_resource_info_returns_class(m2_editor):
@@ -47,3 +45,8 @@ def test_resource_create_assign_delete_round_trip(m2_editor):
     })
     assert deleted["deleted"] is True
 
+
+def test_resource_files_untouched_on_rejection(m2_editor):
+    before = tree_digest(m2_editor["project"])
+    exec_error(m2_editor, "resource/delete", {"path": "res://addons/gdapi/plugin.gd"})
+    assert tree_digest(m2_editor["project"]) == before
