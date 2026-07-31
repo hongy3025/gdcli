@@ -1,10 +1,9 @@
-"""M6 E2E fixtures — shared `e2e_editor` aliases and capability policy helpers.
+"""M6 E2E fixtures — module-scoped aliases of the shared session editor.
 
 The single Godot editor and unified project live in `tests/e2e/shared_fixture.py`,
 re-exported through the root `tests/e2e/conftest.py` as `m6_editor*` and
-friends. The local fixtures no longer start a new editor per module; they
-return the shared session env and apply a per-test policy overlay through
-`temporary_policy` so the capability tests can still deny individual routes.
+friends. The local fixtures no longer start a new editor per module and no
+longer overlay a capability policy; they return the shared session env as-is.
 """
 
 from __future__ import annotations
@@ -40,118 +39,46 @@ from e2e.shared_fixture import (  # noqa: E402,F401
     m6_editor_eval as session_m6_editor_eval,
     m6_editor_network as session_m6_editor_network,
     m6_editor_process as session_m6_editor_process,
-    temporary_policy,
 )
 
 M6_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m6_project"
 
 M6_HTTP_PORT: int = 18923
 
-M6_EVAL_POLICY = {
-    "version": 1,
-    "capabilities": {
-        "runtime_eval": {
-            "enabled": True, "max_source_bytes": 16384,
-            "allowed_input_keys": ["a", "b", "runtime_marker"],
-        },
-        "editor_eval": {
-            "enabled": True, "max_source_bytes": 16384,
-            "allowed_input_keys": ["a", "b", "runtime_marker"],
-        },
-        "process": {
-            "enabled": True, "executables": ["sleep", "sleep.cmd", "echo_args", "echo_args.cmd", "echo_args.py"],
-            "cwd_roots": ["res://tools"],
-            "max_timeout_ms": 5000, "max_output_bytes": 65536,
-        },
-        "network": {
-            "enabled": True, "schemes": ["http"], "hosts": ["127.0.0.1", "localhost"],
-            "ports": [80, 443], "max_timeout_ms": 5000, "max_response_bytes": 1048576,
-            "max_redirects": 5, "allow_private": True,
-        },
-    },
-}
-
-M6_BULK_POLICY = {
-    "version": 1,
-    "capabilities": {"bulk_files": {"enabled": True}},
-}
-
-M6_NETWORK_POLICY = {
-    "version": 1,
-    "capabilities": {
-        "network": {
-            "enabled": True,
-            "schemes": ["http"],
-            "hosts": ["127.0.0.1", "localhost"],
-            "ports": [80, 443, M6_HTTP_PORT],
-            "allow_private": True,
-            "max_redirects": 5,
-            "max_timeout_ms": 5000,
-            "max_response_bytes": 1048576,
-        },
-    },
-}
-
-M6_PROCESS_POLICY = {
-    "version": 1,
-    "capabilities": {
-        "process": {
-            "enabled": True,
-            "executables": ["sleep", "sleep.cmd", "echo_args", "echo_args.cmd", "echo_args.py"],
-            "cwd_roots": ["res://tools"],
-            "max_timeout_ms": 5000,
-            "max_output_bytes": 65536,
-        },
-    },
-}
-
-# Default-deny policy: all capabilities disabled
-M6_DEFAULT_DENY_POLICY = {
-    "version": 1,
-    "capabilities": {},
-}
-
 
 # ── module-scoped policy overlay fixtures ───────────────────────────────
-# Each fixture wraps the session-scoped shared alias with a
-# ``temporary_policy`` that applies the correct capability overlay for
-# the test module.  The policy is restored to the default (all-enabled)
-# when the fixture cleans up.
+# Each fixture is a plain module-scoped alias of the session-scoped shared
+# editor; capability overlays were removed with the policy gate in Task 1.
 
 
 @pytest.fixture(scope="module")
 def m6_editor(session_m6_editor: dict[str, Any]) -> dict[str, Any]:
-    """Module-scoped alias with default-deny policy for contract tests."""
-    with temporary_policy(session_m6_editor, M6_DEFAULT_DENY_POLICY):
-        yield session_m6_editor
+    """Module-scoped alias of the shared editor (no capability overlay)."""
+    return session_m6_editor
 
 
 @pytest.fixture(scope="module")
 def m6_editor_eval(session_m6_editor_eval: dict[str, Any]) -> dict[str, Any]:
-    """Module-scoped alias with eval policy."""
-    with temporary_policy(session_m6_editor_eval, M6_EVAL_POLICY):
-        yield session_m6_editor_eval
+    """Module-scoped alias of the shared editor (no capability overlay)."""
+    return session_m6_editor_eval
 
 
 @pytest.fixture(scope="module")
 def m6_editor_process(session_m6_editor_process: dict[str, Any]) -> dict[str, Any]:
-    """Module-scoped alias with process policy."""
-    with temporary_policy(session_m6_editor_process, M6_PROCESS_POLICY):
-        yield session_m6_editor_process
+    """Module-scoped alias of the shared editor (no capability overlay)."""
+    return session_m6_editor_process
 
 
 @pytest.fixture(scope="module")
 def m6_editor_bulk(session_m6_editor_bulk: dict[str, Any]) -> dict[str, Any]:
-    """Module-scoped alias with bulk_files policy."""
-    with temporary_policy(session_m6_editor_bulk, M6_BULK_POLICY):
-        yield session_m6_editor_bulk
+    """Module-scoped alias of the shared editor (no capability overlay)."""
+    return session_m6_editor_bulk
 
 
 @pytest.fixture(scope="module")
 def m6_editor_network(session_m6_editor_network: dict[str, Any]) -> dict[str, Any]:
-    """Module-scoped alias with network policy."""
-    with temporary_policy(session_m6_editor_network, M6_NETWORK_POLICY):
-        yield session_m6_editor_network
+    """Module-scoped alias of the shared editor (no capability overlay)."""
+    return session_m6_editor_network
 
 
 class _EchoHandler(BaseHTTPRequestHandler):
@@ -375,11 +302,6 @@ def apply_delete(env: dict[str, Any], plan: dict) -> dict[str, Any]:
 
 
 __all__ = [
-    "M6_BULK_POLICY",
-    "M6_DEFAULT_DENY_POLICY",
-    "M6_EVAL_POLICY",
-    "M6_NETWORK_POLICY",
-    "M6_PROCESS_POLICY",
     "apply_delete",
     "apply_replace",
     "audit_for_route",
@@ -403,5 +325,4 @@ __all__ = [
     "replace_plan",
     "start_async_exec",
     "stop_game",
-    "temporary_policy",
 ]

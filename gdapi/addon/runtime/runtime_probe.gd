@@ -248,12 +248,7 @@ func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 	match op:
 		"eval":
 			result = EvalService.execute(
-				String(payload.get("source", "")),
-				payload.get("inputs", {}),
-				{
-					"max_source_bytes": 16384,
-					"allowed_input_keys": payload.get("allowed_input_keys", [])
-				}
+				String(payload.get("source", "")), payload.get("inputs", {})
 			)
 		"runtime/status":
 			result = _op_status(payload)

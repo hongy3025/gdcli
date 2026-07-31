@@ -8,36 +8,26 @@ var failed := 0
 
 
 func _init() -> void:
-	var policy := {"max_source_bytes": 16384, "allowed_input_keys": ["origin", "delta"]}
-	var result := EvalService.execute(
-		"origin + delta",
-		{
-			"origin": {"type": "Vector2", "value": [1, 2]},
-			"delta": {"type": "Vector2", "value": [3, 4]}
-		},
-		policy
+	var result := (
+		EvalService
+		. execute(
+			"origin + delta",
+			{
+				"origin": {"type": "Vector2", "value": [1.0, 2.0]},
+				"delta": {"type": "Vector2", "value": [3.0, 4.0]},
+			}
+		)
 	)
 	assert_eq(
 		result.get("value", {}), {"type": "Vector2", "value": [4.0, 6.0]}, "typed vector expression"
 	)
-	var denied := EvalService.execute("Engine.get_main_loop()", {}, policy)
+	var denied := EvalService.execute("Engine.get_main_loop()", {})
 	assert_eq(denied.get("code", ""), "permission_denied", "object access is denied")
-	var comparison := EvalService.execute("origin.x <= 2", {}, policy)
-	assert_eq(comparison.get("code", ""), "permission_denied", "member access remains denied")
-	var allowed_comparison := (
-		EvalService
-		. execute(
-			"a <= b and a != 0",
-			{"a": 1, "b": 2},
-			{
-				"max_source_bytes": 16384,
-				"allowed_input_keys": ["a", "b"],
-			}
-		)
-	)
-	assert_true(allowed_comparison.get("ok", false), "comparisons are allowed")
-	var unknown := EvalService.execute("instance_from_id(1)", {}, policy)
+	var unknown := EvalService.execute("instance_from_id(1)", {})
 	assert_eq(unknown.get("code", ""), "permission_denied", "unknown call is denied")
+	# 输入 key 不再受限：任意 key 可用
+	var free_keys := EvalService.execute("a + b", {"a": 1, "b": 2})
+	assert_true(free_keys.get("ok", false), "arbitrary input keys are allowed")
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 

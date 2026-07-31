@@ -35,7 +35,7 @@ func dispatch(
 		return
 	var boundary := _validate_boundary(req, op, public_route)
 	if not bool(boundary.get("ok", false)):
-		_reject(req, res, op, mutation, boundary)
+		_reject(req, res, op, public_route, mutation, boundary)
 		return
 	var timeout := operation_timeout(req)
 	var payload_variant: Variant = req.body
@@ -45,7 +45,7 @@ func dispatch(
 			"code": ErrorCodes.INVALID_PARAM,
 			"error": "request body must be a JSON object"
 		}
-		_reject(req, res, op, mutation, invalid)
+		_reject(req, res, op, public_route, mutation, invalid)
 		return
 
 	var payload: Dictionary = payload_variant.duplicate(true)
@@ -54,7 +54,7 @@ func dispatch(
 		Protocol.request_for_version(version, 1, op, payload)
 	)
 	if not bool(protocol_verdict.get("ok", false)):
-		_reject(req, res, op, mutation, protocol_verdict)
+		_reject(req, res, op, public_route, mutation, protocol_verdict)
 		return
 	var broker_timeout := mini(timeout + BROKER_GRACE_TIMEOUT, MAX_BROKER_TIMEOUT)
 	var broker: Variant = RuntimeBroker.instance()
@@ -63,7 +63,13 @@ func dispatch(
 			"ok": false, "code": ErrorCodes.CONFLICT, "error": "runtime is not connected"
 		}
 		if mutation:
-			_audit(op, payload, disconnected, false, ErrorCodes.CONFLICT)
+			_audit(
+				public_route if not public_route.is_empty() else op,
+				payload,
+				disconnected,
+				false,
+				ErrorCodes.CONFLICT
+			)
 		_send_error(res, disconnected)
 		return
 	var broker_status: Dictionary = broker.status() if broker.has_method("status") else {}
@@ -78,7 +84,13 @@ func dispatch(
 			"ok": false, "code": ErrorCodes.CONFLICT, "error": "runtime protocol is not negotiated"
 		}
 		if mutation:
-			_audit(op, payload, unavailable, false, ErrorCodes.CONFLICT)
+			_audit(
+				public_route if not public_route.is_empty() else op,
+				payload,
+				unavailable,
+				false,
+				ErrorCodes.CONFLICT
+			)
 		_send_error(res, unavailable)
 		return
 
@@ -87,7 +99,7 @@ func dispatch(
 		if completed or res.is_sent():
 			return
 		completed = true
-		_complete(res, op, payload, mutation, reply)
+		_complete(res, op, public_route, payload, mutation, reply)
 	if version == Protocol.VERSION:
 		broker.request(op, payload, broker_timeout, callback)
 	else:
@@ -186,7 +198,12 @@ func _invalid_boundary(error: String) -> Dictionary:
 
 
 func _complete(
-	res: GdApiResponse, op: String, payload: Dictionary, mutation: bool, reply: Dictionary
+	res: GdApiResponse,
+	op: String,
+	public_route: String,
+	payload: Dictionary,
+	mutation: bool,
+	reply: Dictionary
 ) -> void:
 	if res.is_sent():
 		return
@@ -203,7 +220,7 @@ func _complete(
 			body["changed"] = bool(body.get("changed", true))
 			body["undoable"] = false
 			body["operation"] = op
-			_audit(op, payload, reply, true, "")
+			_audit(public_route if not public_route.is_empty() else op, payload, reply, true, "")
 		res.json(body)
 		return
 
@@ -211,7 +228,7 @@ func _complete(
 	if code.is_empty():
 		code = ErrorCodes.GODOT_ERROR
 	if mutation:
-		_audit(op, payload, reply, false, code)
+		_audit(public_route if not public_route.is_empty() else op, payload, reply, false, code)
 	_send_error(res, reply)
 
 
@@ -227,11 +244,22 @@ func _send_error(res: GdApiResponse, failure: Dictionary) -> void:
 
 
 func _reject(
-	req: GdApiRequest, res: GdApiResponse, op: String, mutation: bool, failure: Dictionary
+	req: GdApiRequest,
+	res: GdApiResponse,
+	op: String,
+	public_route: String,
+	mutation: bool,
+	failure: Dictionary
 ) -> void:
 	if mutation:
 		var payload: Variant = req.body if req != null else null
-		_audit(op, payload, failure, false, String(failure.get("code", ErrorCodes.INVALID_PARAM)))
+		_audit(
+			public_route if not public_route.is_empty() else op,
+			payload,
+			failure,
+			false,
+			String(failure.get("code", ErrorCodes.INVALID_PARAM))
+		)
 	_send_error(res, failure)
 
 

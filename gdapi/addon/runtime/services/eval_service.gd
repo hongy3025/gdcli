@@ -20,20 +20,16 @@ const ALLOWED_GLOBALS := [
 ]
 
 
-static func execute(source: String, inputs: Dictionary, policy: Dictionary) -> Dictionary:
-	if (
-		source.to_utf8_buffer().size()
-		> min(MAX_SOURCE_BYTES, int(policy.get("max_source_bytes", MAX_SOURCE_BYTES)))
-	):
-		return _error(ErrorCodes.INVALID_PARAM, "source exceeds policy limit")
+static func execute(source: String, inputs: Dictionary) -> Dictionary:
+	if source.to_utf8_buffer().size() > MAX_SOURCE_BYTES:
+		return _error(ErrorCodes.INVALID_PARAM, "source exceeds the 16 KiB limit")
 	if inputs.size() > 64:
 		return _error(ErrorCodes.INVALID_PARAM, "too many inputs")
-	var allowed: Array = policy.get("allowed_input_keys", [])
 	var names: Array[String] = []
 	var values: Array = []
 	for key in inputs:
-		if typeof(key) != TYPE_STRING or not allowed.has(String(key)):
-			return _error(ErrorCodes.PERMISSION_DENIED, "input key is not allowed")
+		if typeof(key) != TYPE_STRING:
+			return _error(ErrorCodes.INVALID_PARAM, "input names must be strings")
 		var decoded := VariantCodec.decode(inputs[key])
 		if not decoded.ok or _contains_object(decoded.value):
 			return _error(ErrorCodes.INVALID_PARAM, "input value is not a permitted Variant")
