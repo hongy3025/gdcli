@@ -3,6 +3,7 @@ class_name GdApiTilemapEditor
 extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
+const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 
