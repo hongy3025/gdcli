@@ -14,11 +14,14 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if path == "":
 		res.error("path is required", "missing_param")
 		return
-	var result := ResourceEditor.delete(path)
-	if not result.ok:
+	_send(res, ResourceEditor.delete(path))
+
+
+func _send(res: GdApiResponse, result: Dictionary) -> void:
+	if result.ok:
+		res.json(result)
+	else:
 		res.error(result.error, result.code, ErrorCodes.http_status(result.code))
-		return
-	res.json(result)
 
 
 func doc() -> GdApiRouteDoc:

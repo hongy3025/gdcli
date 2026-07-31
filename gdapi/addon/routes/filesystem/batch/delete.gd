@@ -6,6 +6,13 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const ROUTE := "filesystem/batch/delete"
 
 
+func _send(res: GdApiResponse, result: Dictionary) -> void:
+	if result.ok:
+		res.json(result)
+	else:
+		res.error(result.error, result.code, ErrorCodes.http_status(result.code))
+
+
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var out := Service.delete(req.body)
 	AuditLog.record(
@@ -15,10 +22,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		out.ok,
 		String(out.get("code", ""))
 	)
-	if out.ok:
-		res.json(out)
-	else:
-		res.error(out.error, out.code, ErrorCodes.http_status(out.code))
+	_send(res, out)
 
 
 func doc() -> GdApiRouteDoc:

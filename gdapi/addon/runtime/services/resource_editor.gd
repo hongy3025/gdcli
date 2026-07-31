@@ -289,7 +289,7 @@ static func move(from_path: String, to_path: String) -> Dictionary:
 
 ## 删除资源文件
 static func delete(path: String) -> Dictionary:
-	var checked := PathGuard.validate(path, "write")
+	var checked := PathGuard.validate(path, "delete")
 	if not checked.ok:
 		return {"ok": false, "code": checked.code, "error": checked.error}
 	if not FileAccess.file_exists(ProjectSettings.globalize_path(checked.path)):
