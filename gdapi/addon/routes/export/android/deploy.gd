@@ -1,6 +1,7 @@
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 const S := preload("res://addons/gdapi/runtime/services/android_bridge.gd")
+const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
@@ -8,7 +9,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if out.ok:
 		res.json(out)
 	else:
-		res.error(out.error, out.code, 400, out.get("details", {}))
+		res.error(out.error, out.code, ErrorCodes.http_status(out.code), out.get("details", {}))
 
 
 func doc() -> GdApiRouteDoc:
@@ -19,14 +20,13 @@ func doc() -> GdApiRouteDoc:
 		. param("apk_path", "String", true, "项目内 APK")
 		. param("package", "String", true, "包名")
 		. param("activity", "String", true, "Activity")
-		. param("force", "bool", true, "确认部署")
 		. returns(
 			"部署结果", {"ok": "bool", "serial": "String", "installed": "bool", "launched": "bool"}
 		)
 		. example(
 			(
 				'{"serial":"emulator-5554","apk_path":"res://build/app.apk",'
-				+ '"package":"org.example.app","activity":"com.godot.game.GodotApp","force":true}'
+				+ '"package":"org.example.app","activity":"com.godot.game.GodotApp"}'
 			)
 		)
 	)

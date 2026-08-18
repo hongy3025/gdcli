@@ -181,13 +181,13 @@ def test_uid_update_without_force(e2e_editor):
     assert resp["ok"] is True
 
 
-def test_uid_update_cannot_touch_protected_metadata(e2e_editor):
+def test_uid_update_protects_metadata_directory(e2e_editor):
     metadata = e2e_editor["fixture"] / ".godot" / "gdapi.json"
     before = metadata.read_bytes()
     error = _exec_error(
         e2e_editor,
         "uid/update_all",
-        {"project_path": "res://.godot", "force": True},
+        {"project_path": "res://.godot"},
     )
     assert error["code"] == "permission_denied"
     assert metadata.read_bytes() == before

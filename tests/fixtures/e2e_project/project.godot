@@ -1,8 +1,7 @@
 ; Unified E2E fixture — merges M2–M6 assets under one project root.
 ;
 ; One project powers the entire pytest session: every capability is enabled by
-; default, and tests that need to deny a capability use the temporary_policy
-; context manager from tests/e2e/shared_fixture.py.
+; default; high-risk capabilities are available for development-time tests.
 config_version=5
 
 [application]

@@ -70,23 +70,6 @@ REQUIRED_PATHS: tuple[str, ...] = (
 )
 
 
-# A capability policy that enables every capability. Tests that need to deny
-# a capability write a tighter policy on top and reset through temporary_policy.
-DEFAULT_POLICY_BYTES = (
-    b"{"
-    b'"version":1,'
-    b'"capabilities":{'
-    b'"editor_eval":{"enabled":true,"max_source_bytes":16384,"allowed_input_keys":[]},'
-    b'"runtime_eval":{"enabled":true,"max_source_bytes":16384,"allowed_input_keys":[]},'
-    b'"process":{"enabled":true,"executables":["sleep","sleep.cmd","echo_args","echo_args.cmd","echo_args.py"],"cwd_roots":["res://tools"],"max_timeout_ms":5000,"max_output_bytes":65536},'
-    b'"network":{"enabled":true,"schemes":["http"],"hosts":["127.0.0.1","localhost"],"ports":[80,443],"max_timeout_ms":5000,"max_response_bytes":1048576,"max_redirects":5,"allow_private":true},'
-    b'"bulk_files":{"enabled":true},'
-    b'"bulk_deploy":{"enabled":true}'
-    b"}"
-    b"}"
-)
-
-
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -129,17 +112,3 @@ def test_unified_fixture_runtime_probe_section_present() -> None:
     """M3's runtime probe autoload is required by the runtime fixtures."""
     project = _read(E2E_PROJECT_GODOT)
     assert "GdApiRuntimeProbe" in project, "M3 autoload GdApiRuntimeProbe missing"
-
-
-def test_unified_fixture_carries_default_capability_policy() -> None:
-    policy_path = E2E_PROJECT / ".godot" / "gdapi-policy.json"
-    assert policy_path.is_file(), (
-        f"missing default policy at {policy_path} (write {policy_path} with "
-        f"bytes from DEFAULT_POLICY_BYTES)"
-    )
-    actual = policy_path.read_bytes().strip()
-    expected = DEFAULT_POLICY_BYTES.strip()
-    assert actual == expected, (
-        "default policy contents drifted from contract; update DEFAULT_POLICY_BYTES "
-        "and confirm every test still sees the capabilities it depends on"
-    )

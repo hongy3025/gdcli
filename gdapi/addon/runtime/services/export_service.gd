@@ -54,7 +54,9 @@ static func run(body: Dictionary) -> Dictionary:
 	var stderr: FileAccess = process["stderr"]
 	var pid := int(process["pid"])
 	var output_text := ""
-	var deadline := Time.get_ticks_msec() + int(body.get("timeout_ms", 120000))
+	var deadline := (
+		Time.get_ticks_msec() + clampi(int(body.get("timeout_ms", 120000)), 10000, 600000)
+	)
 	while OS.is_process_running(pid) and Time.get_ticks_msec() < deadline:
 		OS.delay_msec(10)
 	if OS.is_process_running(pid):
@@ -74,12 +76,26 @@ static func run(body: Dictionary) -> Dictionary:
 			output_text.to_lower().contains("template")
 			or output_text.to_lower().contains("not installed")
 		):
+			AuditLog.record(
+				"export/run",
+				"dangerous",
+				{"preset": preset_name, "path": checked.path},
+				false,
+				ErrorCodes.NOT_SUPPORTED
+			)
 			return {
 				"ok": false,
 				"code": ErrorCodes.NOT_SUPPORTED,
 				"error": "export template is unavailable",
 				"details": {"platform": found.platform, "preset": preset_name}
 			}
+		AuditLog.record(
+			"export/run",
+			"dangerous",
+			{"preset": preset_name, "path": checked.path},
+			false,
+			ErrorCodes.GODOT_ERROR
+		)
 		return {
 			"ok": false,
 			"code": ErrorCodes.GODOT_ERROR,

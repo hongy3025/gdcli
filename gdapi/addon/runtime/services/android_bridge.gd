@@ -4,6 +4,7 @@ extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
+const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
 
 static func parse_devices(text: String) -> Array:
@@ -31,58 +32,69 @@ static func devices() -> Dictionary:
 
 
 static func deploy(body: Dictionary) -> Dictionary:
-	if not bool(body.get("force", false)):
-		return {
-			"ok": false,
-			"code": ErrorCodes.UNSAFE_OPERATION,
-			"error": "export/android/deploy requires force:true"
-		}
 	var serial := String(body.get("serial", ""))
 	var regex := RegEx.new()
 	regex.compile("^[A-Za-z0-9._:-]+$")
 	if regex.search(serial) == null:
-		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid device serial"}
+		return _record_deploy_failure(body, ErrorCodes.INVALID_PARAM, "invalid device serial")
 	var package_name := String(body.get("package", ""))
 	var activity := String(body.get("activity", ""))
 	var identifier := RegEx.new()
 	identifier.compile("^[A-Za-z][A-Za-z0-9_.]*$")
 	if identifier.search(package_name) == null or identifier.search(activity) == null:
-		return {
-			"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid package or activity"
-		}
+		return _record_deploy_failure(body, ErrorCodes.INVALID_PARAM, "invalid package or activity")
 	var path := PathGuard.validate(String(body.get("apk_path", "")), "read")
 	if (
 		not path.ok
 		or not path.path.to_lower().ends_with(".apk")
 		or not FileAccess.file_exists(path.path)
 	):
-		return {"ok": false, "code": ErrorCodes.INVALID_PATH, "error": "APK path is invalid"}
+		return _record_deploy_failure(body, ErrorCodes.INVALID_PATH, "APK path is invalid")
 	var listed := devices()
 	if not listed.ok:
-		return listed
+		return _record_deploy_failure(body, String(listed.code), "device list unavailable")
 	var selected: Array = listed.devices.filter(func(item): return item.serial == serial)
 	if selected.size() != 1 or selected[0].state != "device":
-		return {
-			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "selected device is not online"
-		}
+		return _record_deploy_failure(
+			body, ErrorCodes.NOT_SUPPORTED, "selected device is not online"
+		)
 	var adb := _adb_path()
 	if adb.is_empty() or not FileAccess.file_exists(adb):
-		return {
-			"ok": false,
-			"code": ErrorCodes.NOT_FOUND,
-			"error": "configured ADB executable not found"
-		}
+		return _record_deploy_failure(
+			body, ErrorCodes.NOT_FOUND, "configured ADB executable not found"
+		)
 	var install := _execute(
 		["-s", serial, "install", "-r", ProjectSettings.globalize_path(path.path)], 60000, adb
 	)
 	if not install.ok:
-		return install
+		return _record_deploy_failure(body, String(install.code), "adb install failed")
 	var launch := _execute(
 		["-s", serial, "shell", "am", "start", "-n", package_name + "/" + activity], 60000, adb
 	)
 	if not launch.ok:
-		return launch
+		return _record_deploy_failure(body, String(launch.code), "adb launch failed")
+	AuditLog.record(
+		"export/android/deploy", "dangerous", {"serial": serial, "package": package_name}, true
+	)
 	return {"ok": true, "serial": serial, "installed": true, "launched": true, "undoable": false}
+
+
+static func _record_deploy_failure(body: Dictionary, code: String, message: String) -> Dictionary:
+	(
+		AuditLog
+		. record(
+			"export/android/deploy",
+			"dangerous",
+			{
+				"serial": body.get("serial", ""),
+				"package": body.get("package", ""),
+				"apk_path": body.get("apk_path", ""),
+			},
+			false,
+			code
+		)
+	)
+	return {"ok": false, "code": code, "error": message}
 
 
 static func _execute(args: Array, timeout_ms: int, executable: String = "") -> Dictionary:

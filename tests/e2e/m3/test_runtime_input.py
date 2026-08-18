@@ -214,7 +214,7 @@ def test_input_sequence_prevalidates_every_event_before_execution(m3_running, in
 
 
 def test_input_mutation_audit_is_redacted_and_bounded(m3_running):
-    exec_ok(m3_running, "gdapi/audit/clear", {"force": True})
+    exec_ok(m3_running, "gdapi/audit/clear", {})
     exec_ok(m3_running, "runtime/input/key", {"keycode": 32, "pressed": True})
     secret = "task11-secret-value"
     error = exec_error(m3_running, "runtime/input/key", {
@@ -238,7 +238,7 @@ def test_input_mutation_audit_is_redacted_and_bounded(m3_running):
 
 
 def test_oversized_mutation_request_is_structured_fast_and_secret_safe(m3_running):
-    exec_ok(m3_running, "gdapi/audit/clear", {"force": True})
+    exec_ok(m3_running, "gdapi/audit/clear", {})
     secret = "task16-oversized-authorization"
     payload_path = Path(m3_running["project"]) / ".godot" / "task16-oversized.json"
     payload_path.write_text(json.dumps({

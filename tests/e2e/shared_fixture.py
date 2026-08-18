@@ -7,10 +7,8 @@ helpers every module uses to reach it:
   `subprocess.Popen`, copies the unified project, installs the addon, and
   waits for gdapi readiness.
 * `reset_shared_state` — deterministic per-test reset that stops games,
-  clears runtime transport, clears the audit log, restores the selection,
-  and reloads the default capability policy.
-* `temporary_policy` — context manager that overlays a policy for the
-  duration of a `with` block and unconditionally restores the prior bytes.
+  clears runtime transport, clears the audit log, and restores the
+  selection.
 
 Legacy module fixtures (`m2_editor`, `m3_editor`, `m4_env`, `m5_editor`,
 `m6_editor*`) are session-scoped aliases that all resolve to the same
@@ -41,9 +39,8 @@ from .m2.helpers import (
 
 
 E2E_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "e2e_project"
-E2E_DEFAULT_POLICY_PATH = E2E_FIXTURE_SOURCE / ".godot" / "gdapi-policy.json"
 E2E_RUNTIME_ROOT_NAME = "gdapi_runtime"
-E2E_METADATA_NAME = "gdapi.json"
+
 E2E_DEADLOCK_TIMEOUT_SECONDS = 180
 
 # A class-level counter records how many times the session-scoped fixture
@@ -135,14 +132,6 @@ def _gdcli_ping(env: dict[str, Any]) -> bool:
 def _copy_unified_project(source: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for entry in source.iterdir():
-        if entry.name == ".godot":
-            # `.godot/` is generated per-test-run, but the default capability
-            # policy is checked in there so tests have a known baseline.
-            destination = target / entry.name
-            if destination.exists():
-                shutil.rmtree(destination)
-            shutil.copytree(entry, destination)
-            continue
         destination = target / entry.name
         if entry.is_dir():
             if destination.exists():
@@ -150,6 +139,7 @@ def _copy_unified_project(source: Path, target: Path) -> None:
             shutil.copytree(entry, destination)
         else:
             shutil.copy2(entry, destination)
+
 def _copy_native_library(env: dict[str, Any]) -> None:
     """Copy the gdapi native library into the addon bin/ directory on Windows."""
     if sys.platform != "win32":
@@ -361,45 +351,10 @@ def reset_shared_state(env: dict[str, Any], *, reason: str) -> None:
     _run("editor/selection/set", "editor/selection/set", {"nodes": []})
     _run("gdapi/audit/clear", "gdapi/audit/clear", {})
 
-    # Restore default capability policy if it was overlaid by a prior test.
-    default_policy = E2E_DEFAULT_POLICY_PATH.read_bytes()
-    policy_path = project / ".godot" / "gdapi-policy.json"
-    if policy_path.exists() and policy_path.read_bytes() != default_policy:
-        policy_path.write_bytes(default_policy)
-
     if failures:
         raise AssertionError(
             f"reset_shared_state failed (reason={reason}):\n" + "\n".join(failures)
         )
-
-
-# ── policy overlay contract ───────────────────────────────────────────
-
-
-@contextlib.contextmanager
-def temporary_policy(env: dict[str, Any], override: dict) -> Iterator[dict]:
-    """Overlay a capability policy for the duration of a `with` block.
-
-    The previous policy is restored on success and on exception. If the
-    restoration step itself fails, the test must fail loudly so the
-    shared environment is not silently left in a denied state.
-    """
-    project = env["project"]
-    policy_path = project / ".godot" / "gdapi-policy.json"
-    policy_path.parent.mkdir(parents=True, exist_ok=True)
-    if not policy_path.exists():
-        policy_path.write_bytes(E2E_DEFAULT_POLICY_PATH.read_bytes())
-    previous = policy_path.read_bytes()
-    try:
-        policy_path.write_text(json.dumps(override), encoding="utf-8")
-        yield {"policy_path": policy_path, "previous": previous}
-    finally:
-        try:
-            policy_path.write_bytes(previous)
-        except OSError as exc:
-            raise AssertionError(
-                f"temporary_policy failed to restore previous policy: {exc}"
-            ) from exc
 
 
 # ── environment construction (pure function) ──────────────────────────
@@ -494,7 +449,7 @@ def e2e_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         env = build_environment(tmp_path_factory)
     except RuntimeError as exc:
         if "cargo build" in str(exc):
-            pytest.skip(str(exc), pytrace=False)
+            pytest.skip(str(exc))
         pytest.fail(str(exc), pytrace=False)
 
     try:
@@ -677,44 +632,29 @@ def m6_editor(e2e_editor) -> dict[str, Any]:
 @pytest.fixture(scope="session")
 def m6_editor_process(e2e_editor) -> dict[str, Any]:
     """Module-scoped alias used by M6 process tests."""
-    return e6_alias_with_policy(e2e_editor, "process")
+    return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m6_editor_eval(e2e_editor) -> dict[str, Any]:
     """Module-scoped alias used by M6 eval tests."""
-    return e6_alias_with_policy(e2e_editor, "eval")
+    return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m6_editor_bulk(e2e_editor) -> dict[str, Any]:
     """Module-scoped alias used by M6 bulk tests."""
-    return e6_alias_with_policy(e2e_editor, "bulk")
+    return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m6_editor_network(e2e_editor) -> dict[str, Any]:
     """Module-scoped alias used by M6 network tests."""
-    return e6_alias_with_policy(e2e_editor, "network")
-
-
-def e6_alias_with_policy(env: dict[str, Any], variant: str) -> dict[str, Any]:
-    """Return the env tagged with a policy variant for M6 tests.
-
-    The actual policy is applied per-test through `temporary_policy`; this
-    helper merely stamps a marker on the dict so individual tests can
-    request the right overlay.
-    """
-    env.setdefault("policy_variants", set()).add(variant)
-    return env
-
-
-
+    return e2e_editor
 
 
 __all__ = [
     "E2E_DEADLOCK_TIMEOUT_SECONDS",
-    "E2E_DEFAULT_POLICY_PATH",
     "E2E_FIXTURE_SOURCE",
     "E2E_RUNTIME_ROOT_NAME",
     "EDITOR_START_COUNTER",
@@ -727,5 +667,4 @@ __all__ = [
     "restore_file_state",
     "snapshot_files",
     "teardown_environment",
-    "temporary_policy",
 ]

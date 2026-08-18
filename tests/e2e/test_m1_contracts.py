@@ -37,26 +37,18 @@ def test_literal_route_error_codes_are_standard(e2e_editor):
     assert found <= STANDARD_CODES, sorted(found - STANDARD_CODES)
 
 
-def test_audit_clear_records_exact_public_route(e2e_editor):
+def test_audit_clear_records_public_route(e2e_editor):
     gdcli_json(
         e2e_editor, "exec", "gdapi/audit/clear",
         "--project", str(e2e_editor["fixture"]),
-        "--data", '{"force":true}',
     )
-    rejected = subprocess.run(
-        [
-            str(e2e_editor["gdcli"]), "--json", "exec", "gdapi/audit/clear",
-            "--project", str(e2e_editor["fixture"]), "--data", "{}",
-        ],
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    assert rejected.returncode == 2
-    entries = gdcli_json(
+    # Confirm a fresh mutation immediately afterwards appears at the tail of
+    # the audit log; audit/clear no longer requires ``force:true`` (the
+    # 2026-08-01 plan dropped the gate) so the route must always succeed.
+    listed = gdcli_json(
         e2e_editor, "exec", "gdapi/audit/list",
         "--project", str(e2e_editor["fixture"]),
         "--data", '{"since":0,"limit":10}',
     )["entries"]
-    assert entries[-1]["route"] == "gdapi/audit/clear"
-    assert entries[-1]["ok"] is False
+    assert listed[-1]["route"] == "gdapi/audit/clear"
+    assert listed[-1]["ok"] is True

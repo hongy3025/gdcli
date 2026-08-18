@@ -9,7 +9,7 @@ from .conftest import _exec_raw, command_doc
 @pytest.mark.parametrize("route", sorted(M6_ROUTES))
 def test_m6_route_no_longer_requires_policy(m6_editor, route):
     """Policy requirement removed: routes must not answer permission_denied."""
-    body = {"force": True}  # force 字段被忽略，不应再触发拒绝
+    body = {}  # 路由不再要求 force 或 policy 字段
     if route == "runtime/eval":
         body["source"] = "1 + 1"
     result = _exec_raw(m6_editor, route, body)

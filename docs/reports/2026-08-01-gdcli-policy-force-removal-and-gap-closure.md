@@ -138,10 +138,14 @@ These are non-blocking items uncovered during the per-task review that are docum
 4. `runtime/eval` v1 callers receive `conflict` — by design per the M3 spec; v1 callers are not supported on the runtime surface.
 5. `runtime_route.gd::_audit` Dictionary copy — the per-call `duplicate(true)` is paid on every mutation response; the cost is small in practice but a pre-allocated payload pool could amortize it. Not done.
 
-### 5.3 Deferred work (Android)
+### 5.3 Android toolchain constraint
 
-- `android_bridge.gd` force removal and full deploy-side audit — Task 8 was scoped to `export/run` only (per Main agent's mid-task cancellation); the `android_bridge.gd` rewrite and the `test_export_android.py` unskip are deferred until an Android-enabled environment can verify the failures and the new audit. The downstream `test_m5_smoke.py:20` `unsafe_operation` assertion remains as a placeholder.
-- `bulk_deploy_service.gd` empty-serial rejection was completed (`e041b96`); the remaining bridge work is the audit + `force` removal inside `AndroidBridge.deploy`.
+- `android_bridge.gd` force removal and deploy-side audit are now implemented.
+- `tests/e2e/m5/test_export_android.py` remains intentionally module-skipped because the
+  Android SDK/ADB toolchain is not sufficiently available in this environment. The two
+  Android-dependent tests are expected to report `SKIPPED`, while non-Android M5 smoke
+  coverage remains executable.
+- `bulk_deploy_service.gd` empty-serial rejection was completed (`e041b96`).
 
 ## 6. Summary
 
@@ -153,4 +157,4 @@ All 11 tasks of the 2026-08-01 plan are closed. The branch `feat/full-capability
 - Zero `require_force` / `capability_policy` / `gdapi-policy` / `"force"` residue in `gdapi` and `tests` (per the residue scan in Section 3.5).
 - README, docs/gdcli, and spec annotations reflect the dev-tool posture; the design-doc revision log is captured in this report (Section 4).
 
-The 2 Android tests and the 5 cosmetic findings are tracked as known leftovers (Section 5) and are not regressions introduced by this plan.
+The 2 intentionally skipped Android tests and the 5 cosmetic findings are tracked in Section 5 and are not regressions introduced by this plan.

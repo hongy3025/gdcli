@@ -1,20 +1,16 @@
-"""Lifecycle tests for the shared `e2e_editor` fixture and reset/policy helpers.
+"""Lifecycle tests for the shared `e2e_editor` fixture and reset helpers.
 
-These tests monkeypatch the editor startup so the suite can run without a
-live Godot process. They assert the invariants that other tests rely on:
-
-* two calls to `build_environment` (the pure helper behind `e2e_editor`)
-  share the same Popen/PID/metadata and the global start counter is
-  incremented exactly once;
-* `reset_shared_state` reports the failing phase on failure;
-* `temporary_policy` restores the previous bytes and reports failure if
-  restoration itself fails.
+These tests verify the deterministic per-test reset that stops games,
+clears runtime transport, clears the audit log, and restores the
+editor selection. Capability-policy overlay helpers were removed when
+gdcli was repositioned as a development-time tool (2026-08-01); the
+`temporary_policy` context manager is no longer used.
 """
 
 from __future__ import annotations
 
-import json
 import subprocess
+
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,11 +22,9 @@ from tests.e2e import shared_fixture
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SAMPLE_POLICY = shared_fixture.E2E_DEFAULT_POLICY_PATH.read_bytes()
 
 
 def _fake_env(project: Path) -> dict[str, Any]:
-    """Return a hand-rolled env dict that mirrors what e2e_editor produces."""
     godot_log = project / ".godot" / "godot.log"
     godot_log.parent.mkdir(parents=True, exist_ok=True)
     godot_log.write_text("fake log\n", encoding="utf-8")
@@ -77,74 +71,6 @@ def test_reset_shared_state_reports_failing_phase(
         shared_fixture.reset_shared_state(env, reason="unit")
     assert "project/stop" in str(exc_info.value)
     assert "reason=unit" in str(exc_info.value)
-
-
-def test_reset_shared_state_restores_default_policy(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".godot").mkdir()
-    policy_path = project / ".godot" / "gdapi-policy.json"
-    policy_path.write_text(
-        json.dumps({"version": 1, "capabilities": {"network": {"enabled": False}}}),
-        encoding="utf-8",
-    )
-    env = _fake_env(project)
-
-    monkeypatch.setattr(shared_fixture, "gdcli_call", lambda *a, **kw: {"ok": True})
-
-    shared_fixture.reset_shared_state(env, reason="unit")
-    assert policy_path.read_bytes() == SAMPLE_POLICY
-
-
-def test_temporary_policy_overlays_and_restores(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".godot").mkdir()
-    policy_path = project / ".godot" / "gdapi-policy.json"
-    policy_path.write_bytes(SAMPLE_POLICY)
-    env = _fake_env(project)
-
-    override = {"version": 1, "capabilities": {"network": {"enabled": False}}}
-    with shared_fixture.temporary_policy(env, override):
-        assert json.loads(policy_path.read_text(encoding="utf-8")) == override
-    assert policy_path.read_bytes() == SAMPLE_POLICY
-
-
-def test_temporary_policy_restores_on_exception(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".godot").mkdir()
-    policy_path = project / ".godot" / "gdapi-policy.json"
-    policy_path.write_bytes(SAMPLE_POLICY)
-    env = _fake_env(project)
-
-    override = {"version": 1, "capabilities": {"network": {"enabled": False}}}
-    with pytest.raises(RuntimeError):
-        with shared_fixture.temporary_policy(env, override):
-            assert json.loads(policy_path.read_text(encoding="utf-8")) == override
-            raise RuntimeError("forced failure")
-    assert policy_path.read_bytes() == SAMPLE_POLICY
-
-
-def test_temporary_policy_reports_restoration_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".godot").mkdir()
-    policy_path = project / ".godot" / "gdapi-policy.json"
-    policy_path.write_bytes(SAMPLE_POLICY)
-    env = _fake_env(project)
-
-    def _fail_write(_self, _data):  # type: ignore[no-untyped-def]
-        raise OSError("disk gone")
-
-    monkeypatch.setattr(Path, "write_bytes", _fail_write)
-    with pytest.raises(AssertionError, match="temporary_policy failed to restore"):
-        with shared_fixture.temporary_policy(env, {"version": 1, "capabilities": {}}):
-            pass
 
 
 def test_build_environment_yields_one_process(
@@ -251,7 +177,7 @@ def test_build_environment_copies_unified_project(
         project = captured_project["path"]
         assert (project / "project.godot").is_file()
         assert (project / "addons" / "gdapi_test" / "plugin.gd").is_file()
-        assert (project / ".godot" / "gdapi-policy.json").is_file()
+
         assert env["fixture_root"] is shared_fixture.E2E_FIXTURE_SOURCE
     finally:
         shared_fixture.teardown_environment(env)

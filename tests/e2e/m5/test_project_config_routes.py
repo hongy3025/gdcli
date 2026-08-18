@@ -23,7 +23,7 @@ def test_project_config_round_trip_restores_snapshot(m5_editor):
     assert_snapshot_restored(m5_editor, before)
 
 
-def test_project_config_removals_do_not_require_force(m5_editor):
+def test_project_config_removals_succeed_without_force(m5_editor):
     before = project_snapshot(m5_editor)
     exec_ok(m5_editor, "project/settings/set", {
         "name": "application/config/m5_remove_value", "value": 7,

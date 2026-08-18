@@ -17,5 +17,5 @@ def test_m5_queries_uid_apply_and_safety_contracts(m5_editor):
     assert exec_ok(m5_editor, "diagnostics/script_errors", {"roots": ["res://fixtures"]})["items"]
     assert exec_ok(m5_editor, "export/presets")["presets"]
     assert exec_ok(m5_editor, "uid/repair", {"roots": ["res://fixtures"], "dry_run": False})["ok"] is True
-    # Task 8 removes android_bridge.gd's force guard; until then this remains unsafe_operation.
-    assert exec_error(m5_editor, "export/android/deploy", {"serial": "bad"})["code"] == "unsafe_operation"
+    # Invalid serial is rejected before any Android toolchain is needed.
+    assert exec_error(m5_editor, "export/android/deploy", {"serial": "bad"})["code"] == "invalid_param"

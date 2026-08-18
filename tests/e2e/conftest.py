@@ -47,7 +47,6 @@ from e2e.shared_fixture import (  # noqa: E402,F401 — re-export
     m6_editor_process,
     reset_shared_state,
     teardown_environment,
-    temporary_policy,
 )
 
 

@@ -50,6 +50,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 			var abs_dir := ProjectSettings.globalize_path(new_dir)
 			if not DirAccess.dir_exists_absolute(abs_dir):
 				DirAccess.make_dir_recursive_absolute(abs_dir)
+		save_path = checked.path
 
 	# 加载场景资源
 	var scene := load(scene_path)

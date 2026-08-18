@@ -265,19 +265,21 @@ func test_suspended_request_times_out_once() -> void:
 	t.tick(now)
 	assert_eq(tracker.calls, 1, "timeout handler starts once")
 	assert_true(t._inflight.has(45), "timeout handler enters inflight")
-	t.tick(now + 2)
+	# Leave enough wall-clock margin for the async handler to be scheduled before
+	# advancing the deterministic transport clock.
+	t.tick(now + 100)
 	var out_path := probe_dir.path_join("outbox/45.json")
 	var reply := _read_reply(out_path)
 	assert_true(Protocol.validate_message(reply).ok, "timeout reply is protocol valid")
 	assert_eq(reply.get("code", ""), "timeout", "timeout reply has stable code")
 	assert_true(not t._inflight.has(45), "timeout clears inflight")
 	var first_timeout_reply := JSON.stringify(reply)
-	t.tick(now + 3)
+	t.tick(now + 101)
 	assert_eq(
 		JSON.stringify(_read_reply(out_path)), first_timeout_reply, "timeout reply is written once"
 	)
 	_write_request(probe_dir.path_join("inbox/duplicate-45.json"), 45, t.generation())
-	t.tick(now + 4)
+	t.tick(now + 102)
 	assert_eq(tracker.calls, 1, "timed out id never restarts")
 	t.stop()
 	_cleanup(root)
