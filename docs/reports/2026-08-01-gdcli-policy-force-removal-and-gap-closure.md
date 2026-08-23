@@ -3,7 +3,7 @@
 **Date**: 2026-08-01
 **Status**: Closed
 **Plan**: `docs/superpowers/plans/2026-08-01-gdcli-policy-force-removal-and-gap-closure.md`
-**Branch**: `feat/full-capability` (HEAD `fe42c98`)
+**Branch**: `feat/full-capability` (HEAD `ba4b6f5`)
 
 ## 1. Requirement change summary
 
@@ -54,18 +54,17 @@ Suites: parser (39), lsp_port_discovery (4), lsp_cli (6), lsp_diagnostics (101),
 
 ```
 $ python scripts/format-gd.py
-gdformat completed for 571 GDScript files.
+gdformat completed for 569 GDScript files.
 $ python scripts/format-gd.py --check
-gdformat check passed for 571 GDScript files.
+gdformat check passed for 569 GDScript files.
 ```
 
-### 3.3 E2E (full, gated by `pytest -m "not budget"`)
+### 3.3 E2E (non-budget suite)
 
 ```
 $ GODOT_BIN=D:/app/devel/Godot/v4.7.1/godot_console.exe \
     uv run pytest tests/e2e/ -m "not budget" -q
-…
-# (count and pass rate from Task 13 actual run; baseline prior to this plan: 223/223 across m1..m4 + 41/41 m6 + 11/13 m5)
+339 passed, 3 skipped, 1 deselected in 230.26s
 ```
 
 Per-milestone slice results observed during the per-task verification and gap-closure phases:
@@ -76,22 +75,39 @@ Per-milestone slice results observed during the per-task verification and gap-cl
 | `tests/e2e/m5/` | 13 | 11 | 2 | 2 Android tests still skipped (see Section 5). |
 | `tests/e2e/m4/` | 32 | 32 | 0 | passed in 30.77s. |
 | `tests/e2e/m3/` + `m2/` + `m1/` | 223 | 223 | 0 | full m1/m2/m3/m4 smoke. |
-| `tests/e2e/test_gdscript_units.py` | 21 | 20 | 0 | 1 pre-existing flake on `test_runtime_transport_file_probe.gd` (transport envelope timeout, environment-sensitive; reproducible on baseline). |
+| `tests/e2e/test_gdscript_units.py` | 21 | 20 | 0 | 1 pre-existing environment-sensitive failure is excluded from the aggregate run by the current fixture selection. |
 | `tests/e2e/test_shared_editor_lifecycle.py` | — | all green | 0 | policy-driven tests removed. |
 | `tests/e2e/test_unified_fixture_contract.py` | — | all green | 0 | `DEFAULT_POLICY_BYTES` removed. |
 | `tests/e2e/test_policy_restore.py` | 3 | 3 | 0 | updated to assert deny-all no longer gates. |
 
-> Note: Task 13 actual numbers are filled in by the Task 13 implementer before final commit. The per-task `pytest` runs above are the per-task verification snapshots preserved from the per-task reports.
+The aggregate result above is the current Task 13 verification, not a historical snapshot.
 
 ### 3.4 Route manifest
 
 ```
-$ diff <(git ls-files gdapi/addon/routes | sort) \
-        <(python -c "import sys; sys.path.insert(0, 'tests/e2e'); from route_manifests import M1_M2_M3_ROUTES, M4_ROUTES, M5_ROUTES, M6_ROUTES; print('\n'.join(sorted(M1_M2_M3_ROUTES + M4_ROUTES + M5_ROUTES + M6_ROUTES)))" | sed 's,^,gdapi/addon/routes/,' | sort)
-(no diff)
+$ python - <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, "tests/e2e")
+import route_manifests as manifests
+
+declared = set().union(
+    manifests.M3_RUNTIME_ROUTES,
+    manifests.M4_ROUTES,
+    manifests.M5_ROUTES,
+    manifests.M6_ROUTES,
+)
+actual = {
+    path.relative_to(Path("gdapi/addon/routes")).with_suffix("").as_posix()
+    for path in Path("gdapi/addon/routes").rglob("*.gd")
+}
+assert not declared - actual
+print(f"{len(declared)} declared milestone routes exist; no manifest-only route")
+PY
+121 declared milestone routes exist; no manifest-only route
 ```
 
-Counts: M1+M2+M3 = 35, M4 = 51, M5 = 27, M6 = 8. Total 121 routes.
+Counts: M3 = 35, M4 = 51, M5 = 27, M6 = 8. Total 121 milestone routes. The repository also contains older M1/M2 routes outside this milestone-owned manifest.
 
 ### 3.5 Residue scan
 
@@ -103,7 +119,7 @@ $ git grep -n '"force"' -- gdapi tests
 (no output)
 ```
 
-Only the design-doc historical snapshot callouts in `docs/superpowers/specs/2026-07-30-single-editor-e2e-design.md` and `docs/superpowers/plans/2026-07-30-single-editor-e2e-plan.md` contain policy/force references, and those are explicitly annotated as `**历史快照（2026-08-01 已废弃）**` (commit `fe42c98`).
+Historical policy/force references remain only in explicitly labelled snapshot material under `docs/superpowers/`; production code, tests, and README are clean.
 
 ## 4. Design-document revision log
 
@@ -149,12 +165,12 @@ These are non-blocking items uncovered during the per-task review that are docum
 
 ## 6. Summary
 
-All 11 tasks of the 2026-08-01 plan are closed. The branch `feat/full-capability` ends at `fe42c98` with:
+All 13 tasks of the 2026-08-01 plan are closed. The branch `feat/full-capability` ends at `ba4b6f5` with:
 
 - 202/202 Rust tests passing.
-- 571 GDScript files formatted and lint-clean.
-- 223/223 M1-M4 E2E + 41/41 M6 E2E + 11/13 M5 E2E (2 Android skipped) + 20/21 GDScript unit + 3/3 policy-restore updated — all run-results are green within the constraint that the M5 Android slice requires an Android-enabled environment.
-- Zero `require_force` / `capability_policy` / `gdapi-policy` / `"force"` residue in `gdapi` and `tests` (per the residue scan in Section 3.5).
+- 569 GDScript files format-checked; `gdlint` passes for all production `gdapi/addon` scripts. Full-repository lint still reports intentional malformed fixtures and legacy test-style violations.
+- 339 non-budget E2E tests passed, 3 Android-dependent tests skipped, and 1 budget test deselected.
+- Zero `require_force` / `capability_policy` / `gdapi-policy` / `"force"` residue in `gdapi`, `tests`, and README (per the residue scan in Section 3.5).
 - README, docs/gdcli, and spec annotations reflect the dev-tool posture; the design-doc revision log is captured in this report (Section 4).
 
 The 2 intentionally skipped Android tests and the 5 cosmetic findings are tracked in Section 5 and are not regressions introduced by this plan.

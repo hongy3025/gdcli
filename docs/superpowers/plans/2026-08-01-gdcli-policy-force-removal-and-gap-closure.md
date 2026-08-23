@@ -38,7 +38,7 @@
 - Consumes: `EvalService.execute(source, inputs)`（两参新签名）
 - Produces: `GdApiRuntimeRoute.dispatch()` 的审计统一使用公开 route 名（`public_route` 非空时）
 
-- [ ] **Step 1: 改 `eval_service.gd` 签名与默认行为**
+- [x] **Step 1: 改 `eval_service.gd` 签名与默认行为**
 
 将 `execute` 改为两参；删除 `allowed_input_keys` 白名单；上限只查常量：
 
@@ -61,7 +61,7 @@ static func execute(source: String, inputs: Dictionary) -> Dictionary:
 	# 以下 _validate_source / Expression.parse / execute / _validate_result 保持不变
 ```
 
-- [ ] **Step 2: 改 `editor/eval.gd`（移除 Policy，保留审计，去掉 force）**
+- [x] **Step 2: 改 `editor/eval.gd`（移除 Policy，保留审计，去掉 force）**
 
 整体替换 handle 与 doc：
 
@@ -104,7 +104,7 @@ func doc() -> GdApiRouteDoc:
 	)
 ```
 
-- [ ] **Step 3: 改 `runtime/eval.gd`（移除 Policy 与 allowed_input_keys 注入）**
+- [x] **Step 3: 改 `runtime/eval.gd`（移除 Policy 与 allowed_input_keys 注入）**
 
 整体替换：
 
@@ -134,7 +134,7 @@ func doc() -> GdApiRouteDoc:
 	)
 ```
 
-- [ ] **Step 4: 改 `runtime_route.gd` — 审计一律使用公开 route 名（缺口：runtime/eval 审计记为 `eval`）**
+- [x] **Step 4: 改 `runtime_route.gd` — 审计一律使用公开 route 名（缺口：runtime/eval 审计记为 `eval`）**
 
 将 `_complete`、`_reject`、`_audit` 改为携带 `public_route`：
 
@@ -190,7 +190,7 @@ func _reject(
 
 `_audit` 签名不变（第一参语义变为"公开 route 名"）。
 
-- [ ] **Step 5: 改 `runtime_probe.gd` eval 分支（去掉注入的 allowed_input_keys）**
+- [x] **Step 5: 改 `runtime_probe.gd` eval 分支（去掉注入的 allowed_input_keys）**
 
 ```gdscript
 		"eval":
@@ -200,7 +200,7 @@ func _reject(
 			)
 ```
 
-- [ ] **Step 6: 简化 `tests/e2e/m6/conftest.py`**
+- [x] **Step 6: 简化 `tests/e2e/m6/conftest.py`**
 
 - 删除 `M6_EVAL_POLICY` / `M6_BULK_POLICY` / `M6_NETWORK_POLICY` / `M6_PROCESS_POLICY` / `M6_DEFAULT_DENY_POLICY` 五个字典。
 - 从 `from e2e.shared_fixture import (...)` 中移除 `temporary_policy`。
@@ -215,7 +215,7 @@ def m6_editor(session_m6_editor: dict[str, Any]) -> dict[str, Any]:
 
 其余四个 fixture 同样处理（各自依赖对应的 session fixture）。
 
-- [ ] **Step 7: 改写 `tests/e2e/m6/test_m6_contract.py` 的 default-deny 测试**
+- [x] **Step 7: 改写 `tests/e2e/m6/test_m6_contract.py` 的 default-deny 测试**
 
 将 `test_m6_route_is_default_deny` 替换为"默认可用（不再 permission_denied）"：
 
@@ -232,13 +232,13 @@ def test_m6_route_no_longer_requires_policy(m6_editor, route):
 
 （`M6_ROUTES` 从 `e2e.route_manifests` 导入；`_exec_raw` 已存在于 m6/conftest.py。）
 
-- [ ] **Step 8: 更新 `tests/e2e/m6/test_eval.py` 与 `test_runtime_eval.py`**
+- [x] **Step 8: 更新 `tests/e2e/m6/test_eval.py` 与 `test_runtime_eval.py`**
 
 - 所有 body 删除 `"force": True`（grep 定位：test_eval.py:32、41、48；test_runtime_eval.py:13、21、27、36）。
 - test_eval.py 中若存在"未授权 input key → permission_denied"用例，删除（输入 key 不再受限）；sandbox 拒绝用例（`Engine.get_main_loop()`、`instance_from_id(1)` 等）保留。
 - 其余断言（审计脱敏、值相等、conflict）不变。
 
-- [ ] **Step 9: 更新两处 `test_eval_service.gd`**
+- [x] **Step 9: 更新两处 `test_eval_service.gd`**
 
 ```gdscript
 func _init() -> void:
@@ -263,7 +263,7 @@ func _init() -> void:
 	quit(1 if failed > 0 else 0)
 ```
 
-- [ ] **Step 10: 验证并提交**
+- [x] **Step 10: 验证并提交**
 
 ```bash
 python scripts/format-gd.py
@@ -288,7 +288,7 @@ Expected: gdscript_units 全绿（capability_policy 单测仍过——Task 10 �
 **Interfaces:**
 - Produces: `GdApiProcessService.validate(body) -> Dictionary`（单参；硬上限常量 `DEFAULT_TIMEOUT_MS=5000`、`MAX_TIMEOUT_MS=60000`、`DEFAULT_MAX_OUTPUT_BYTES=65536`、`MAX_OUTPUT_BYTES=1048576`）
 
-- [ ] **Step 1: 改 `process_service.gd` — 移除 policy 参数与 allowlist**
+- [x] **Step 1: 改 `process_service.gd` — 移除 policy 参数与 allowlist**
 
 在类头加常量，整体替换 `validate`：
 
@@ -333,7 +333,7 @@ static func validate(body: Dictionary) -> Dictionary:
 
 （删除了 executables allowlist、cwd_roots、policy 上限比较。`start`/`tick`/`cancel` 不变。）
 
-- [ ] **Step 2: 改 `routes/process/run.gd`**
+- [x] **Step 2: 改 `routes/process/run.gd`**
 
 四处修改：
 1. 删除 `Policy` preload 与整个 gate 块（`var policy := Policy.new()`、`authorize("process", ...)`、拒绝分支）。
@@ -341,13 +341,13 @@ static func validate(body: Dictionary) -> Dictionary:
 3. 两处 denial audit（gate 拒绝）整块删除；保留 validate 失败与 terminal audit，summary 中删除 `"force": ...` 字段（原 `{"executable": ..., "force": req.get_body("force", false)}` → `{"executable": ...}`）。
 4. `doc()`：删除 `force` param 与示例中的 `"force":true`；desc 改为"executable 与 argv 原样传递，不经过 shell；timeout 上限 60s、输出上限 1 MiB"。
 
-- [ ] **Step 3: 更新 `tests/e2e/m6/test_process_run.py`**
+- [x] **Step 3: 更新 `tests/e2e/m6/test_process_run.py`**
 
 - 删除 `test_process_run_requires_force`（替换为：无 force 直接成功，即并入现有成功用例）。
 - 其余 body 删除 `"force": True`（grep 定位：:20、:32、:51）。
 - 保留 timeout（:31-34）、取消、audit 断言。
 
-- [ ] **Step 4: 验证并提交**
+- [x] **Step 4: 验证并提交**
 
 ```bash
 python scripts/format-gd.py && python scripts/format-gd.py --check
@@ -372,7 +372,7 @@ Commit: `refactor(process): drop policy allowlists, enforce built-in caps`.
 **Interfaces:**
 - Produces: `GdApiNetworkTargetGuard.authorize(url) -> Dictionary`（单参）；`GdApiNetworkService.validate(body) -> Dictionary`（单参）；`start(spec, response)` 设置 `HTTPRequest.body_size_limit`
 
-- [ ] **Step 1: 整体替换 `network_target_guard.gd`**
+- [x] **Step 1: 整体替换 `network_target_guard.gd`**
 
 ```gdscript
 @tool
@@ -422,7 +422,7 @@ static func _error(code: String, message: String) -> Dictionary:
 
 （删除 `is_public_address`、`_is_ip_literal`、`_normalize_addresses`、hosts/ports allowlist、DNS 解析与私网拒绝。）
 
-- [ ] **Step 2: 改 `network_service.gd`**
+- [x] **Step 2: 改 `network_service.gd`**
 
 类头加常量：
 
@@ -494,14 +494,14 @@ static func validate(body: Dictionary) -> Dictionary:
 4. redirect 分支的 target 校验改为 `var target := TargetGuard.authorize(location)`（无 policy）。
 5. 成功分支：`var truncated := forced_truncated`；`if body.size() > spec.max_response_bytes: body = body.slice(0, spec.max_response_bytes); truncated = true` 保留为双保险。
 
-- [ ] **Step 3: 改 `routes/network/http_request.gd`**
+- [x] **Step 3: 改 `routes/network/http_request.gd`**
 
 1. 删除 `Policy` preload 与整个 gate 块（`authorize("network", ...)` 拒绝分支）。
 2. `Service.validate(req.body)` 去掉 `policy.settings("network")` 参数。
 3. denial audit 删除；validate 失败与 terminal audit 的 summary 删除 `"force"` 字段（原 `{"url": ..., "force": ...}` → `{"url": ...}`）。
 4. `doc()`：删除 `force` param、`"force":true` 示例；desc 改为"仅 http/https，下载上限 4 MiB、重定向 ≤5、超时 ≤60s"。
 
-- [ ] **Step 4: 更新两处 `test_network_target_guard.gd`（按新单参签名重写）**
+- [x] **Step 4: 更新两处 `test_network_target_guard.gd`（按新单参签名重写）**
 
 ```gdscript
 func _init() -> void:
@@ -530,7 +530,7 @@ func _test_structural_rejections() -> void:
 
 （`_assert_true`/`_assert_eq` helper 沿用文件现有实现。）
 
-- [ ] **Step 5: 更新 `tests/e2e/m6/test_network_request.py`**
+- [x] **Step 5: 更新 `tests/e2e/m6/test_network_request.py`**
 
 - 所有 body 删除 `"force": True`。
 - 私网拒绝测试（:11-14 请求 `http://10.0.0.1/ok`）改为：不再 permission_denied，改为"连接类错误"：
@@ -568,7 +568,7 @@ def test_network_request_redirect_is_followed(m6_editor_network, local_http_serv
 - redirect-loop（:24-28）与 redirect-limit 断言保持（`conflict`）。
 - :40-43 timeout 用例保留（去 force）。
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**
 
 ```bash
 python scripts/format-gd.py && python scripts/format-gd.py --check
@@ -593,7 +593,7 @@ Commit: `fix(network): body_size_limit at download time; drop policy target allo
 **Interfaces:**
 - Consumes: `GdApiBulkFileService.delete(body)` / `replace(body)` 仍要求 `plan_hash` 一致才 apply（保留，非权限门禁）
 
-- [ ] **Step 1: 改 `bulk_file_service.gd`**
+- [x] **Step 1: 改 `bulk_file_service.gd`**
 
 - `delete()`：删除
 
@@ -611,25 +611,25 @@ Commit: `fix(network): body_size_limit at download time; drop policy target allo
 
 - 保留 `plan_hash` 一致性检查、trash + manifest + rollback、dry_run 语义。
 
-- [ ] **Step 2: 改 `bulk_deploy_service.gd`**
+- [x] **Step 2: 改 `bulk_deploy_service.gd`**
 
 - 删除 apply 路径中的 force 检查；`deploy_many` 传给 bridge 的 body 中 `"force": true` 字段删除（Task 8 中 bridge 会删 force 检查，这里去掉传入）。
 - 保留 serials 校验、plan_hash、每设备终态。
 
-- [ ] **Step 3: 改 4 个 route handler**
+- [x] **Step 3: 改 4 个 route handler**
 
 每个文件：
 1. 删除 `Policy` preload 与 gate 块（`authorize("bulk_files"/"bulk_deploy", ...)` 拒绝分支 + 对应 denial audit）。
 2. 保留 outcome audit，summary 删除 `"force"` 字段（如 `{"dry_run": ..., "count": ...}`）。
 3. `doc()`：删除 `force` param、示例中的 `"force":true`、desc 中 force 措辞（如"再以 force:true 应用"→"再以 plan_hash 应用"）。
 
-- [ ] **Step 4: 更新 `tests/e2e/m6/test_bulk_files.py` 与 `test_bulk_deploy.py`**
+- [x] **Step 4: 更新 `tests/e2e/m6/test_bulk_files.py` 与 `test_bulk_deploy.py`**
 
 - 所有 body 删除 `"force": True`（grep 定位：test_bulk_files.py:50、54；test_bulk_deploy.py:22；m6/conftest.py 的 `replace_plan`/`apply_replace`/`delete_plan`/`apply_delete` 辅助函数 :323、:335、:364、:373）。
 - test_bulk_deploy.py:21-25 的 deny-all 断言（`permission_denied`）删除——policy 已移除；改为断言无 permission_denied 或直接删除该用例（apply 流程由 test_bulk_files 覆盖）。
 - test_bulk_files.py recover 二次调用 `conflict` 断言保留。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 python scripts/format-gd.py && python scripts/format-gd.py --check
@@ -660,11 +660,11 @@ Commit: `refactor(bulk): drop force gate, keep plan_hash consistency check`.
 **Interfaces:**
 - Produces: `TextEditService.create_script(path, content, route := "script/create")`、`write_script(path, content, route := "script/write")`、`patch_script(path, first, last, text)`；`SceneEditor.save_scene(path)`；`ResourceEditor.create(path, type, properties)` / `delete(path)` / `move(from_path, to_path)`
 
-- [ ] **Step 1: 删除 `error_codes.gd` 的 `require_force`**
+- [x] **Step 1: 删除 `error_codes.gd` 的 `require_force`**
 
 删除 `require_force` 函数（34-38 行）。`UNSAFE_OPERATION` 常量与 `HTTP_STATUS` 映射保留。
 
-- [ ] **Step 2: 整体替换 `gdapi/audit/clear.gd`**
+- [x] **Step 2: 整体替换 `gdapi/audit/clear.gd`**
 
 ```gdscript
 @tool
@@ -695,7 +695,7 @@ func doc() -> GdApiRouteDoc:
 	)
 ```
 
-- [ ] **Step 3: scene 域（5 个文件型 route + current/save）**
+- [x] **Step 3: scene 域（5 个文件型 route + current/save）**
 
 通用变换（每个文件按 grep 到的当前代码执行）：
 1. 删除 `var force: bool = req.get_body("force", false)` 及 `ErrorCodes.require_force(...)` 块与对应 denial audit。
@@ -707,7 +707,7 @@ func doc() -> GdApiRouteDoc:
 
 `scene_editor.gd` 的 `save_scene(path, force)` → `save_scene(path)`：删除 `force` 参数、`target_exists and not force` 块（102-115）与其 audit；成功 audit（131）summary 去掉 force。route `scene/current/save.gd` 对应改调用与 doc。
 
-- [ ] **Step 4: script 域 — 含审计名修复（缺口）**
+- [x] **Step 4: script 域 — 含审计名修复（缺口）**
 
 `text_edit.gd`：
 
@@ -753,11 +753,11 @@ static func write_script(path: String, content: String, route: String = "script/
 - `script/patch.gd`：`TextEditService.patch_script(path, first, last, text)`，doc 去 force。
 - 三个文件的 `res.error(..., 403 if result.code == "unsafe_operation" else 400)` → `res.error(result.error, result.code, ErrorCodes.http_status(result.code))`。
 
-- [ ] **Step 5: `filesystem/write.gd`**
+- [x] **Step 5: `filesystem/write.gd`**
 
 删除 `force` 读取（:18）、exists 检查块（:30-41）与对应 audit；成功 audit（:53）summary 去 force；doc 去 force。
 
-- [ ] **Step 6: resource 域**
+- [x] **Step 6: resource 域**
 
 `resource_editor.gd`：
 - `create(path, type, properties)`：删 force 参数、165-177 的 exists/force 块与其 audit；成功 audit（202-204）summary 去 force。
@@ -765,7 +765,7 @@ static func write_script(path: String, content: String, route: String = "script/
 - `delete(path)`：删 force 参数、334-346 块；audit（354）去 force。
 - route 文件（create/delete/move.gd）：删 force 读取与传参；`403 if result.code == "unsafe_operation" else 400` → `ErrorCodes.http_status(result.code)`；doc 去 force。
 
-- [ ] **Step 7: 更新 m2 测试与共享 harness**
+- [x] **Step 7: 更新 m2 测试与共享 harness**
 
 - `tests/e2e/m2/test_filesystem_routes.py`：
   - `test_filesystem_write_requires_force`（:24-42）→ 改写为"覆盖已有文件直接成功"：
@@ -822,7 +822,7 @@ def test_audit_clear_without_force(e2e_editor):
   - `test_uid_update_requires_force`（:184-186）→ Task 7 一并处理（uid/update_all 在本 task 未动）；此处先删除该测试或留待 Task 7——**留待 Task 7**，本 task 跳过该文件内 uid 测试。
 - `tests/e2e/shared_fixture.py:362`：`{"force": True}` → `{}`。
 
-- [ ] **Step 8: 验证并提交**
+- [x] **Step 8: 验证并提交**
 
 ```bash
 python scripts/format-gd.py && python scripts/format-gd.py --check
@@ -850,7 +850,7 @@ Commit: `refactor(write paths): drop force gates; fix script/write audit route n
 - Modify: `gdapi/addon/routes/audio/bus/list.gd`（doc desc 补齐）
 - Modify: `tests/e2e/m4/test_rendering.py`、`test_tilemap.py`、`test_navigation.py`、`test_audio.py`、`test_m4_contract.py`
 
-- [ ] **Step 1: `theme_editor.gd` 整体替换（force 移除 + 类型精确，缺口）**
+- [x] **Step 1: `theme_editor.gd` 整体替换（force 移除 + 类型精确，缺口）**
 
 ```gdscript
 @tool
@@ -947,7 +947,7 @@ static func _error(code: String, message: String) -> Dictionary:
 
 （`_force` 删除；`_save` 补失败审计——顺带修复 review INFO 项。）
 
-- [ ] **Step 2: 其余 M4 service 的 force 移除**
+- [x] **Step 2: 其余 M4 service 的 force 移除**
 
 每个文件删除 force 参数与检查块（grep 已定位确切行）：
 - `material_editor.gd`：`save(node_path, path, route := "material/save")`、`duplicate_material(node_path, path)`；`_save_resource(resource, path, route)` 删除 typeof(force) 检查（161-163）、exists/force 块（164-174）及其 audit；成功 audit（182）summary 去 force。
@@ -972,7 +972,7 @@ static func clear(path: String) -> Dictionary:
 
 - `audio_editor.gd`：`remove_bus(name)` 删除 46-54 的 force 检查与其 audit；成功路径保留 `_save_layout("audio/bus/remove")` 的审计（:145）。
 
-- [ ] **Step 3: M4 route 文件更新**
+- [x] **Step 3: M4 route 文件更新**
 
 每个 route：删除 force 读取/传参、删除 `_send` 中 `403 if ... else 400`（统一 `ErrorCodes.http_status(r.code)`，需加 `ErrorCodes` preload——检查各文件，缺失则加）、doc 删 force param/示例/措辞。`_send` 统一为：
 
@@ -986,7 +986,7 @@ func _send(res: GdApiResponse, r: Dictionary) -> void:
 
 `physics/*` 四个 route 的 `_send` 中 `501 if r.code == "not_supported" else 400` 同样替换为 `ErrorCodes.http_status(r.code)`（not_supported→501、其余→映射值）。
 
-- [ ] **Step 4: M4 doc() 补齐（缺口：10 个 route）**
+- [x] **Step 4: M4 doc() 补齐（缺口：10 个 route）**
 
 `physics/body/create.gd`：
 
@@ -1101,7 +1101,7 @@ func doc() -> GdApiRouteDoc:
 
 `navigation/region/list.gd`：已有 desc/returns，无参数；补一个说明即可（可跳过——无参数 route 不受 example 要求约束；确认无 .param 缺失后不动）。
 
-- [ ] **Step 5: 更新 m4 测试**
+- [x] **Step 5: 更新 m4 测试**
 
 - `test_rendering.py`：`test_shader_write_requires_force_for_existing_project_file`（:21-27）→ 改为"无 force 覆盖成功"；其余 body 去 force（:86、:99、:105、:128）。
 - `test_tilemap.py`：`test_tilemap_rejects_invalid_cell_and_clear_without_force`（:40-43）→ 拆为：非法坐标仍 invalid_param；clear 无 force 直接成功（断言 cleared/changed）。
@@ -1109,7 +1109,7 @@ func doc() -> GdApiRouteDoc:
 - `test_audio.py`：bus remove 相关 body 去 force（grep 定位）。
 - `test_m4_contract.py`：force 相关条目（若有）去 force。
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**
 
 ```bash
 python scripts/format-gd.py && python scripts/format-gd.py --check
@@ -1137,17 +1137,17 @@ Commit: `fix(m4): drop force gates, type-check theme values, audit tilemap clear
 - Modify: `tests/e2e/m5/test_m5_smoke.py:19`、`test_uid_repair.py`、`test_project_config_routes.py`、`test_classdb_routes.py`、`test_diagnostics_routes.py`
 - Modify: `tests/e2e/test_m1_smoke.py:184-186`
 
-- [ ] **Step 1: `project_config.gd`**
+- [x] **Step 1: `project_config.gd`**
 
 - `reset(name)`：删除 `force` 参数与 58-62 的 force 检查；audit（:75）summary 去 force。
 - `remove_action(name)`：删除 force 检查（107-111）；`unbind(name, event)`：删除 128-132；`remove_autoload(name)`：删除 178-182。
 - 对应 4 个 route 文件：删 force 读取/传参、doc 去 force、示例去 `"force":true`。
 
-- [ ] **Step 2: `uid/update_all.gd`**
+- [x] **Step 2: `uid/update_all.gd`**
 
 删除 24-27 的 require_force 块与其 denial audit；保留其余逻辑。doc 删 force param、示例去 force。
 
-- [ ] **Step 3: `uid_repair.gd`**
+- [x] **Step 3: `uid_repair.gd`**
 
 ```gdscript
 static func repair(body: Dictionary) -> Dictionary:
@@ -1160,7 +1160,7 @@ static func repair(body: Dictionary) -> Dictionary:
 
 `routes/uid/repair.gd`：`res.error(out.error, out.code, 400, ...)` → `res.error(out.error, out.code, ErrorCodes.http_status(out.code), ...)`；doc 删 force param（:20）。
 
-- [ ] **Step 4: classdb 与 diagnostics 的 out.ok 检查（缺口）**
+- [x] **Step 4: classdb 与 diagnostics 的 out.ok 检查（缺口）**
 
 `classdb/methods.gd`、`properties.gd`、`signals.gd`、`inheriters.gd` 的 handle 从：
 
@@ -1182,7 +1182,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 （各文件需确认 `ErrorCodes` preload；`classdb_query.gd` 返回 `not_found` 时现在走 404。`diagnostics/*.gd` 四个 route 同样处理：`S.analyze(req)` / `S.health(req)` 等调用先查 `out.ok`，失败走 `res.error`。）
 
-- [ ] **Step 5: 小修三处**
+- [x] **Step 5: 小修三处**
 
 - `routes/runtime/status.gd` broker==null 分支补齐字段：
 
@@ -1207,7 +1207,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 - `runtime/response.gd:93`：`error("cannot read file: " + path, "read_error", 500)` → `error("cannot read file: " + path, "godot_error", 500)`。
 - `routes/scene/current.gd:52` doc：`"edited": "bool, 是否未保存的临时场景(目前恒为 false)"` → `"edited": "bool, 场景未落盘(路径为空或未保存)时为 true"`。
 
-- [ ] **Step 6: 更新 m5/m1 测试**
+- [x] **Step 6: 更新 m5/m1 测试**
 
 - `test_m5_smoke.py:19`：
 
@@ -1227,7 +1227,7 @@ def test_uid_update_without_force(e2e_editor):
     assert resp["ok"] is True
 ```
 
-- [ ] **Step 7: 验证并提交**
+- [x] **Step 7: 验证并提交**
 
 ```bash
 python scripts/format-gd.py && python scripts/format-gd.py --check
@@ -1414,7 +1414,7 @@ Commit: `fix(export): audit failures, bound export timeout, audit single-device 
 **Interfaces:**
 - Consumes: `GdApiEditAction.undo_redo() -> EditorUndoRedoManager`
 
-- [ ] **Step 1: `node/signal/connect.gd` — UndoRedo 化**
+- [x] **Step 1: `node/signal/connect.gd` — UndoRedo 化**
 
 在文件头加 `const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")`，将 43-44 行替换为：
 
@@ -1432,7 +1432,7 @@ Commit: `fix(export): audit failures, bound export timeout, audit single-device 
 
 （原 43 行的 `var flags` 声明上移。注意重复连接检查在 create_action 之前完成——失败不创建 action，符合"失败不创建 action"契约。）响应中 `"undoable": false` → `"undoable": true`；doc 的 returns 描述同步改。
 
-- [ ] **Step 2: `node/signal/disconnect.gd`**
+- [x] **Step 2: `node/signal/disconnect.gd`**
 
 40 行替换为：
 
@@ -1449,7 +1449,7 @@ Commit: `fix(export): audit failures, bound export timeout, audit single-device 
 
 （undo 用 CONNECT_PERSIST 恢复原 flags——与 connect 默认一致。）`undoable: false` → `true`；doc 同步。
 
-- [ ] **Step 3: `node/group/add.gd`**
+- [x] **Step 3: `node/group/add.gd`**
 
 27 行替换为：
 
@@ -1466,7 +1466,7 @@ Commit: `fix(export): audit failures, bound export timeout, audit single-device 
 
 `undoable: false` → `true`；doc 同步。
 
-- [ ] **Step 4: `node/group/remove.gd`**
+- [x] **Step 4: `node/group/remove.gd`**
 
 26 行替换为：
 
@@ -1483,13 +1483,13 @@ Commit: `fix(export): audit failures, bound export timeout, audit single-device 
 
 `undoable: false` → `true`；doc 同步。
 
-- [ ] **Step 5: 更新 `test_signal_group_routes.py`**
+- [x] **Step 5: 更新 `test_signal_group_routes.py`**
 
 - :18 `assert connect_result["undoable"] is False` → `is True`。
 - :25 `assert group_add["undoable"] is False` → `is True`。
 - 其余断言不变（保存重开仍可查询）。
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**
 
 ```bash
 python scripts/format-gd.py && python scripts/format-gd.py --check
@@ -1515,7 +1515,7 @@ Commit: `fix(node): signal/group mutations are undoable via EditorUndoRedoManage
 - Modify: `tests/e2e/test_shared_editor_lifecycle.py`（删 3 个 policy 测试与 `SAMPLE_POLICY`）
 - Modify: `tests/e2e/test_unified_fixture_contract.py`（删 `DEFAULT_POLICY_BYTES` 与对应测试）
 
-- [ ] **Step 1: 删除源码与单测**
+- [x] **Step 1: 删除源码与单测**
 
 删除 `capability_policy.gd`、两处 `test_capability_policy.gd`、`test_policy_restore.py`、policy fixture JSON。`test_gdscript_units.py` 列表移除：
 
@@ -1523,19 +1523,19 @@ Commit: `fix(node): signal/group mutations are undoable via EditorUndoRedoManage
         "res://tests/test_capability_policy.gd",
 ```
 
-- [ ] **Step 2: 清理 `shared_fixture.py`**
+- [x] **Step 2: 清理 `shared_fixture.py`**
 
 - 删除 `E2E_DEFAULT_POLICY_PATH` 常量（:44）与其注释。
 - 删除 `temporary_policy` context manager（:379-400 附近整块）与 `import contextlib` 若不再使用。
 - `reset_shared_state` 中删除 policy restore 块（:364-368）。
 
-- [ ] **Step 3: 清理 `conftest.py` 与生命周期/契约测试**
+- [x] **Step 3: 清理 `conftest.py` 与生命周期/契约测试**
 
 - `conftest.py`：`from e2e.shared_fixture import (...)` 中删除 `temporary_policy`。
 - `test_shared_editor_lifecycle.py`：删除 `SAMPLE_POLICY`（:29）与 `test_reset_shared_state_restores_default_policy`、`test_temporary_policy_overlays_and_restores`、`test_temporary_policy_restores_on_exception`、`test_temporary_policy_reports_restoration_failure` 四个测试（policy 相关全部删除；保留 reset/其它 lifecycle 测试）。
 - `test_unified_fixture_contract.py`：删除 `DEFAULT_POLICY_BYTES`（:75-132 区域）与 `test_unified_fixture_carries_default_capability_policy`。
 
-- [ ] **Step 4: 全局验证无残留**
+- [x] **Step 4: 全局验证无残留**
 
 ```bash
 git grep -n "capability_policy\|gdapi-policy\|temporary_policy\|require_force" -- gdapi tests | cat
@@ -1543,7 +1543,7 @@ git grep -n "capability_policy\|gdapi-policy\|temporary_policy\|require_force" -
 
 Expected: 零匹配（`temporary_policy` 与 `require_force` 已随各自 task 清理）。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 python scripts/format-gd.py && python scripts/format-gd.py --check
@@ -1565,7 +1565,7 @@ Commit: `chore(policy): remove capability policy subsystem entirely`.
 - Modify: `gdcli-full-capability-roadmap-design-2026-06-27.md`（追加需求变更记录）
 - Delete（引用清理）: README 中对 `docs/security/high-risk-capabilities.md` 的引用（文件不存在）
 
-- [ ] **Step 1: README 更新**
+- [x] **Step 1: README 更新**
 
 - :259 `scene/current/save`：`{path, force?}` → `{path?}`。
 - :323-324 `script/write`：删除"需 force:true"；`script/patch`：`{path, start_line, end_line, text, force?}` → 去 force。
@@ -1586,11 +1586,11 @@ process 超时 ≤60s/输出 ≤1 MiB、network 仅 http(s)/超时 ≤60s/响应
 重定向 ≤5、export 超时 ≤600s。所有危险操作保留审计日志（不含 secret）。
 ```
 
-- [ ] **Step 2: docs/gdcli 更新**
+- [x] **Step 2: docs/gdcli 更新**
 
 对 `gdcli-manual.md` 与 `gdcli-exec.md` 执行 `grep -n "force\|policy\|capability"`，逐处：删除 force 参数说明、policy 配置说明，改为与 README 一致的新语义（有参 route 的 `force?` 标记删除）。
 
-- [ ] **Step 3: 设计文档追加修订记录**
+- [x] **Step 3: 设计文档追加修订记录**
 
 在 `gdcli-full-capability-roadmap-design-2026-06-27.md` 的"历史决策记录"末尾追加：
 
@@ -1605,7 +1605,7 @@ process 超时 ≤60s/输出 ≤1 MiB、network 仅 http(s)/超时 ≤60s/响应
 - 审计、标准错误码、mutation 模型（编辑器状态 mutation 应 undoable）等其余 contract 不变。
 ```
 
-- [ ] **Step 4: 验证并提交**
+- [x] **Step 4: 验证并提交**
 
 ```bash
 git grep -n "force:true\|gdapi-policy\|需 .*force\|force 要求" -- README.md docs | cat
@@ -1623,15 +1623,15 @@ Expected: 仅剩设计文档中"历史快照"性质的历史引用（M3 历史�
 - Create: `docs/reports/2026-07-30-gdcli-full-capability-roadmap-remediation-closure.md`
 - Create: `docs/reports/2026-08-01-gdcli-policy-force-removal-and-gap-closure.md`
 
-- [ ] **Step 1: 创建三份历史 milestone closure 报告**
+- [x] **Step 1: 创建三份历史 milestone closure 报告**
 
 每份包含：日期、范围、验收证据（对应测试套件与通过数——以本 plan Task 13 实测输出为准填写）、已知遗留。M3 报告引用 `docs/superpowers/plans/2026-07-29-gdcli-m3-runtime-remediation.md`（该 plan 文件缺失——报告中注明"plan 文档未入库，本报告以 2026-08-01 复核代码与测试为准"）。M4 报告说明 51 route 锁定与类型断言。M6 报告说明 8 route 门禁验收（并注明 2026-08-01 门禁已按新方针移除，历史验收记录保留）。
 
-- [ ] **Step 2: 创建本 plan 的 closure 报告**
+- [x] **Step 2: 创建本 plan 的 closure 报告**
 
 内容：需求变更摘要、缺口清单逐项 → 修复 commit、验收命令与结果（Task 13 实测）、设计文档修订记录、遗留项（如有）。
 
-- [ ] **Step 3: 验证并提交**
+- [x] **Step 3: 验证并提交**
 
 ```bash
 git add docs/reports && git commit -m "docs: milestone closure reports (m3/m4/m6 + 2026-08-01 remediation)"
@@ -1641,7 +1641,7 @@ git add docs/reports && git commit -m "docs: milestone closure reports (m3/m4/m6
 
 ## Task 13: 最终验证
 
-- [ ] **Step 1: GDScript 门禁与 Rust 门禁**
+- [x] **Step 1: GDScript 门禁与 Rust 门禁**
 
 ```bash
 python scripts/format-gd.py --check
@@ -1656,7 +1656,7 @@ cargo test --workspace
 
 Expected: 全部 exit 0。
 
-- [ ] **Step 2: 残留扫描**
+- [x] **Step 2: 残留扫描**
 
 ```bash
 git grep -n "require_force\|capability_policy\|gdapi-policy" -- gdapi tests README.md | cat
@@ -1665,7 +1665,7 @@ git grep -n '"force"' -- gdapi tests | cat
 
 Expected: 零匹配（设计文档历史段落除外——单独验证）。
 
-- [ ] **Step 3: E2E 全套**
+- [x] **Step 3: E2E 全套（预算测试排除）**
 
 ```bash
 cargo build --workspace
@@ -1676,7 +1676,7 @@ uv run pytest tests/e2e/ -v
 
 Expected: 全绿（预算测试按需排除）。`gdapi/routes` 与 `tests/e2e/route_manifests.py` 一致（M3=35、M4=51、M5=27、M6=8）。
 
-- [ ] **Step 4: 修复任何残留并更新 Task 12 报告数据，提交**
+- [x] **Step 4: 修复残留并更新 Task 12 报告数据**
 
 ```bash
 git add -A && git commit -m "chore: final verification pass"

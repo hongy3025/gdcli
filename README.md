@@ -404,9 +404,9 @@ M3 增补 35 个 runtime 路由（`runtime/...`）；M6 引入 `runtime/eval` �
 
 M6 高风险能力（`editor/eval`、`runtime/eval`、`process/run`、`network/http_request`、
 `filesystem/batch/delete`、`filesystem/batch/replace`、`filesystem/batch/recover`、
-`export/android/deploy_many`）自 2026-08-01 起默认可用，不再需要
-`.godot/gdapi-policy.json` 配置或 `force:true`（gdcli 为开发期工具，鉴权由
-loopback + Bearer token 承担）。能力仍受内置硬上限约束：eval 源码 ≤16 KiB、
+`export/android/deploy_many`）自 2026-08-01 起默认可用，不再需要额外权限配置或
+强制确认字段（gdcli 为开发期工具，鉴权由 loopback + Bearer token 承担）。能力仍受
+内置硬上限约束：eval 源码 ≤16 KiB、
 process 超时 ≤60s/输出 ≤1 MiB、network 仅 http(s)/超时 ≤60s/响应 ≤4 MiB/
 重定向 ≤5、export 超时 ≤600s。所有危险操作保留审计日志（不含 secret）。
 
