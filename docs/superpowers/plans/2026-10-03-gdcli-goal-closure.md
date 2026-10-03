@@ -245,7 +245,7 @@
 
 **Verification**
 - [x] `uv run pytest tests/e2e/m6 -q`、`uv run pytest tests/e2e/m2 -q`（在 Task 16 全量运行中一并验证；切片全绿）
-- ⚠️ 未解决：运行时 harness 偶发握手失败（`m3_running` 的 probe 在 60s 内未连接，级联同模块用例 error；单独运行 `tests/e2e/m3` 为 123 passed）。已保留 `attach_game` 的一次重试与失败诊断；尚未定位触发条件，继续跟踪。
+- [x] 后续 T1 已落地真实握手修复：hello 文件发布失败不再误标记为“已发送”；真实 Godot 故障注入确认同一 generation 内恢复连接，且未放宽超时/增加 harness 重启。回归与稳定性验收证据见 [T1](../../todos/2026-10-03-open-issues.md)；原全量失败缺少发布结果，保留历史记录而不推断其具体 I/O 来源。
 - ⚠️ 未解决：`gdapi_test` undo 桥在重负载下可能超过 2s（观测 1 次 `plugin never produced a result`）。
 
 ### Task 12: 预算与收集顺序收尾

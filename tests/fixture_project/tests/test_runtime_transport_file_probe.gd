@@ -17,6 +17,8 @@ func _run() -> void:
 	test_probe_id_is_unique_hex()
 	test_root_dir_under_dot_godot()
 	test_start_writes_hello_file()
+	test_immediate_hello_recovers_after_write_failure()
+	test_delayed_hello_recovers_after_rename_failure()
 	test_hello_contains_generation_metadata()
 	test_generationless_request_is_rejected_when_generation_is_active()
 	test_inbox_request_triggers_callback()
@@ -143,6 +145,58 @@ func test_hello_contains_generation_metadata() -> void:
 	assert_true(int(result.get("pid", 0)) > 0, "hello pid present")
 	assert_true(float(result.get("started_at", 0.0)) > 0.0, "hello started_at present")
 	assert_eq(result.get("transport"), "file", "hello transport present")
+	t.stop()
+	_cleanup(root)
+
+
+func test_immediate_hello_recovers_after_write_failure() -> void:
+	var root := _make_root()
+	var t := Transport.new(0, root)
+	var hello_path := root.path_join(t.probe_id()).path_join("hello.json")
+	var blocked_tmp := hello_path + ".tmp"
+	# 目录占住临时文件路径，真实 FileAccess.open 必须失败。
+	DirAccess.make_dir_recursive_absolute(blocked_tmp)
+	t.start()
+	t.tick(Time.get_ticks_msec())
+	assert_true(not FileAccess.file_exists(hello_path), "blocked write cannot publish hello")
+	DirAccess.remove_absolute(blocked_tmp)
+	t.tick(Time.get_ticks_msec())
+	assert_eq(
+		_read_reply(hello_path).get("event"),
+		"hello",
+		"pending hello publishes after write succeeds"
+	)
+	# 已发布端点被删代表断开，不能把旧 session 当作未完成握手重新发布。
+	DirAccess.remove_absolute(hello_path)
+	t.tick(Time.get_ticks_msec())
+	assert_true(not FileAccess.file_exists(hello_path), "disconnected endpoint stays disconnected")
+	t.stop()
+	_cleanup(root)
+
+
+func test_delayed_hello_recovers_after_rename_failure() -> void:
+	var root := _make_root()
+	var t := Transport.new(250, root)
+	var hello_path := root.path_join(t.probe_id()).path_join("hello.json")
+	# 目标路径为目录：临时文件能写入，但原子 rename 必须失败。
+	DirAccess.make_dir_recursive_absolute(hello_path)
+	t.start()
+	var due: int = t._hello_due_msec
+	t.tick(due - 1)
+	assert_true(not FileAccess.file_exists(hello_path + ".tmp"), "hello waits for its deadline")
+	t.tick(due)
+	assert_true(FileAccess.file_exists(hello_path + ".tmp"), "hello reaches the blocked rename")
+	assert_true(not FileAccess.file_exists(hello_path), "failed rename cannot publish hello")
+	DirAccess.remove_absolute(hello_path)
+	t.tick(due + 1)
+	assert_eq(
+		_read_reply(hello_path).get("event"),
+		"hello",
+		"pending hello publishes after rename succeeds"
+	)
+	assert_true(
+		not FileAccess.file_exists(hello_path + ".tmp"), "published hello has no partial file"
+	)
 	t.stop()
 	_cleanup(root)
 

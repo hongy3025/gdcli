@@ -54,6 +54,7 @@ var _last_disconnect_remaining: int = 0
 
 ## hello 定时器到期时刻
 var _hello_due_msec: int = 0
+## 只有 hello.json 原子发布成功才为 true；未发布时保持握手待完成。
 var _hello_sent: bool = false
 
 
@@ -109,10 +110,9 @@ func start() -> void:
 	_endpoint_disconnected = false
 	_last_disconnect_abandoned = 0
 	_last_disconnect_remaining = 0
+	_hello_due_msec = Time.get_ticks_msec() + maxi(hello_delay_ms, 0)
 	if hello_delay_ms <= 0:
 		_write_hello_file()
-	else:
-		_hello_due_msec = Time.get_ticks_msec() + hello_delay_ms
 
 
 ## 停止并清理
@@ -133,9 +133,13 @@ func stop() -> void:
 func tick(now_msec: int) -> void:
 	if not _started:
 		return
-	if not _hello_sent and hello_delay_ms > 0 and now_msec >= _hello_due_msec:
+	if not _hello_sent:
+		if now_msec < _hello_due_msec:
+			return
 		_write_hello_file()
-	if _hello_sent and not _endpoint_exists():
+		if not _hello_sent:
+			return
+	if not _endpoint_exists():
 		_abandon_disconnected_inflight()
 		return
 	if _endpoint_disconnected:
@@ -147,7 +151,6 @@ func tick(now_msec: int) -> void:
 
 ## 私有:写 hello.json
 func _write_hello_file() -> void:
-	_hello_sent = true
 	var hello := (
 		Protocol
 		. event(
@@ -165,7 +168,7 @@ func _write_hello_file() -> void:
 		)
 	)
 	var path := root_path().path_join(_probe_id).path_join("hello.json")
-	_atomic_write(path, JSON.stringify(hello))
+	_hello_sent = _atomic_write(path, JSON.stringify(hello))
 
 
 ## 私有:扫描 inbox/ 处理每个 request

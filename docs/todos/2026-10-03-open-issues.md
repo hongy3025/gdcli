@@ -10,27 +10,45 @@
 
 ## 1. 工程遗留问题
 
-### T1（P1）运行时 harness 偶发握手失败——唯一仍未定位的问题
+### T1（P1）运行时 harness 偶发握手失败（已解决）
 
-**证据**
-- 6 次全量运行中出现 1 次：`m3_running` 的 probe 在 60s 内未连接（`state=connecting`、`transport=none`、`editor_playing=true`），级联同模块 14 个用例 error；同时单独运行 `tests/e2e/m3` 为 **123 passed**，其余全量运行也全绿。
-- 相关代码：`tests/e2e/m3/conftest.py`（`attach_game`、`wait_for_connected`，重试上限 `RECOVERY_RESTART_LIMIT = 1`）、`tests/e2e/shared_fixture.py`（session 级单编辑器）。
-- 已做的缓解（不构成修复）：`attach_game` 失败时打印 `runtime/status` + `.godot/gdapi_runtime` 目录内容 + 编辑器 console 尾部；失败后清理并重试 1 次。
+**历史证据**
+- 6 次全量运行中出现 1 次：`m3_running` 的 probe 在 60s 内未连接（`state=connecting`、`transport=none`、`editor_playing=true`），级联同模块 14 个用例 error；单独运行 `tests/e2e/m3` 为 **123 passed**。
+- 当时仅加入失败诊断与一次恢复重启，未修复握手本身。
 
-**影响**：全量 E2E 偶发红，CI/验收可信度受损；功能本身未见缺陷。
+**已定位缺陷**
+- `gdapi/addon/runtime/runtime_transport_file_probe.gd::_write_hello_file()` 在写文件前就设置 `_hello_sent=true`，并忽略 `_atomic_write()` 的成功/失败结果。一次 open 或 rename 失败后，`tick()` 不再发布 hello，编辑器无法发现 probe。
+- 真实 Godot 故障注入：在 probe 建好 inbox/outbox 后用目录占住 `hello.json`，使临时文件写入成功而 rename 失败；移开障碍后，旧实现仍无 hello，连续状态采样保持 `connecting / none / editor_playing=true`。
+- 历史失败未记录 hello 的写入结果，不能断言那一次一定由同一个 I/O 故障触发；本次证明并修复的是能确定性产生该症状的握手终态缺陷。
 
-**建议调查路径**
-1. 统计复现率：连续跑完整套件 5 次，记录失败次数与失败点（文件/模块），确认是否只出现在 module 级 fixture 首次 attach。
-2. 采集时间线：在 `wait_for_connected` 期间每 5s 打印一次 `runtime/status`，并同时记录 `.godot/gdapi_runtime` 下的文件出现顺序（`hello.json`/`inbox`/`outbox`），对比成功与失败两次运行。
-3. 验证假设（按可能性排序）：
-   - a. **transport 选择竞态**：probe 先尝试 EngineDebugger、再回落 file；若此前有残留 session/文件，可能一直停在 connecting。用 `GDAPI_E2E_TRANSPORT=engine_debugger` 与默认 file 两种模式各跑多次对比。
-   - b. **编辑器主线程拥塞**：上一测试遗留的重负载（如大文件写入/恢复）让 `play_custom_scene` 与 debugger attach 延迟超过 60s。可在同一台机器上把并发任务清空后复跑。
-   - c. **reset 清理不彻底**：`reset_shared_state` 只做 stop/close/open/selection/audit，没有显式清 `.godot/gdapi_runtime`；残留会干扰下一次 attach。
-   - d. 机器/磁盘瞬时故障（Windows 句柄竞争）。
+**修复**
+- 只有原子发布成功才把 hello 标记为已发送。立即与延迟 hello 共用明确的发布 deadline；未发布成功时保持握手待完成，由后续 tick 完成发布，且不处理未就绪端点的请求。
+- 保持原定 hello 延迟、不扩大 harness 的 60s 超时或恢复次数、不重启游戏。已发布端点消失仍表示断开，不重新宣告旧 session。
+- 两份 fixture 的 `test_runtime_transport_file_probe.gd` 同步增加真实文件系统回归：立即 open 失败、延迟 rename 失败、发布前 deadline 与发布后断开不复活。
 
-**验收标准**：连续 5 次全量运行 0 次该失败；或给出根因并落地「真实修复」（不只是放宽超时/加重试）。
+**验证证据（实际执行）**
 
-**规模**：1–3 小时（取决于是否复现）。
+| 验证 | 结果 |
+|---|---|
+| 相同 rename 故障注入，解除文件障碍 | **0.025s** 内连接；同一 generation，`game_run_count=1`、`game_stop_count=0`，未恢复重启 |
+| 恢复后的 runtime 数据面与停止 | `runtime/scene/tree` 返回 `RuntimeMain` 与 `ProbeTarget`；stop 后 `stopped / none / pending=0 / editor_playing=false` |
+| `python scripts/format-gd.py` / `--check` | 555 个 GDScript 通过 |
+| `gdlint`（全部 3 个改动 `.gd`） | Success: no problems found |
+| `uv run pytest tests/e2e/test_gdscript_units.py -q -s -k transport` | **3 passed, 16 deselected**，单编辑器 |
+| `cargo test --workspace` | **202 passed** |
+| `uv run pytest tests/e2e -q -s`（连续 5 次） | 每次 **373 passed, 1 deselected**；无握手失败或 harness recovery，均为单编辑器 |
+
+连续全量明细（默认 file transport；budget 仍按默认配置排除）：
+
+| 轮次 | 结果 | 耗时 | `GODOT_EDITOR_STARTS` |
+|---|---|---|---|
+| 1 | 373 passed, 1 deselected | 281.72s | 1 |
+| 2 | 373 passed, 1 deselected | 281.10s | 1 |
+| 3 | 373 passed, 1 deselected | 281.04s | 1 |
+| 4 | 373 passed, 1 deselected | 281.16s | 1 |
+| 5 | 373 passed, 1 deselected | 282.13s | 1 |
+
+**验收标准已满足**：连续 5 次全量运行 0 次该失败；同时落地真实发布状态修复，并证明同一运行会话内的握手恢复，不依赖放宽超时或增加 harness 重试。
 
 ### T2（P2）EngineDebugger 数据面尚未进入默认验收
 
@@ -125,11 +143,12 @@
 
 ## 5. 建议立项顺序
 
-1. **T1**（唯一未定位的稳定性问题，直接影响验收可信度）
-2. **T2 + 4 中的「CI/脚本化」**（把已建立的验收入口固化）
-3. **T5 / T7**（3D 场景搭建、跨场景批量重构：能力面最大的两块）
-4. **T6** 与 **T8** 中按需项
-5. **T4 / T3**（审计与超时余量的精细化）
+T1 的握手发布缺陷已修复，证据见 §1；其余问题按以下顺序立项：
+
+1. **T2 + 4 中的「CI/脚本化」**（把已建立的验收入口固化）
+2. **T5 / T7**（3D 场景搭建、跨场景批量重构：能力面最大的两块）
+3. **T6** 与 **T8** 中按需项
+4. **T4 / T3**（审计与超时余量的精细化）
 
 ---
 
@@ -149,6 +168,9 @@ uv run pytest tests/e2e/test_full_suite_budget.py -m budget -v
 # EngineDebugger 数据面（T2 的入口）
 GDAPI_E2E_TRANSPORT=engine_debugger uv run pytest tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_runtime_nodes.py -q
 
-# 运行时握手诊断（T1 复现时看 [attach_game] 输出）
+# T1：真实文件系统故障下的 hello 发布回归（立即 open 失败与延迟 rename 失败）
+uv run pytest tests/e2e/test_gdscript_units.py -q -s -k transport
+
+# 运行时生命周期与数据面
 uv run pytest tests/e2e/m3 -q -s
 ```

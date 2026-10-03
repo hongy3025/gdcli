@@ -46,7 +46,7 @@ Android 平台能力整体移出目标并**删除实现**：删除 `export/andro
 | 8 | M2 验收补齐（信号/分组持久化、typed 往返、assign/attach） | ✅ 63 passed |
 | 9 | M4 弱验收补齐（Audio/Physics/Animation/TileMap） | ✅ 42 passed ×2 |
 | 10 | 单编辑器 fixture 身份统一 + 会话级断言 | ✅ 守卫用例通过 |
-| 11 | 每测试隔离与恢复硬化 | ✅（运行时 harness 偶发项仍跟踪） |
+| 11 | 每测试隔离与恢复硬化 | 已完成；后续 T1 真实握手发布修复与验证见[遗留问题清单](../todos/2026-10-03-open-issues.md) |
 | 12 | 预算默认排除 + 收集顺序 | ✅ 360/361、1 deselected |
 | 13 | 失败审计真实性 | ✅ |
 | 14 | 批量事务完整性 | ✅ 7 passed |
@@ -118,7 +118,7 @@ GDAPI_E2E_TRANSPORT=engine_debugger uv run pytest tests/e2e/m3/test_runtime_stat
 > 本节各项已整理为可立项的专题清单：[docs/todos/2026-10-03-open-issues.md](../todos/2026-10-03-open-issues.md)（T1–T8，含复现命令、建议调查路径与规模估计）。
 
 1. ~~保存失败回滚缺少 E2E 注入~~ **已解决**：不再依赖"注入失败"，而是让服务自己回读校验落盘结果（Godot 在目标不可写时会静默返回 OK）。回滚分支现由只读 `project.godot` 与只读目标资源两个 E2E 用例覆盖（断言报错、内存回滚、文件不变、`uid/repair` 失败后 dry-run 与失败前完全一致）。
-2. **运行时 harness 偶发握手失败**（唯一未定位项）：一次全量运行中 `m3_running` 的 probe 在 60s 内未连接，级联同模块 14 个用例 error；单独运行 `tests/e2e/m3` 为 123 passed，其余运行也全绿。已加入失败诊断（`runtime/status` + runtime 目录内容 + 编辑器 console 尾部）与一次重试，触发条件仍未定位。
+2. ~~运行时 harness 偶发握手失败~~ **已解决**：发现 file probe 在 hello 原子写入失败后仍标记“已发送”，不再发布 hello；现仅在发布成功后更新状态。真实 Godot 故障注入证明：移开 rename 障碍后，同一游戏/同一 generation 在 0.025s 内连接，数据面与 stop 正常；立即写入失败及延迟 rename 失败已纳入回归。修复后连续 5 次非预算全量均为 **373 passed, 1 deselected**（281.04–282.13s、单编辑器、无握手失败或恢复重启）。历史那次失败缺少写入结果，不能断言与本次注入的 I/O 故障完全相同；完整证据与验收入口见 [T1](../todos/2026-10-03-open-issues.md)。
 3. ~~负载敏感的超时~~ **已加固**：`gdapi_test` undo 桥（m2 与 m4 两份）统一放宽到 10s，`wait_for` 默认 5s → 15s，m3 输入用例中 6 处显式 2s → 10s；只影响失败路径耗时，断言语义不变。
 4. ~~GUI / EngineDebugger 数据面未验收~~ **已完成**：headless 与真实 GUI 会话下均实测 `transport=engine_debugger`、协议 v2、PNG 截图、输入生效、stop 正常；并提供 `GDAPI_E2E_TRANSPORT=engine_debugger` 作为可重复验收入口（见 §4.4）。
 5. ~~外部功能对等未复核~~ **已完成抽样复核**：见 [外部 godot-mcp 能力对比](2026-10-03-external-parity-comparison.md)——27 个能力域中 13 等价 / 11 部分 / 3 缺失（3D 场景搭建、粒子、跨场景批量重构），差距项均不在本分支已批准目标内。

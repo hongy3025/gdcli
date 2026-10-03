@@ -14,6 +14,7 @@
 - 新增 `cli/src/format/` 模块，对外暴露 `render_exec_body` API
 
 ### Fixes
+- 修复 runtime file transport 的 hello 发布状态：此前一次文件 open/rename 失败也会提前标记为“已发送”，导致 probe 永久停在 `connecting / transport=none`；现在只有 `hello.json` 原子发布成功才标记为已发送，否则在原定延迟到期后继续完成发布，不重启游戏、不扩大 harness 超时或重试次数。新增真实文件系统故障回归，覆盖立即写入失败、延迟 rename 失败及已断开端点不复活。
 - 修复 `export/run` 在编辑器内必然失败的问题：`GdApiExportService` 现在在子进程运行期间持续排空 stdout/stderr（Godot 管道缓冲仅约 4 KiB，写满会阻塞子进程，直到超时被杀），并用 `--editor --headless --recovery-mode` 启动导出子进程，避免它重复加载 gdapi 插件后覆盖并删除父编辑器正在使用的 `.godot/gdapi.json`。
 - `export/run` 超时改为返回 `timeout` 并删除半成品产物；响应 `messages` 已去除 ANSI 转义与控制字符，可被严格 JSON 解析器读取。
 - `project/input_map/*` 与 `project/autoload/*` 变更现在会写回 `project.godot`（此前只改内存 InputMap，重载后丢失）；保存失败时回滚内存状态并记录失败审计。
