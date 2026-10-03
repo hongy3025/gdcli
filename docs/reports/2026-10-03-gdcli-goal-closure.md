@@ -115,6 +115,8 @@ GDAPI_E2E_TRANSPORT=engine_debugger uv run pytest tests/e2e/m3/test_runtime_stat
 
 ## 5. 未完成 / 未验证事项（如实记录）
 
+> 本节各项已整理为可立项的专题清单：[docs/todos/2026-10-03-open-issues.md](../todos/2026-10-03-open-issues.md)（T1–T8，含复现命令、建议调查路径与规模估计）。
+
 1. ~~保存失败回滚缺少 E2E 注入~~ **已解决**：不再依赖"注入失败"，而是让服务自己回读校验落盘结果（Godot 在目标不可写时会静默返回 OK）。回滚分支现由只读 `project.godot` 与只读目标资源两个 E2E 用例覆盖（断言报错、内存回滚、文件不变、`uid/repair` 失败后 dry-run 与失败前完全一致）。
 2. **运行时 harness 偶发握手失败**（唯一未定位项）：一次全量运行中 `m3_running` 的 probe 在 60s 内未连接，级联同模块 14 个用例 error；单独运行 `tests/e2e/m3` 为 123 passed，其余运行也全绿。已加入失败诊断（`runtime/status` + runtime 目录内容 + 编辑器 console 尾部）与一次重试，触发条件仍未定位。
 3. ~~负载敏感的超时~~ **已加固**：`gdapi_test` undo 桥（m2 与 m4 两份）统一放宽到 10s，`wait_for` 默认 5s → 15s，m3 输入用例中 6 处显式 2s → 10s；只影响失败路径耗时，断言语义不变。
