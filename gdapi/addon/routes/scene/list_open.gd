@@ -25,12 +25,12 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("列出编辑器当前打开的场景路径")
-		. desc("目前 Godot 编辑器仅持有单一当前编辑场景,该 route 返回一个长度为 0 或 1 的路径数组。")
+		. desc("读取 EditorInterface.get_open_scenes(),返回编辑器当前打开的全部场景路径,按字典序稳定排序。")
 		. returns(
 			"当前场景列表",
 			{
 				"ok": "bool",
-				"paths": "Array[String], 当前场景 res:// 路径",
+				"paths": "Array[String], 全部已打开场景的 res:// 路径,字典序升序",
 				"undoable": "bool, 始终为 false",
 			}
 		)

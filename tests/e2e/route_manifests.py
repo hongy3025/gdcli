@@ -45,16 +45,15 @@ M5_ROUTES = {
     "project/autoload/add", "project/autoload/remove", "classdb/classes", "classdb/class",
     "classdb/methods", "classdb/properties", "classdb/signals", "classdb/inheriters", "uid/repair",
     "diagnostics/health", "diagnostics/unused_resources", "diagnostics/cycle_deps", "diagnostics/script_errors",
-    "export/presets", "export/run", "export/android/devices", "export/android/deploy",
+    "export/presets", "export/run",
 }
 
 M6_ROUTES = {
     "editor/eval", "runtime/eval", "process/run", "network/http_request",
     "filesystem/batch/delete", "filesystem/batch/replace", "filesystem/batch/recover",
-    "export/android/deploy_many",
 }
 
 assert len(M3_RUNTIME_ROUTES) == 35
 assert len(M4_ROUTES) == 51
-assert len(M5_ROUTES) == 27
-assert len(M6_ROUTES) == 8
+assert len(M5_ROUTES) == 25
+assert len(M6_ROUTES) == 7

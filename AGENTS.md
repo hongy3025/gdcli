@@ -206,7 +206,7 @@ gdapi/addon/routes/
 
 ## 注意事项
 
-- 本机 Godot 路径：`GODOT_BIN=D:\app\devel\Godot\v4.7.1\godot_console.exe`
+- 本机 Godot 路径：`GODOT_BIN=D:\app\devel\Godot\v4.7.2\godot_console.exe`（当前验证基线为 4.7.2；仍支持 4.7.x）
 - 版本号统一在 workspace `Cargo.toml` 的 `workspace.package.version` 管理
 - `plugin.cfg` 和 `gdapi.gdextension` 中的版本号需要手动同步
 - 行列号参数是 1-based（与编辑器一致），内部转换为 0-based

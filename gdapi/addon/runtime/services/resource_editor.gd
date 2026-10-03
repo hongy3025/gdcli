@@ -222,6 +222,12 @@ static func assign(node_path: String, property: String, path: String) -> Diction
 		return {
 			"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "node has no property: " + property
 		}
+	if not _is_resource_property(node, property):
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "property does not accept a Resource: " + property
+		}
 	var res: Resource = load(checked.path)
 	var previous: Variant = node.get(property)
 	var manager := EditAction.undo_redo()
@@ -243,6 +249,18 @@ static func assign(node_path: String, property: String, path: String) -> Diction
 		"property": property,
 		"path": checked.path,
 	}
+
+
+## 属性必须接受 Resource（`doc()` 承诺「仅支持属性类型为 Resource 或其子类的字段」）。
+static func _is_resource_property(node: Object, property: String) -> bool:
+	for entry in node.get_property_list():
+		if String(entry.get("name", "")) != property:
+			continue
+		return (
+			int(entry.get("type", TYPE_NIL)) == TYPE_OBJECT
+			and int(entry.get("hint", 0)) == PROPERTY_HINT_RESOURCE_TYPE
+		)
+	return false
 
 
 ## 在编辑器文件系统中移动资源文件

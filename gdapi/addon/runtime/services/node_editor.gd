@@ -132,7 +132,10 @@ static func _unique_name(parent: Node, base: String) -> String:
 	return name
 
 
-## delete 通过 UndoRedo 显式 remove_child + queue_free (do) / 重新加入 (undo).
+## delete 通过 UndoRedo 显式 remove_child (do) / 重新加入并恢复原 index (undo).
+## do 阶段不 queue_free:节点由 add_undo_reference 托管,只有当 action 被历史淘汰或
+## 历史被清空(do 态)时才由 UndoRedo 释放,因此跨帧 undo 仍能完整恢复节点与层级位置。
+## 这与编辑器 SceneTreeDock 删除节点的实现一致(add_undo_reference,不 free)。
 static func delete_node(node_path: String) -> Dictionary:
 	var lookup := find(node_path)
 	if not lookup.ok:
@@ -156,10 +159,10 @@ static func delete_node(node_path: String) -> Dictionary:
 		}
 	manager.create_action("gdcli: delete node", UndoRedo.MERGE_DISABLE, owner)
 	manager.add_do_method(parent, "remove_child", node)
-	manager.add_do_method(node, "queue_free")
-	manager.add_undo_method(parent, "add_child", node)
+	manager.add_undo_method(parent, "add_child", node, true)
+	manager.add_undo_method(parent, "move_child", node, index)
 	manager.add_undo_method(node, "set_owner", owner)
-	manager.add_do_reference(node)
+	manager.add_undo_reference(node)
 	manager.commit_action()
 	return {
 		"ok": true,

@@ -63,3 +63,50 @@ def test_scene_close_then_current_is_not_found(m2_editor):
     # acceptable; only the wrong scene content would be a failure.
     result = exec_ok(m2_editor, "scene/current")
     assert result.get("ok") is True
+
+
+def test_scene_list_open_returns_every_open_scene_in_stable_order(m2_editor):
+    # Opening a second scene keeps the first one open as an editor tab, so the
+    # route must report the whole open set (not just the edited scene).
+    exec_ok(m2_editor, "scene/open", {"path": "res://scenes/audio.tscn"})
+
+    first = exec_ok(m2_editor, "scene/list_open")
+    assert first["undoable"] is False
+    paths = first["paths"]
+    assert "res://scenes/main.tscn" in paths
+    assert "res://scenes/audio.tscn" in paths
+    # Stable, deterministic ordering (lexicographic ascending).
+    assert paths == sorted(paths)
+    assert exec_ok(m2_editor, "scene/list_open")["paths"] == paths
+
+    # Closing the current scene drops it from the open set.
+    closed = exec_ok(m2_editor, "scene/close")
+    assert closed["path"] == "res://scenes/audio.tscn"
+    assert "res://scenes/audio.tscn" not in exec_ok(m2_editor, "scene/list_open")["paths"]
+
+
+def test_scene_close_only_operates_on_current_scene(m2_editor):
+    before = exec_ok(m2_editor, "scene/current")["path"]
+    assert before == "res://scenes/main.tscn"
+
+    exec_ok(m2_editor, "scene/open", {"path": "res://scenes/audio.tscn"})
+    assert exec_ok(m2_editor, "scene/current")["path"] == "res://scenes/audio.tscn"
+
+    # Godot exposes no API to close a non-current scene by path; the request is
+    # rejected without changing editor state.
+    rejected = exec_error(m2_editor, "scene/close", {"path": before})
+    assert rejected["code"] == "not_found"
+    assert exec_ok(m2_editor, "scene/current")["path"] == "res://scenes/audio.tscn"
+
+    closed = exec_ok(m2_editor, "scene/close")
+    assert closed["changed"] is True
+    assert closed["path"] == "res://scenes/audio.tscn"
+
+    # The closed scene is gone: closing it again reports not_found.
+    again = exec_error(m2_editor, "scene/close", {"path": "res://scenes/audio.tscn"})
+    assert again["code"] == "not_found"
+
+    # scene/current reflects the real post-close state (the previously edited scene).
+    after = exec_ok(m2_editor, "scene/current")
+    assert after["path"] == before
+    assert before in exec_ok(m2_editor, "scene/list_open")["paths"]

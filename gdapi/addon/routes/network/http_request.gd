@@ -14,6 +14,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 	var started := Service.start(checked, res)
 	if not started.ok:
+		AuditLog.record(ROUTE, "dangerous", {"url": checked.url}, false, started.code)
 		res.error(started.error, started.code, ErrorCodes.http_status(started.code))
 		return
 	var terminal := func(outcome):
@@ -27,11 +28,13 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
 				"tick": func(_now): return bool(started.state.done),
 				"cancel": func(_reason): started.state.node.cancel_request(),
-				"finish": terminal
+				"finish": terminal,
+				"state": started.state,
 			}
 		)
 	):
 		started.state.node.cancel_request()
+		AuditLog.record(ROUTE, "dangerous", {"url": checked.url}, false, ErrorCodes.GODOT_ERROR)
 		res.error("network task could not be registered", ErrorCodes.GODOT_ERROR, 500)
 
 

@@ -42,3 +42,15 @@ def test_process_run_async_timeout_returns_conflict(
         "timeout_ms": 200,
     })
     assert error.get("code") == "timeout", error
+
+
+def test_process_spawn_failure_is_audited_as_failure(
+    m6_editor_process: dict[str, Any],
+) -> None:
+    error = exec_error(m6_editor_process, "process/run", {
+        "executable": "definitely-not-a-real-binary-xyz", "args": [], "cwd": "res://tools",
+    })
+    assert error.get("code"), error
+    events = audit_for_route(m6_editor_process, "process/run")
+    failures = [e for e in events if e.get("ok") is False and e.get("code")]
+    assert failures, events

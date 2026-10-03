@@ -17,11 +17,20 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("烘焙并保存 2D 导航网格")
-		. desc("复制选定 NavigationRegion2D 的导航多边形到项目内 .tres；文件写入不可撤销。")
+		. desc("按当前源几何真实烘焙并保存 NavigationRegion2D 的导航多边形到项目内 .tres；失败或超时不留输出。")
 		. param("region_path", "String", true, "NavigationRegion2D 的绝对节点路径", "")
 		. param("path", "String", true, "项目内 .tres 输出路径", "")
 		. example(
 			'{"region_path":"/root/NavigationDomain/Region","path":"res://navigation/baked.tres"}'
 		)
-		. returns("烘焙结果", {"path": "String", "saved": "bool", "undoable": "bool, false"})
+		. returns(
+			"烘焙结果",
+			{
+				"path": "String",
+				"vertex_count": "int",
+				"polygon_count": "int",
+				"saved": "bool",
+				"undoable": "bool, false",
+			}
+		)
 	)

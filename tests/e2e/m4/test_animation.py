@@ -94,7 +94,7 @@ def test_animation_track_and_key_persist_after_reopen(m4_env):
             "name": "move",
             "track_index": track["track_index"],
             "time": 0.0,
-            "value": 1,
+            "value": {"type": "Vector2", "value": [1.0, 2.0]},
         },
     )
     assert key["undoable"] is True
@@ -105,6 +105,77 @@ def test_animation_track_and_key_persist_after_reopen(m4_env):
         {"player_path": "AnimationPlayer", "name": "move"},
     )
     assert duplicate["code"] == "conflict"
+    # Read the persisted track/key back through the animation API on the reopened scene.
+    reopened_key = exec_ok(
+        m4_env,
+        "animation/key/remove",
+        {
+            "player_path": "AnimationPlayer",
+            "name": "move",
+            "track_index": track["track_index"],
+            "time": 0.0,
+        },
+    )
+    assert reopened_key["key_index"] == key["key_index"]
+    missing_key = exec_error(
+        m4_env,
+        "animation/key/remove",
+        {
+            "player_path": "AnimationPlayer",
+            "name": "move",
+            "track_index": track["track_index"],
+            "time": 5.0,
+        },
+    )
+    assert missing_key["code"] == "not_found"
+    missing_track = exec_error(
+        m4_env,
+        "animation/key/remove",
+        {
+            "player_path": "AnimationPlayer",
+            "name": "move",
+            "track_index": track["track_index"] + 1,
+            "time": 0.0,
+        },
+    )
+    assert missing_track["code"] == "not_found"
+    reopened_track = exec_ok(
+        m4_env,
+        "animation/track/remove",
+        {
+            "player_path": "AnimationPlayer",
+            "name": "move",
+            "track_index": track["track_index"],
+        },
+    )
+    assert reopened_track["track_index"] == track["track_index"]
+    # The saved scene file itself must carry the authored track path and key time.
+    content = exec_ok(m4_env, "filesystem/read", {"path": scene_path})["content"]
+    assert 'tracks/0/path = NodePath(".:position")' in content, content
+    assert "PackedFloat32Array(0)" in content, content
+
+
+def test_animation_play_and_stop_expose_player_state(m4_env):
+    """Hard-coded play/stop results must not survive the AnimationPlayer read-back."""
+    exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
+    exec_ok(
+        m4_env,
+        "animation/create",
+        {"player_path": "AnimationPlayer", "name": "idle"},
+    )
+
+    def current_animation() -> str:
+        return exec_ok(
+            m4_env,
+            "node/property/get",
+            {"node_path": "/root/AnimationDomain/AnimationPlayer", "property": "current_animation"},
+        )["value"]
+
+    assert current_animation() == ""
+    exec_ok(m4_env, "animation/play", {"player_path": "AnimationPlayer", "name": "idle"})
+    assert current_animation() == "idle"
+    exec_ok(m4_env, "animation/stop", {"player_path": "AnimationPlayer"})
+    assert current_animation() == ""
 
 
 def test_animation_key_removal_undo_redo_and_invalid_value(m4_env):

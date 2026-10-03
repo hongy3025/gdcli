@@ -1,4 +1,12 @@
-from .conftest import assert_snapshot_restored, exec_ok, m5_editor, project_snapshot, restore_snapshot
+from pathlib import Path
+
+from .conftest import (
+    assert_snapshot_restored,
+    exec_ok,
+    m5_editor,
+    project_snapshot,
+    restore_snapshot,
+)
 
 
 def test_project_config_round_trip_restores_snapshot(m5_editor):
@@ -52,5 +60,19 @@ def test_project_config_removals_succeed_without_force(m5_editor):
     assert all(item["action"] != "m5_remove_action" for item in actions["items"])
     autoloads = exec_ok(m5_editor, "project/autoload/list", {})
     assert all(item["name"] != "M5RemoveAuto" for item in autoloads["autoloads"])
+    restore_snapshot(m5_editor)
+    assert_snapshot_restored(m5_editor, before)
+
+
+def test_input_map_and_autoload_are_persisted_to_project_file(m5_editor):
+    """InputMap/Autoload 变更必须写进 project.godot，重载后才不会丢失。"""
+    before = project_snapshot(m5_editor)
+    exec_ok(m5_editor, "project/input_map/action/add", {"action": "m5_persist_action"})
+    exec_ok(m5_editor, "project/autoload/add", {
+        "name": "M5PersistAuto", "path": "res://fixtures/state.gd",
+    })
+    text = (Path(m5_editor["project"]) / "project.godot").read_text(encoding="utf-8")
+    assert "m5_persist_action" in text, text
+    assert "M5PersistAuto" in text, text
     restore_snapshot(m5_editor)
     assert_snapshot_restored(m5_editor, before)

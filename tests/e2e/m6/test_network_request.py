@@ -61,3 +61,13 @@ def test_audit_redacts_body_and_headers(m6_editor_network, local_http_server):
     event = latest_audit(m6_editor_network, "network/http_request")
     body = json.dumps(event)
     assert "payload-ok" not in body
+
+
+def test_failed_request_is_audited_as_failure(m6_editor_network, local_http_server):
+    error = exec_error(m6_editor_network, "network/http_request", {
+        "url": local_http_server.url("/delay"), "timeout_ms": 500,
+    })
+    assert error["code"] == "timeout", error
+    event = latest_audit(m6_editor_network, "network/http_request")
+    assert event["ok"] is False, event
+    assert event["code"] == "timeout", event

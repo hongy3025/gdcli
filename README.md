@@ -18,6 +18,10 @@ cargo build --release
 
 gdcli 的 gdapi 插件仅支持 Godot 4.7.x。构建使用 godot-rust 0.5.4 的 `api-4-7` API level；Godot 4.3–4.6 不在兼容或测试范围内。
 
+当前开发验证基线为 **Godot 4.7.2**，本机 Windows 二进制为 `D:\app\devel\Godot\v4.7.2\godot_console.exe`。维护版本升级不改变 `api-4-7` 或 `.gdextension` 的 `compatibility_minimum = 4.7`，也不将最低要求提高到 4.7.2。
+
+**平台范围**：仅桌面编辑器与桌面导出目标（Windows / macOS / Linux）。Android 平台能力（设备查询、打包、部署、ADB 集成）自 2026-10-03 起不属于本分支范围，相关路由与实现已从代码树移除；见[分支总目标与范围](docs/superpowers/specs/2026-10-03-gdcli-branch-goal-and-scope.md)与[目标收口计划](docs/superpowers/plans/2026-10-03-gdcli-goal-closure.md)。
+
 LSP 命令需要 Godot 编辑器运行中（默认监听 6005 端口）：
 
 ```bash
@@ -81,7 +85,23 @@ uv run pytest tests/e2e/m2 -v
 uv run pytest tests/e2e/m3 -v
 ```
 
-可选设置 `GODOT_BIN` 环境变量指定 Godot 路径（默认使用 PATH 中的 `godot`）。
+通过 `GODOT_BIN` 环境变量可覆盖 Godot 路径；共享 E2E fixture 在 Windows 上默认使用 `D:\app\devel\Godot\v4.7.2\godot_console.exe`，其他平台默认使用 PATH 中的 `godot`。直接调用 `build_environment(godot_bin=...)` 时，显式参数优先于环境变量。
+
+Windows PowerShell 示例：
+
+```powershell
+$env:GODOT_BIN = 'D:\app\devel\Godot\v4.7.2\godot_console.exe'
+& $env:GODOT_BIN --version
+uv run pytest tests/e2e/test_m1_smoke.py -v
+```
+
+### Godot 4.7.1 → 4.7.2
+
+[官方公告](https://godotengine.org/article/maintenance-release-godot-4-7-2/)列出 57 项修复，暂无相对 4.7.1 的已知不兼容。与本工具相关的重点包括 GDExtension 父类暴露检查、主线程生命周期、autoload 状态判断、Windows 初始化/网络盘访问和 TLS 熵源修复。`rand_weighted` 负权重和 `Color.hash()` 有边界行为修正，但本仓库不依赖被修正的旧行为。
+
+完整分类清单、代码影响核对和实测证据见 [4.7.2 升级核对报告](docs/reports/2026-10-03-godot-4.7.2-upgrade.md)。目前未发现必须修改 Godot API 调用、LSP 协议或 Rust 依赖的适配项；已验证真实 4.7.2 编辑器、HTTP/HTTPS、LSP、原生进程和重复运行/停止链路。
+
+使用导出功能前还需安装匹配的 **4.7.2 导出模板**；本机新安装目录的 `export_templates` 为空，本次没有执行导出验收。历史报告中的 4.7.1 保留为当时的验证记录。
 
 ---
 
@@ -366,7 +386,7 @@ M4 提供 51 条游戏系统路由，覆盖 Animation/AnimationTree、TileMap、
 
 Physics 与 Navigation 当前只支持 2D。3D 节点、形状、地图或查询在 mutation 前返回 `not_supported`。`physics/raycast`、`navigation/path/get` 和 `navigation/agent/target` 通过运行中的游戏 probe 执行；停止游戏后请求会按 broker 清理语义失败。
 
-完整路由集合及每条参数/返回文档可通过 `gdcli command list` 和 `gdcli command doc <route>` 查询。
+完整路由集合及每条参数/返回文档可通过 `gdcli exec command/list` 和 `gdcli exec command/doc <route>` 查询。
 
 ### M5 项目、诊断与发布
 
@@ -374,7 +394,7 @@ M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项�
 
 诊断路由 `diagnostics/health`、`unused_resources`、`cycle_deps` 和 `script_errors` 返回稳定的 `{severity,code,message,path?,line?,details?}` finding，并支持 `roots`、`offset`、`limit` 分页。`uid/repair` 默认 dry-run。
 
-`export/presets` 从 `export_presets.cfg` 发现预设，`export/run` 只使用固定 Godot 导出参数并校验项目内目标路径；缺少模板返回 `not_supported`。Android 只允许编辑器配置的 ADB、精确 serial 和固定的 `devices -l`/安装/启动命令，输出会去敏。
+`export/presets` 从 `export_presets.cfg` 发现预设，`export/run` 只使用固定 Godot 导出参数并校验项目内目标路径；缺少模板返回 `not_supported`，超时返回 `timeout` 并删除半成品产物。导出在独立的 `--editor --headless --recovery-mode` 子进程中执行：不加载编辑器插件，避免与正在运行的编辑器争用 `.godot/gdapi.json`；响应 `messages` 已去除 ANSI 转义与控制字符。导出能力仅覆盖桌面预设（PCK/Pack），Android 预设与部署不在目标与验收范围内。
 
 ### Mutation 模型
 
@@ -388,12 +408,12 @@ M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项�
 
 ### M3 运行时验证
 
-M3 增补 35 个 runtime 路由（`runtime/...`）；M6 引入 `runtime/eval` 作为 v2 协议下运行进程内执行的能力，必须在 broker 协商 v2 后才能路由。这些路由需要项目处于运行状态：使用 `gdcli exec project/run` 启动游戏后通过 `runtime/status` 等待 `connected`。所有 runtime/* 请求均由后台的 EditorDebuggerPlugin ↔ EngineDebugger 双向通道承载，公共路由不直接调用 session API。
+M3 增补 35 个 runtime 路由（`runtime/...`）；M6 引入 `runtime/eval` 作为 v2 协议下运行进程内执行的能力，必须在 broker 协商 v2 后才能路由。这些路由需要项目处于运行状态：使用 `gdcli exec project/run` 启动游戏后通过 `runtime/status` 等待 `connected`。所有 runtime/* 请求统一经后台 broker 转发：优先走 EditorDebuggerPlugin ↔ EngineDebugger 通道，不可用时回退到项目内 `.godot/gdapi_runtime` 文件 transport；公共路由不直接调用 session API。
 
 | 分类 | 路由数 | 说明 |
 |---|---|---|
 | `runtime/status` `runtime/scene/tree` | 2 | 状态、场景树 |
-| `runtime/node/info\|get\|set\|call\|find\|remove\|reparent` | 7 | 节点增删改查，方法调用需要在节点元数据 `gdapi_callable_methods` allowlist 中 |
+| `runtime/node/info\|get\|set\|call\|find\|remove\|reparent\|create\|duplicate\|rename` | 10 | 节点增删改查，方法调用需要在节点元数据 `gdapi_callable_methods` allowlist 中 |
 | `runtime/input/key\|mouse\|gamepad\|touch\|action\|sequence` | 6 | 输入模拟；sequence 最多 100 项、累计 ≤ 10 秒 |
 | `runtime/screenshot/viewport\|camera\|frames` | 3 | PNG 截图，尺寸限制 1920x1080（超限源在 CPU readback 前拒绝），单响应 ≤ 4 MiB |
 | `runtime/log/read\|clear` `runtime/debug/performance\|monitors\|errors\|breakpoints` | 6 | 游标读取 + 性能监控 |
@@ -403,8 +423,7 @@ M3 增补 35 个 runtime 路由（`runtime/...`）；M6 引入 `runtime/eval` �
 所有 runtime 请求默认 5 秒超时，可被 broker.tick 清理；stop/disconnect 会同步失败所有 pending 让 await/call 收到 `conflict`。
 
 M6 高风险能力（`editor/eval`、`runtime/eval`、`process/run`、`network/http_request`、
-`filesystem/batch/delete`、`filesystem/batch/replace`、`filesystem/batch/recover`、
-`export/android/deploy_many`）自 2026-08-01 起默认可用，不再需要额外权限配置或
+`filesystem/batch/delete`、`filesystem/batch/replace`、`filesystem/batch/recover`）自 2026-08-01 起默认可用，不再需要额外权限配置或
 强制确认字段（gdcli 为开发期工具，鉴权由 loopback + Bearer token 承担）。能力仍受
 内置硬上限约束：eval 源码 ≤16 KiB、
 process 超时 ≤60s/输出 ≤1 MiB、network 仅 http(s)/超时 ≤60s/响应 ≤4 MiB/

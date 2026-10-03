@@ -16,27 +16,39 @@ from typing import Any
 import pytest
 
 from e2e.m3.conftest import command_doc, exec_error, exec_ok  # noqa: F401
+from e2e.shared_fixture import is_tracked_project_file  # noqa: F401 — re-export
 from e2e.shared_fixture import m4_env  # noqa: F401 — re-export
 from e2e.shared_fixture import reset_shared_state, restore_file_state
 
 
-def project_snapshot(project: Path) -> str:
-    digest = hashlib.sha256()
+def project_files(project: Path) -> dict[str, str]:
+    """Tracked project files → sha256 hex, excluding generated/installed state."""
+    files: dict[str, str] = {}
     for path in sorted(project.rglob("*")):
         if not path.is_file():
             continue
         rel = str(path.relative_to(project)).replace("\\", "/")
-        if (
-            rel.startswith(".godot/")
-            or rel.startswith("addons/gdapi/")
-            or rel == "project.godot"
-        ):
+        if not is_tracked_project_file(rel):
             continue
+        files[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return files
+
+
+def project_snapshot(project: Path) -> str:
+    digest = hashlib.sha256()
+    for rel, file_digest in project_files(project).items():
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(file_digest.encode("ascii"))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def describe_project_diff(before: dict[str, str], after: dict[str, str]) -> str:
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    changed = sorted(rel for rel in set(before) & set(after) if before[rel] != after[rel])
+    return f"added={added} removed={removed} changed={changed}"
 
 
 def reset_project_state(env: dict[str, Any]) -> None:
@@ -49,11 +61,14 @@ def reset_project_state(env: dict[str, Any]) -> None:
 
 @pytest.fixture(autouse=True)
 def isolated_test_state(m4_env):
-    before = project_snapshot(Path(m4_env["project"]))
+    project = Path(m4_env["project"])
+    before = project_files(project)
     yield
     reset_project_state(m4_env)
-    after = project_snapshot(Path(m4_env["project"]))
-    assert after == before, "M4 project state changed after test"
+    after = project_files(project)
+    assert after == before, (
+        "M4 project state changed after test: " + describe_project_diff(before, after)
+    )
 
 
 __all__ = [

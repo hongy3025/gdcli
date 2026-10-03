@@ -116,3 +116,76 @@ def test_node_list_and_property_list(m2_editor):
     props = exec_ok(m2_editor, "node/property/list", {"node_path": "/root/Main/Player"})
     names = [p["name"] for p in props["properties"]]
     assert "position" in names
+
+
+def _child_names(editor: dict, node_path: str) -> list[str]:
+    return [child["name"] for child in exec_ok(editor, "node/list", {"node_path": node_path})["children"]]
+
+
+def test_node_delete_undo_restores_parent_and_index(m2_editor):
+    """delete detaches the node; undo re-attaches it to the same parent at the same index."""
+    exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Node2D", "name": "Alpha"
+    })
+    exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Node2D", "name": "Beta"
+    })
+    before = _child_names(m2_editor, "/root/Main")
+    assert before == ["Player", "Target", "Alpha", "Beta"]
+
+    deleted = exec_ok(m2_editor, "node/delete", {"node_path": "/root/Main/Alpha"})
+    assert deleted["undoable"] is True
+    assert _child_names(m2_editor, "/root/Main") == ["Player", "Target", "Beta"]
+    assert exec_error(m2_editor, "node/get", {"node_path": "/root/Main/Alpha"})["code"] == "not_found"
+
+    editor_undo(m2_editor)
+    restored = exec_ok(m2_editor, "node/get", {"node_path": "/root/Main/Alpha"})
+    assert restored["name"] == "Alpha"
+    # Parent is correct because the path resolves under /root/Main again.
+    assert restored["node_path"] == "/root/Main/Alpha"
+    # Sibling order proves the original index was restored, not appended.
+    assert _child_names(m2_editor, "/root/Main") == before
+
+
+def test_node_delete_redo_removes_node_again(m2_editor):
+    """Redo of a delete re-applies remove_child so the node is unreachable again."""
+    exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Node2D", "name": "Alpha"
+    })
+    exec_ok(m2_editor, "node/delete", {"node_path": "/root/Main/Alpha"})
+    editor_undo(m2_editor)
+    assert exec_ok(m2_editor, "node/get", {"node_path": "/root/Main/Alpha"})["name"] == "Alpha"
+
+    editor_redo(m2_editor)
+    assert exec_error(m2_editor, "node/get", {"node_path": "/root/Main/Alpha"})["code"] == "not_found"
+    assert "Alpha" not in _child_names(m2_editor, "/root/Main")
+
+
+def test_node_delete_two_step_undo_redo_keeps_scene_tree_consistent(m2_editor):
+    """Two consecutive delete/undo/redo cycles restore the tree exactly, with no orphans."""
+    exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Node2D", "name": "Alpha"
+    })
+    exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Node2D", "name": "Beta"
+    })
+    baseline = exec_ok(m2_editor, "scene/tree")
+
+    exec_ok(m2_editor, "node/delete", {"node_path": "/root/Main/Alpha"})
+    exec_ok(m2_editor, "node/delete", {"node_path": "/root/Main/Beta"})
+    assert _child_names(m2_editor, "/root/Main") == ["Player", "Target"]
+
+    editor_undo(m2_editor)
+    editor_undo(m2_editor)
+    # scene/tree only lists children with an owner, so equality also proves no orphan node.
+    assert exec_ok(m2_editor, "scene/tree") == baseline
+    assert _child_names(m2_editor, "/root/Main") == ["Player", "Target", "Alpha", "Beta"]
+    for name in ("Alpha", "Beta"):
+        assert exec_ok(m2_editor, "node/get", {"node_path": "/root/Main/" + name})["name"] == name
+
+    editor_redo(m2_editor)
+    editor_redo(m2_editor)
+    assert _child_names(m2_editor, "/root/Main") == ["Player", "Target"]
+    for name in ("Alpha", "Beta"):
+        error = exec_error(m2_editor, "node/get", {"node_path": "/root/Main/" + name})
+        assert error["code"] == "not_found"

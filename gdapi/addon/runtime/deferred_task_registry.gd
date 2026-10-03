@@ -84,7 +84,9 @@ func _emit_terminal(task: Dictionary, outcome: Dictionary) -> void:
 		callback.call(outcome)
 
 
-func _task_outcome(task: Dictionary) -> Dictionary:
+## 任务结束时若没有记录 outcome，说明该 task 漏写了终态：
+## 不能以「响应已发送」推断成功，否则失败会被审计成 ok。
+static func _task_outcome(task: Dictionary) -> Dictionary:
 	var outcome: Variant = task.get("outcome", null)
 	if typeof(outcome) == TYPE_DICTIONARY:
 		return outcome
@@ -93,7 +95,9 @@ func _task_outcome(task: Dictionary) -> Dictionary:
 		outcome = state.get("outcome", null)
 		if typeof(outcome) == TYPE_DICTIONARY:
 			return outcome
-	return {"ok": _response_is_sent(task["response"]), "code": "", "summary": "completed"}
+	return {
+		"ok": false, "code": ErrorCodes.CONFLICT, "summary": "task ended without a recorded outcome"
+	}
 
 
 func _fail_task(task: Dictionary, code: String, message: String) -> void:

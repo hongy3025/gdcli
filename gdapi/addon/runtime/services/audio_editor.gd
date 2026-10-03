@@ -83,24 +83,39 @@ static func create_player(parent_path: Variant, name: Variant, stream_path: Vari
 		"changed": true,
 		"undoable": true,
 		"name": player.name,
-		"node_path": str(player.get_path())
+		"node_path": _user_path(player)
 	}
 
 
+## 返回编辑器场景内的用户路径（/root/<场景根>/...），与 node/* 路由一致；
+## 直接返回编辑器内部路径（/root/@EditorNode@...）会无法再被其它路由解析。
+static func _user_path(node: Node) -> String:
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null:
+		return str(node.get_path())
+	if node == root:
+		return "/root/" + String(root.name)
+	return "/root/" + String(root.name) + "/" + String(root.get_path_to(node))
+
+
+## 在编辑器当前场景中触发播放,返回节点真实的 AudioStreamPlayer.playing 状态。
 static func play(node_path: Variant) -> Dictionary:
 	var player := _player(node_path)
 	if not player.ok:
 		return player
-	player.node.play()
-	return {"ok": true, "changed": true, "playing": true, "undoable": false}
+	var target: AudioStreamPlayer = player.node
+	target.play()
+	return {"ok": true, "changed": true, "playing": target.playing, "undoable": false}
 
 
+## 在编辑器当前场景中停止播放,返回节点真实的 AudioStreamPlayer.playing 状态。
 static func stop(node_path: Variant) -> Dictionary:
 	var player := _player(node_path)
 	if not player.ok:
 		return player
-	player.node.stop()
-	return {"ok": true, "changed": true, "playing": false, "undoable": false}
+	var target: AudioStreamPlayer = player.node
+	target.stop()
+	return {"ok": true, "changed": true, "playing": target.playing, "undoable": false}
 
 
 static func _player(node_path: Variant) -> Dictionary:

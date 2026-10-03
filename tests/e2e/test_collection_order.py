@@ -37,10 +37,9 @@ def test_classify_puts_contract_tests_in_bucket_0() -> None:
 
 def test_classify_puts_slow_paths_in_bucket_4() -> None:
     for rel in [
-        "tests/e2e/m5/test_export_android.py",
+        "tests/e2e/m5/test_export.py",
         "tests/e2e/m6/test_process_run.py",
         "tests/e2e/m6/test_bulk_files.py",
-        "tests/e2e/m6/test_bulk_deploy.py",
         "tests/e2e/m6/test_network_request.py",
         "tests/e2e/m6/test_runtime_eval.py",
         "tests/e2e/m6/test_eval.py",
@@ -71,7 +70,7 @@ def test_classify_defaults_to_bucket_2_for_m2_m4_m3_contract() -> None:
 
 def test_bucketize_preserves_relative_order_within_buckets() -> None:
     items = _items(
-        "tests/e2e/m5/test_export_android.py",  # bucket 4
+        "tests/e2e/m5/test_export.py",  # bucket 4
         "tests/e2e/m2/test_m2_contract.py",  # bucket 2
         "tests/e2e/test_unified_fixture_contract.py",  # bucket 0
         "tests/e2e/m3/test_runtime_input.py",  # bucket 3
@@ -84,13 +83,13 @@ def test_bucketize_preserves_relative_order_within_buckets() -> None:
         "test_m2_contract.py",                # bucket 2
         "test_m4_contract.py",                # bucket 2
         "test_runtime_input.py",              # bucket 3
-        "test_export_android.py",             # bucket 4
+        "test_export.py",                     # bucket 4
     ]
 
 
 def test_bucketize_is_idempotent() -> None:
     items = _items(
-        "tests/e2e/m5/test_export_android.py",
+        "tests/e2e/m5/test_export.py",
         "tests/e2e/m2/test_m2_contract.py",
         "tests/e2e/test_unified_fixture_contract.py",
     )

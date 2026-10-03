@@ -34,16 +34,33 @@ static func set_item(
 				return _error(ErrorCodes.INVALID_PARAM, "value must be a Color")
 			theme.set_color(String(item), String(type_name), decoded.value)
 		"constant":
-			if typeof(decoded.value) != TYPE_INT:
-				return _error(ErrorCodes.INVALID_PARAM, "value must be an int")
-			theme.set_constant(String(item), String(type_name), int(decoded.value))
+			var constant := _int_value(decoded.value)
+			if not constant.ok:
+				return _error(ErrorCodes.INVALID_PARAM, constant.error)
+			theme.set_constant(String(item), String(type_name), constant.value)
 		"font_size":
-			if typeof(decoded.value) != TYPE_INT:
-				return _error(ErrorCodes.INVALID_PARAM, "value must be an int")
-			theme.set_font_size(String(item), String(type_name), int(decoded.value))
+			var font_size := _int_value(decoded.value)
+			if not font_size.ok:
+				return _error(ErrorCodes.INVALID_PARAM, font_size.error)
+			theme.set_font_size(String(item), String(type_name), font_size.value)
 		_:
 			return _error(ErrorCodes.INVALID_PARAM, "unsupported theme item kind")
 	return _save(theme, checked.path, "theme/" + kind + "/set")
+
+
+## JSON 数字一律解码为 float，因此整数值必须同时接受 4 与 4.0。
+## 非整数、NaN/INF 拒绝；theme 常量不限制取值范围（允许负数）。
+static func _int_value(value: Variant) -> Dictionary:
+	if typeof(value) == TYPE_INT:
+		return {"ok": true, "value": int(value)}
+	if typeof(value) != TYPE_FLOAT:
+		return {"ok": false, "error": "value must be an int, got " + type_string(typeof(value))}
+	var number := float(value)
+	if not is_finite(number):
+		return {"ok": false, "error": "value must be a finite integer"}
+	if number != floor(number):
+		return {"ok": false, "error": "value must be an integer, got " + str(number)}
+	return {"ok": true, "value": int(number)}
 
 
 static func set_stylebox(

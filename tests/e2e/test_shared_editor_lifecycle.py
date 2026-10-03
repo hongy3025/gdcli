@@ -18,10 +18,22 @@ from unittest import mock
 
 import pytest
 
-from tests.e2e import shared_fixture
+from e2e import shared_fixture
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _preserve_editor_start_counter():
+    """这些用例会重置/递增全局启动计数：结束后必须还原，
+    否则会话级"只启动一个编辑器"的断言会被污染。"""
+    snapshot = dict(shared_fixture.EDITOR_START_COUNTER)
+    snapshot["pids"] = set(snapshot.get("pids", set()))
+    snapshot["callers"] = list(snapshot.get("callers", []))
+    yield
+    shared_fixture.EDITOR_START_COUNTER.clear()
+    shared_fixture.EDITOR_START_COUNTER.update(snapshot)
 
 
 def _fake_env(project: Path) -> dict[str, Any]:
@@ -113,7 +125,7 @@ def test_build_environment_yields_one_process(
         assert env["editor_pid"] == captured["pid"]
         assert env["meta"]["pid"] == captured["pid"]
     finally:
-        shared_fixture.teardown_environment(env)
+        shared_fixture.teardown_environment(env, reset=False)  # mock 环境没有真实编辑器可重置
 
     assert shared_fixture.EDITOR_START_COUNTER["starts"] == 1
     assert shared_fixture.EDITOR_START_COUNTER["pids"] == {captured["pid"]}
@@ -180,4 +192,4 @@ def test_build_environment_copies_unified_project(
 
         assert env["fixture_root"] is shared_fixture.E2E_FIXTURE_SOURCE
     finally:
-        shared_fixture.teardown_environment(env)
+        shared_fixture.teardown_environment(env, reset=False)  # mock 环境没有真实编辑器可重置

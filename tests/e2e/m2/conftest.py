@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from e2e.shared_fixture import reset_shared_state, restore_file_state
+from e2e.shared_fixture import is_tracked_project_file, reset_shared_state, restore_file_state
 
 
 def project_snapshot(project: Path) -> str:
@@ -23,13 +23,9 @@ def project_snapshot(project: Path) -> str:
         if not path.is_file():
             continue
         rel = str(path.relative_to(project)).replace("\\", "/")
-        # Skip generated and addon-installed files that change without
-        # being a test artifact; the shared reset hook owns them.
-        if (
-            rel.startswith(".godot/")
-            or rel.startswith("addons/gdapi/")
-            or rel == "project.godot"
-        ):
+        # Skip generated, addon-installed and engine-maintained files that
+        # change without being a test artifact; the shared reset hook owns them.
+        if not is_tracked_project_file(rel):
             continue
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")

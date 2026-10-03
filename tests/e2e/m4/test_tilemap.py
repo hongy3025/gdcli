@@ -55,6 +55,11 @@ def test_tilemap_clear_without_force_succeeds(m4_env):
     cleared = exec_ok(m4_env, "tilemap/layer/clear", {"layer_path": "TileMapLayer"})
     assert cleared["changed"] is True
     assert cleared["undoable"] is True
+    assert exec_ok(m4_env, "tilemap/used_cells", {"layer_path": "TileMapLayer"})["cells"] == []
+    editor_undo(m4_env)
+    assert exec_ok(m4_env, "tilemap/used_cells", {"layer_path": "TileMapLayer"})["cells"] == [
+        {"x": 0, "y": 0}
+    ]
 
 
 def test_tilemap_fill_and_used_cells_are_sorted(m4_env):

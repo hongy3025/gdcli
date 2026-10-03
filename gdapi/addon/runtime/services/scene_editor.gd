@@ -69,7 +69,10 @@ static func describe_tree(node: Node, max_depth: int, depth: int = 0) -> Diction
 
 
 ## 关闭编辑器中当前打开的场景,如果该场景是当前路径则调用 EditorInterface.
-## @param path 可选;非空表示关闭指定路径场景(目前仅支持当前)
+## Godot 4.7 的 EditorInterface 只提供 close_scene()(关闭当前编辑场景),
+## 没有按路径关闭任意已打开场景的 API;因此本方法只支持"当前场景"语义,
+## 传入的 path 必须等于当前编辑场景,否则返回 not_found。
+## @param path 可选;非空表示关闭指定路径场景,必须与当前场景一致
 ## @return {ok,changed,undoable}
 static func close_scene(path: String) -> Dictionary:
 	var current := current_path()
@@ -138,9 +141,15 @@ static func open_scene(path: String) -> Dictionary:
 	}
 
 
-## 返回当前 editor 已打开场景路径数组(目前仅当前场景)
+## 返回当前 editor 已打开的全部场景 res:// 路径数组
+## 读取 EditorInterface.get_open_scenes(),过滤空路径后按字典序稳定排序,
+## 保证同一编辑器状态多次调用返回顺序一致。
 static func list_open_scenes() -> Array:
-	var current := current_path()
-	if current == "":
+	if not Engine.is_editor_hint():
 		return []
-	return [current]
+	var paths: Array = []
+	for path in EditorInterface.get_open_scenes():
+		if path != "":
+			paths.append(path)
+	paths.sort()
+	return paths

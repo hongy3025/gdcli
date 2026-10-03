@@ -37,8 +37,12 @@ static func delete(body: Dictionary) -> Dictionary:
 			)
 			!= OK
 		):
-			_rollback_manifest(manifest)
-			return _error(ErrorCodes.GODOT_ERROR, "batch delete rolled back")
+			var rollback_failures := _rollback_manifest(manifest)
+			return _error_with_details(
+				ErrorCodes.GODOT_ERROR,
+				"batch delete rolled back",
+				{"rollback_failures": rollback_failures}
+			)
 		var uid := source + ".uid"
 		var manifest_entry := {
 			"source": source,
@@ -55,12 +59,16 @@ static func delete(body: Dictionary) -> Dictionary:
 				)
 				!= OK
 			):
-				_rollback_manifest(manifest)
+				var uid_failures := _rollback_manifest(manifest)
 				DirAccess.rename_absolute(
 					ProjectSettings.globalize_path(destination),
 					ProjectSettings.globalize_path(source)
 				)
-				return _error(ErrorCodes.GODOT_ERROR, "batch delete rolled back")
+				return _error_with_details(
+					ErrorCodes.GODOT_ERROR,
+					"batch delete rolled back",
+					{"rollback_failures": uid_failures}
+				)
 		manifest.append(manifest_entry)
 	var mf := FileAccess.open(
 		ProjectSettings.globalize_path(trash + "/manifest.json"), FileAccess.WRITE
@@ -94,7 +102,21 @@ static func replace(body: Dictionary) -> Dictionary:
 	var scan := _scan_files(checked.path, find_text, replacement, matches)
 	if not scan.ok:
 		return scan
-	var plan := {"ok": true, "operations": matches, "plan_hash": _hash_plan(matches)}
+	var plan := {
+		"ok": true,
+		"operations": matches,
+		# plan_hash 必须绑定全部操作参数：只绑 path/sha256/replacements 的话，
+		# 同一批文件上的不同 find/replace 会得到同一个 hash。
+		"plan_hash":
+		_hash_plan(
+			{
+				"root": checked.path,
+				"find": find_text,
+				"replace": replacement,
+				"operations": matches,
+			}
+		)
+	}
 	if bool(body.get("dry_run", false)):
 		return plan
 	if String(body.get("plan_hash", "")) != plan.plan_hash:
@@ -135,9 +157,13 @@ static func replace(body: Dictionary) -> Dictionary:
 	var applied: Array = []
 	for index in range(matches.size()):
 		if debug_fail_after >= 0 and index >= debug_fail_after:
-			_rollback_replace(matches, applied)
+			var injected_failures := _rollback_replace(matches, applied)
 			_cleanup_replace_stage(stage_root)
-			return _error(ErrorCodes.GODOT_ERROR, "injected failure for testing")
+			return _error_with_details(
+				ErrorCodes.GODOT_ERROR,
+				"injected failure for testing",
+				{"rollback_failures": injected_failures}
+			)
 		var operation: Dictionary = matches[index]
 		if (
 			DirAccess.rename_absolute(
@@ -146,9 +172,13 @@ static func replace(body: Dictionary) -> Dictionary:
 			)
 			!= OK
 		):
-			_rollback_replace(matches, applied)
+			var backup_failures := _rollback_replace(matches, applied)
 			_cleanup_replace_stage(stage_root)
-			return _error(ErrorCodes.GODOT_ERROR, "batch replace rolled back")
+			return _error_with_details(
+				ErrorCodes.GODOT_ERROR,
+				"batch replace rolled back",
+				{"rollback_failures": backup_failures}
+			)
 		if (
 			DirAccess.rename_absolute(
 				ProjectSettings.globalize_path(operation.staged),
@@ -156,9 +186,13 @@ static func replace(body: Dictionary) -> Dictionary:
 			)
 			!= OK
 		):
-			_rollback_replace(matches, applied + [index])
+			var staged_failures := _rollback_replace(matches, applied + [index])
 			_cleanup_replace_stage(stage_root)
-			return _error(ErrorCodes.GODOT_ERROR, "batch replace rolled back")
+			return _error_with_details(
+				ErrorCodes.GODOT_ERROR,
+				"batch replace rolled back",
+				{"rollback_failures": staged_failures}
+			)
 		applied.append(index)
 	_cleanup_replace_stage(stage_root)
 	return {
@@ -171,16 +205,46 @@ static func replace(body: Dictionary) -> Dictionary:
 	}
 
 
-static func _rollback_replace(matches: Array, applied: Array) -> void:
+static func _rollback_replace(matches: Array, applied: Array) -> Array:
+	var failures: Array = []
 	for raw_index in range(applied.size() - 1, -1, -1):
 		var index := int(applied[raw_index])
 		var operation: Dictionary = matches[index]
 		var target := ProjectSettings.globalize_path(operation.path)
 		var backup := ProjectSettings.globalize_path(operation.backup)
 		if FileAccess.file_exists(target):
-			DirAccess.remove_absolute(target)
+			if DirAccess.remove_absolute(target) != OK:
+				failures.append(operation.path)
 		if FileAccess.file_exists(backup):
-			DirAccess.rename_absolute(backup, target)
+			if DirAccess.rename_absolute(backup, target) != OK:
+				failures.append(operation.path)
+	return failures
+
+
+## 恢复中途失败时把已恢复项放回 trash，避免留下"恢复了一半"的项目状态。
+static func _rollback_recover(restored: Array) -> Array:
+	var failures: Array = []
+	for raw_index in range(restored.size() - 1, -1, -1):
+		var entry: Dictionary = restored[raw_index]
+		if FileAccess.file_exists(ProjectSettings.globalize_path(entry.uid_source)):
+			if (
+				DirAccess.rename_absolute(
+					ProjectSettings.globalize_path(entry.uid_source),
+					ProjectSettings.globalize_path(entry.uid_trash)
+				)
+				!= OK
+			):
+				failures.append(entry.uid_source)
+		if FileAccess.file_exists(ProjectSettings.globalize_path(entry.source)):
+			if (
+				DirAccess.rename_absolute(
+					ProjectSettings.globalize_path(entry.source),
+					ProjectSettings.globalize_path(entry.trash)
+				)
+				!= OK
+			):
+				failures.append(entry.source)
+	return failures
 
 
 static func _cleanup_replace_stage(stage_root: String) -> void:
@@ -225,7 +289,16 @@ static func recover(operation_id: String) -> Dictionary:
 			and FileAccess.file_exists(ProjectSettings.globalize_path(entry.uid_source))
 		):
 			return _error(ErrorCodes.CONFLICT, "recovery destination already exists")
+	var debug_fail_after := _debug_recover_fail_after()
+	var restored_entries: Array = []
 	for entry in entries:
+		if debug_fail_after >= 0 and restored_entries.size() >= debug_fail_after:
+			var injected_failures := _rollback_recover(restored_entries)
+			return _error_with_details(
+				ErrorCodes.GODOT_ERROR,
+				"injected recovery failure for testing",
+				{"restored": restored_entries.size(), "rollback_failures": injected_failures}
+			)
 		DirAccess.make_dir_recursive_absolute(
 			ProjectSettings.globalize_path(entry.source.get_base_dir())
 		)
@@ -236,7 +309,12 @@ static func recover(operation_id: String) -> Dictionary:
 			)
 			!= OK
 		):
-			return _error(ErrorCodes.GODOT_ERROR, "recovery failed")
+			var move_failures := _rollback_recover(restored_entries)
+			return _error_with_details(
+				ErrorCodes.GODOT_ERROR,
+				"recovery failed",
+				{"restored": restored_entries.size(), "rollback_failures": move_failures}
+			)
 		if (
 			entry.has("uid_trash")
 			and FileAccess.file_exists(ProjectSettings.globalize_path(entry.uid_trash))
@@ -248,7 +326,13 @@ static func recover(operation_id: String) -> Dictionary:
 				)
 				!= OK
 			):
-				return _error(ErrorCodes.GODOT_ERROR, "UID recovery failed")
+				var uid_failures := _rollback_recover(restored_entries)
+				return _error_with_details(
+					ErrorCodes.GODOT_ERROR,
+					"UID recovery failed",
+					{"restored": restored_entries.size(), "rollback_failures": uid_failures}
+				)
+		restored_entries.append(entry)
 		restored += 1
 	parsed["recovered"] = true
 	parsed["recovered_at"] = Time.get_unix_time_from_system()
@@ -299,6 +383,9 @@ static func _scan_files(
 					file.close()
 					var count := text.count(find_text)
 					if count > 0:
+						var writable := PathGuard.validate(path, "write")
+						if not writable.ok:
+							return writable
 						matches.append(
 							{
 								"path": path,
@@ -331,22 +418,32 @@ static func _hash_plan(value: Variant) -> String:
 	return context.finish().hex_encode()
 
 
-static func _rollback_manifest(manifest: Array) -> void:
+static func _rollback_manifest(manifest: Array) -> Array:
+	var failures: Array = []
 	for index in range(manifest.size() - 1, -1, -1):
 		var entry: Dictionary = manifest[index]
 		if FileAccess.file_exists(ProjectSettings.globalize_path(entry.trash)):
-			DirAccess.rename_absolute(
-				ProjectSettings.globalize_path(entry.trash),
-				ProjectSettings.globalize_path(entry.source)
-			)
+			if (
+				DirAccess.rename_absolute(
+					ProjectSettings.globalize_path(entry.trash),
+					ProjectSettings.globalize_path(entry.source)
+				)
+				!= OK
+			):
+				failures.append(entry.source)
 		if (
 			entry.has("uid_trash")
 			and FileAccess.file_exists(ProjectSettings.globalize_path(entry.uid_trash))
 		):
-			DirAccess.rename_absolute(
-				ProjectSettings.globalize_path(entry.uid_trash),
-				ProjectSettings.globalize_path(entry.uid_source)
-			)
+			if (
+				DirAccess.rename_absolute(
+					ProjectSettings.globalize_path(entry.uid_trash),
+					ProjectSettings.globalize_path(entry.uid_source)
+				)
+				!= OK
+			):
+				failures.append(entry.uid_source)
+	return failures
 
 
 static func _debug_fail_after() -> int:
@@ -363,5 +460,23 @@ static func _debug_fail_after() -> int:
 	return int(text)
 
 
+static func _debug_recover_fail_after() -> int:
+	var path := ProjectSettings.globalize_path("res://.gdapi-debug-recover-fail")
+	if not FileAccess.file_exists(path):
+		return -1
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return -1
+	var text := f.get_as_text().strip_edges()
+	f.close()
+	if text.is_empty() or not text.is_valid_int():
+		return -1
+	return int(text)
+
+
 static func _error(code: String, message: String) -> Dictionary:
 	return {"ok": false, "code": code, "error": message}
+
+
+static func _error_with_details(code: String, message: String, details: Dictionary) -> Dictionary:
+	return {"ok": false, "code": code, "error": message, "details": details}

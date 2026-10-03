@@ -2,9 +2,109 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from .helpers import exec_error, exec_ok, tree_digest
+
+MAIN_SCENE = "res://scenes/main.tscn"
+PLAYER = "/root/Main/Player"
+PLAYER_SCRIPT = "res://scripts/player.gd"
+# `Child` is parented to `Player` in scenes/main.tscn.
+CHILD = "/root/Main/Player/Child"
+
+
+def _reopen_main_scene(editor) -> None:
+    """Save-independent reload: close the edited scene and open it again from disk."""
+    exec_ok(editor, "scene/close")
+    exec_ok(editor, "scene/open", {"path": MAIN_SCENE})
+
+
+def _scene_text(editor) -> str:
+    return exec_ok(editor, "filesystem/read", {"path": MAIN_SCENE})["content"]
+
+
+def _script_ext_resources(scene_text: str) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for line in scene_text.splitlines():
+        if line.startswith("[ext_resource") and 'type="Script"' in line:
+            resource_id = re.search(r'\bid="([^"]+)"', line)
+            path = re.search(r'\bpath="([^"]+)"', line)
+            if resource_id and path:
+                mapping[resource_id.group(1)] = path.group(1)
+    return mapping
+
+
+def _node_stanza(scene_text: str, node_name: str) -> str:
+    """Return the `[node ...]` stanza for `node_name` plus its property lines."""
+    lines = scene_text.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines)
+         if line.startswith("[node ") and f'[node name="{node_name}"' in line),
+        None,
+    )
+    if start is None:
+        return ""
+    end = start + 1
+    while end < len(lines) and not lines[end].startswith("[node "):
+        end += 1
+    return "\n".join(lines[start:end])
+
+
+def _node_script_path(scene_text: str, node_name: str) -> str | None:
+    """Resolve the `script` property persisted for a node stanza in the scene file."""
+    match = re.search(r'script = ExtResource\("([^"]+)"\)', _node_stanza(scene_text, node_name))
+    if not match:
+        return None
+    return _script_ext_resources(scene_text).get(match.group(1))
+
+
+def _node_signals(editor) -> list[str]:
+    return exec_ok(editor, "node/signal/list", {"node_path": CHILD})["signals"]
+
+
+def test_script_attach_survives_reopen(m2_editor):
+    """Attaching a script must be observable on the node and persist to the scene file."""
+    assert "health_changed" not in _node_signals(m2_editor)
+    assert _node_script_path(_scene_text(m2_editor), "Child") is None
+
+    attached = exec_ok(m2_editor, "script/attach", {
+        "node_path": CHILD, "path": PLAYER_SCRIPT,
+    })
+    assert attached["undoable"] is True
+    assert attached["script_path"] == PLAYER_SCRIPT
+    # `health_changed` is declared by player.gd, so it proves the script is mounted.
+    assert "health_changed" in _node_signals(m2_editor)
+
+    exec_ok(m2_editor, "scene/current/save")
+    assert _node_script_path(_scene_text(m2_editor), "Child") == PLAYER_SCRIPT
+
+    _reopen_main_scene(m2_editor)
+    assert "health_changed" in _node_signals(m2_editor)
+    assert _node_script_path(_scene_text(m2_editor), "Child") == PLAYER_SCRIPT
+
+
+def test_script_detach_survives_reopen(m2_editor):
+    exec_ok(m2_editor, "script/attach", {"node_path": CHILD, "path": PLAYER_SCRIPT})
+    exec_ok(m2_editor, "scene/current/save")
+
+    _reopen_main_scene(m2_editor)
+    assert "health_changed" in _node_signals(m2_editor)
+    assert _node_script_path(_scene_text(m2_editor), "Child") == PLAYER_SCRIPT
+
+    detached = exec_ok(m2_editor, "script/detach", {"node_path": CHILD})
+    assert detached["undoable"] is True
+    assert "health_changed" not in _node_signals(m2_editor)
+
+    exec_ok(m2_editor, "scene/current/save")
+    assert _node_script_path(_scene_text(m2_editor), "Child") is None
+
+    _reopen_main_scene(m2_editor)
+    assert "health_changed" not in _node_signals(m2_editor)
+    assert _node_script_path(_scene_text(m2_editor), "Child") is None
+    error = exec_error(m2_editor, "script/detach", {"node_path": CHILD})
+    assert error["code"] == "not_found"
 
 
 def test_script_create_patch_validate_attach(m2_editor):
@@ -25,7 +125,7 @@ def test_script_create_patch_validate_attach(m2_editor):
     assert valid["valid"] is True
 
     attached = exec_ok(m2_editor, "script/attach", {
-        "node_path": "/root/Main/Player", "path": path
+        "node_path": PLAYER, "path": path
     })
     assert attached["undoable"] is True
 

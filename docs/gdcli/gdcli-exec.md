@@ -13,7 +13,7 @@ gdcli exec <command> [--data <json>] [--timeout <secs>] [--project <path>]
 
 ## 特殊命令
 
-`command/list` 和 `command/doc` 使用位置参数，不接受 `--data`：
+`command/doc` 需要位置参数（路由名），两者都不接受 `--data`；`command/list` 不接受位置参数：
 
 ```bash
 gdcli exec command/list              # 列出所有可用路由
@@ -227,9 +227,6 @@ gdcli exec command/doc runtime/input/key --project .
 |------|------|
 | export/run | 执行受控项目导出 |
 | export/presets | 发现导出预设 |
-| export/android/devices | 列出 Android 设备 |
-| export/android/deploy | 部署并启动单个 Android 设备 |
-| export/android/deploy_many | 确认后的多设备 Android 部署 |
 
 ### filesystem（文件系统）
 

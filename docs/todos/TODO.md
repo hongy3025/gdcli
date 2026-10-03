@@ -1,54 +1,21 @@
-# TODO: Single-editor E2E migration
+# TODO: 目标收口（Android 除外）
 
-## Export/run handler timeout (M5)
+**当前 backlog 已由 [目标收口计划](../superpowers/plans/2026-10-03-gdcli-goal-closure.md) 接管；执行结果见 [收口报告](../reports/2026-10-03-gdcli-goal-closure.md)。**
 
-**Problem:** `test_export_android.py::test_export_run_returns_matching_artifact_digest` fails with 504 Gateway Timeout.
+本文件只保留指向与范围说明，不再单独维护任务清单，避免与计划、closure 报告出现互相矛盾的状态。
 
-**Root cause:** The Rust GdApiServer (`gdapi/rust/src/server.rs`) has a default handler timeout of 5 seconds (`DEFAULT_TIMEOUT_MS = 5_000`). The `export/run` route handler spawns a child Godot process that takes >5 seconds to complete (exporting a PCK). The HTTP server returns 504 before the handler finishes.
+## 适用范围
 
-**Attempted fix:** Set `GDAPI_HANDLER_TIMEOUT_MS=180000` in the Godot process environment via `shared_fixture.py:_start_editor`. This was applied but the test was not re-verified after the fix.
+- 分支范围以 [分支总目标与范围（Android 除外）](../superpowers/specs/2026-10-03-gdcli-branch-goal-and-scope.md) 为准。
+- **Android 平台能力已移出目标**：设备查询、打包、部署、ADB 集成不要求、不验收；以 Android 环境为由的 `pytest.mark.skip` 必须在收口计划 Task 1–2 中移除。
+- `capability_policy` / `force:true` 门禁已于 2026-08-01 取消，不再恢复；相关历史条目（policy 恢复测试、overlay fixture）已作废。
 
-**Verification needed:** 
-1. Kill any existing Godot editor process
-2. Run `GODOT_BIN=D:/app/devel/Godot/v4.7.1/godot_console.exe python -m pytest tests/e2e/m5/test_export_android.py -x -q --durations=10`
-3. If the fix works, remove the `pytestmark = pytest.mark.skip(...)` from `test_export_android.py`
+## 已作废的历史条目
 
-**Additional issue:** `test_android_routes_are_deterministic_without_real_device` calls `exec_error` with `extra_args=["--timeout", "60"]`, but the `exec_error` function in `m3/conftest.py` does not accept `extra_args`. The test is also broken regardless of the timeout issue. Fix: either update `exec_error` to accept `extra_args`, or pass the timeout through the data dict.
-
-## M6 policy overlay fixtures
-
-**Status:** Implemented. Module-scoped fixtures in `m6/conftest.py` wrap session-scoped aliases with `temporary_policy`. Verification needed by running M6 tests.
-
-## Policy restoration tests (Plan Task 4)
-
-**Not yet created.** `tests/e2e/test_policy_restore.py` should cover:
-- Overlay/restore via `temporary_policy`
-- Exception-path restoration
-- Restoration failure diagnostics
-- Zero subprocess/editor starts during policy switching
-- Real capability denial/restoration assertion
-
-## `test_edit_action.py` migration (Plan acceptance)
-
-**Not yet started.** `tests/e2e/test_edit_action.py::test_real_editor_undo_redo` independently executes Godot with `--editor`. Must be migrated to the shared editor or replaced by equivalent shared-editor behavior.
-
-## Acceptance tests (Plan Task 5)
-
-**Not yet created:**
-- `EDITOR_START_COUNTER["starts"] == 1` assertion
-- Machine-checkable `GODOT_EDITOR_STARTS=1` line for full-suite budget test
-- Deterministic shared-state/isolation assertions
-
-## GDScript format/lint gate
-
-**Not yet run.** Must run before final commit:
-- `python scripts/format-gd.py`
-- `python scripts/format-gd.py --check`
-- `gdlint` on all modified `.gd` files
-
-## Full E2E suite
-
-**Not yet run.** Must verify:
-- Exactly one editor PID
-- Total duration <= 360 seconds
-- `cargo test --workspace`, `cargo fmt --check`, `cargo clippy --workspace`
+| 旧条目 | 结论 |
+|---|---|
+| Export/run handler timeout 需要验证并解 skip | 已由收口计划 Task 2 接管；根因已定位：fixture 预设平台名非法（`Windows`），且旧模块整体 skip 掩盖了桌面导出用例 |
+| `exec_error` 不支持 `extra_args` | 已修复，条目作废 |
+| `test_edit_action.py` 仍需迁移到共享 editor | 已迁移，条目作废 |
+| Policy restoration tests / M6 policy overlay fixtures | 需求已取消，条目作废 |
+| GDScript format/lint 与全量 E2E「尚未执行」 | 属历史状态；后续验证要求见收口计划 Task 14 |

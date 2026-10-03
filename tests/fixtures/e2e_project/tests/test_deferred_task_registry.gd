@@ -12,6 +12,8 @@ func _init() -> void:
 	test_timeout_cancels_and_sends_one_terminal_error()
 	test_cancel_all_cleans_up_every_pending_task_once()
 	test_terminal_callback_is_exactly_once()
+	test_completed_task_without_outcome_is_reported_as_failure()
+	test_state_outcome_is_forwarded_to_terminal_callback()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -62,6 +64,29 @@ func test_terminal_callback_is_exactly_once() -> void:
 	assert_eq(task.terminal_count, 1, "timeout emits one terminal callback")
 
 
+func test_completed_task_without_outcome_is_reported_as_failure() -> void:
+	var registry := DeferredTaskRegistry.new()
+	var task := FakeTask.new(200, true)
+	registry.register(task.as_registration())
+	registry.tick(100)
+	assert_eq(task.terminal_count, 1, "completion emits one terminal callback")
+	assert_eq(task.outcomes.size(), 1, "completion records one outcome")
+	var outcome: Dictionary = task.outcomes[0]
+	assert_eq(outcome.get("ok"), false, "missing outcome must not be reported as success")
+	assert_eq(outcome.get("code"), "conflict", "missing outcome uses a stable failure code")
+
+
+func test_state_outcome_is_forwarded_to_terminal_callback() -> void:
+	var registry := DeferredTaskRegistry.new()
+	var task := FakeTask.new(200, true)
+	var registration := task.as_registration()
+	registration["state"] = {"outcome": {"ok": false, "code": "timeout", "summary": "late"}}
+	registry.register(registration)
+	registry.tick(100)
+	assert_eq(task.outcomes.size(), 1, "completion records one outcome")
+	assert_eq(task.outcomes[0].get("code"), "timeout", "state outcome wins over the fallback")
+
+
 class FakeResponse:
 	extends RefCounted
 	var sent_count := 0
@@ -87,6 +112,7 @@ class FakeTask:
 	var completes_on_tick: bool
 	var cancel_reasons: Array = []
 	var terminal_count := 0
+	var outcomes: Array = []
 
 	func _init(deadline: int, should_complete: bool) -> void:
 		deadline_ms = deadline
@@ -112,6 +138,7 @@ class FakeTask:
 
 	func terminal(_outcome: Dictionary) -> void:
 		terminal_count += 1
+		outcomes.append(_outcome)
 
 
 func assert_true(value: bool, context: String) -> void:

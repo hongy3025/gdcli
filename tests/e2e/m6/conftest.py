@@ -9,6 +9,7 @@ longer overlay a capability policy; they return the shared session env as-is.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import shutil
 import subprocess
@@ -34,16 +35,51 @@ from e2e.m3.conftest import (  # noqa: E402
     project_stop,
 )
 from e2e.shared_fixture import (  # noqa: E402,F401
+    is_tracked_project_file,
     m6_editor as session_m6_editor,
     m6_editor_bulk as session_m6_editor_bulk,
     m6_editor_eval as session_m6_editor_eval,
     m6_editor_network as session_m6_editor_network,
     m6_editor_process as session_m6_editor_process,
+    restore_file_state,
 )
 
 M6_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m6_project"
 
 M6_HTTP_PORT: int = 18923
+
+
+def _m6_project_digests(project: Path) -> dict[str, str]:
+    digests: dict[str, str] = {}
+    for path in sorted(project.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(project)).replace("\\", "/")
+        if not is_tracked_project_file(rel):
+            continue
+        digests[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return digests
+
+
+@pytest.fixture(autouse=True)
+def isolated_m6_files(m6_editor: dict[str, Any]):
+    """M6 用例会批量删除/替换项目文件，每个用例结束必须恢复文件基线。
+
+    只恢复文件、不停止运行中的游戏，避免破坏模块级 running-game fixture。
+    """
+    project = Path(m6_editor["project"])
+    before = _m6_project_digests(project)
+    yield
+    baseline = m6_editor.get("file_baseline")
+    if baseline is not None:
+        restore_file_state(m6_editor, baseline)
+    after = _m6_project_digests(project)
+    assert after == before, (
+        "M6 project files changed after test: "
+        f"added={sorted(set(after) - set(before))} "
+        f"removed={sorted(set(before) - set(after))} "
+        f"changed={sorted(k for k in set(before) & set(after) if before[k] != after[k])}"
+    )
 
 
 # ── module-scoped policy overlay fixtures ───────────────────────────────
@@ -271,6 +307,17 @@ def inject_apply_failure(env: dict[str, Any], fail_after: int) -> None:
     })
 
 
+def inject_recover_failure(env: dict[str, Any], fail_after: int) -> None:
+    exec_ok(env, "filesystem/write", {
+        "path": "res://.gdapi-debug-recover-fail",
+        "content": str(fail_after),
+    })
+
+
+def clear_recover_failure(env: dict[str, Any]) -> None:
+    project_file(env, ".gdapi-debug-recover-fail").unlink(missing_ok=True)
+
+
 def bulk_digest(env: dict[str, Any]) -> str:
     import hashlib
     bulk_dir = project_file(env, "bulk")
@@ -306,11 +353,13 @@ __all__ = [
     "apply_replace",
     "audit_for_route",
     "bulk_digest",
+    "clear_recover_failure",
     "command_doc",
     "delete_plan",
     "exec_error",
     "exec_ok",
     "inject_apply_failure",
+    "inject_recover_failure",
     "latest_audit",
     "local_http_server",
     "m6_editor",

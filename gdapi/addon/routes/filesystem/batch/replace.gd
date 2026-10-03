@@ -18,7 +18,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if out.ok:
 		res.json(out)
 	else:
-		res.error(out.error, out.code, ErrorCodes.http_status(out.code))
+		res.error(out.error, out.code, ErrorCodes.http_status(out.code), out.get("details", {}))
 
 
 func doc() -> GdApiRouteDoc:

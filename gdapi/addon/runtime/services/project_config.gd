@@ -46,6 +46,9 @@ static func set_setting(name: String, value: Variant) -> Dictionary:
 			ProjectSettings.clear(name)
 		else:
 			ProjectSettings.set_setting(name, previous)
+		AuditLog.record(
+			"project/settings/set", "dangerous", {"name": name}, false, ErrorCodes.GODOT_ERROR
+		)
 		return {
 			"ok": false,
 			"code": ErrorCodes.GODOT_ERROR,
@@ -65,6 +68,9 @@ static func reset(name: String) -> Dictionary:
 	var error := ProjectSettings.save()
 	if error != OK:
 		ProjectSettings.set_setting(name, previous)
+		AuditLog.record(
+			"project/settings/reset", "dangerous", {"name": name}, false, ErrorCodes.GODOT_ERROR
+		)
 		return {
 			"ok": false,
 			"code": ErrorCodes.GODOT_ERROR,
@@ -99,14 +105,32 @@ static func add_action(name: String, deadzone: float) -> Dictionary:
 	if InputMap.has_action(name):
 		return _err(ErrorCodes.CONFLICT, "action already exists")
 	InputMap.add_action(name, deadzone)
-	return _save_input(name, true)
+	_persist_action(name)
+	return _save_input(
+		name,
+		true,
+		func():
+			InputMap.erase_action(name)
+			ProjectSettings.clear("input/" + name)
+	)
 
 
 static func remove_action(name: String) -> Dictionary:
 	if not InputMap.has_action(name):
 		return _err(ErrorCodes.NOT_FOUND, "action not found")
+	var deadzone := InputMap.action_get_deadzone(name)
+	var events := InputMap.action_get_events(name)
 	InputMap.erase_action(name)
-	return _save_input(name, true)
+	ProjectSettings.clear("input/" + name)
+	return _save_input(
+		name,
+		true,
+		func():
+			ProjectSettings.set_setting("input/" + name, {"deadzone": deadzone, "events": events})
+			InputMap.add_action(name, deadzone)
+			for event in events:
+				InputMap.action_add_event(name, event)
+	)
 
 
 static func bind(name: String, event: Dictionary) -> Dictionary:
@@ -116,7 +140,14 @@ static func bind(name: String, event: Dictionary) -> Dictionary:
 	if parsed == null:
 		return _err(ErrorCodes.INVALID_PARAM, "unsupported input event")
 	InputMap.action_add_event(name, parsed)
-	return _save_input(name, true)
+	_persist_action(name)
+	return _save_input(
+		name,
+		true,
+		func():
+			InputMap.action_erase_event(name, parsed)
+			_persist_action(name)
+	)
 
 
 static func unbind(name: String, event: Dictionary) -> Dictionary:
@@ -126,7 +157,14 @@ static func unbind(name: String, event: Dictionary) -> Dictionary:
 	if parsed == null:
 		return _err(ErrorCodes.INVALID_PARAM, "unsupported input event")
 	InputMap.action_erase_event(name, parsed)
-	return _save_input(name, true)
+	_persist_action(name)
+	return _save_input(
+		name,
+		true,
+		func():
+			InputMap.action_add_event(name, parsed)
+			_persist_action(name)
+	)
 
 
 static func autoloads() -> Array:
@@ -164,28 +202,53 @@ static func add_autoload(name: String, path: String, singleton: bool) -> Diction
 	if ProjectSettings.has_setting(key):
 		return _err(ErrorCodes.CONFLICT, "autoload already exists")
 	ProjectSettings.set_setting(key, ("*" if singleton else "") + checked.path)
-	return _save_project(key)
+	return _save_project(key, func(): ProjectSettings.clear(key))
 
 
 static func remove_autoload(name: String) -> Dictionary:
 	var key := "autoload/" + name
 	if not ProjectSettings.has_setting(key):
 		return _err(ErrorCodes.NOT_FOUND, "autoload not found")
+	var previous = ProjectSettings.get_setting(key)
 	ProjectSettings.clear(key)
-	return _save_project(key)
+	return _save_project(key, func(): ProjectSettings.set_setting(key, previous))
 
 
-static func _save_input(name: String, changed: bool) -> Dictionary:
+## 把 InputMap 的当前状态写回项目设置：只改 InputMap 不会随项目重载保留。
+static func _persist_action(name: String) -> void:
+	(
+		ProjectSettings
+		. set_setting(
+			"input/" + name,
+			{
+				"deadzone": InputMap.action_get_deadzone(name),
+				"events": InputMap.action_get_events(name),
+			}
+		)
+	)
+
+
+static func _save_input(name: String, changed: bool, restore: Callable = Callable()) -> Dictionary:
 	var error := ProjectSettings.save()
 	if error != OK:
+		if restore.is_valid():
+			restore.call()
+		AuditLog.record(
+			"project/input_map", "dangerous", {"action": name}, false, ErrorCodes.GODOT_ERROR
+		)
 		return _err(ErrorCodes.GODOT_ERROR, "project settings could not be saved")
 	AuditLog.record("project/input_map", "dangerous", {"action": name}, true)
 	return {"ok": true, "action": name, "changed": changed, "undoable": false}
 
 
-static func _save_project(name: String) -> Dictionary:
+static func _save_project(name: String, restore: Callable = Callable()) -> Dictionary:
 	var error := ProjectSettings.save()
 	if error != OK:
+		if restore.is_valid():
+			restore.call()
+		AuditLog.record(
+			"project/autoload", "dangerous", {"name": name}, false, ErrorCodes.GODOT_ERROR
+		)
 		return _err(ErrorCodes.GODOT_ERROR, "project settings could not be saved")
 	AuditLog.record("project/autoload", "dangerous", {"name": name}, true)
 	return {"ok": true, "name": name.trim_prefix("autoload/"), "changed": true, "undoable": false}

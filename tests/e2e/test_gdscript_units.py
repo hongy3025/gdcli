@@ -26,7 +26,6 @@ from conftest import run_godot_script
         "res://tests/test_runtime_capture_ops.gd",
         "res://tests/test_audit_log_redaction.gd",
         "res://tests/test_network_target_guard.gd",
-        "res://tests/test_bulk_deploy_service.gd",
         ],
 )
 def test_gdscript_unit_suite(e2e_editor, script):

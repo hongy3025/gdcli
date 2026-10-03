@@ -57,7 +57,6 @@ REQUIRED_PATHS: tuple[str, ...] = (
     "fixtures/cycle_a.tres",
     "fixtures/cycle_b.tres",
     "fixtures/unused.tres",
-    "tests/test_android_bridge.gd",
     "export_presets.cfg",
     # M6 — bulk, network, process, runtime eval
     "bulk/a.txt",

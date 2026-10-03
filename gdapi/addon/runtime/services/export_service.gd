@@ -5,6 +5,10 @@ extends RefCounted
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
+const MAX_OUTPUT_BYTES := 262144
+const DRAIN_CHUNK_BYTES := 8192
+const ANSI_ESCAPE_PATTERN := "\\x1b\\[[0-9;]*[A-Za-z]"
+const CONTROL_CHARACTER_PATTERN := "[\\x00-\\x08\\x0b-\\x1f\\x7f]"
 
 
 static func presets() -> Dictionary:
@@ -16,14 +20,16 @@ static func presets() -> Dictionary:
 	for section in config.get_sections():
 		if not String(section).begins_with("preset.") or String(section).contains(".options"):
 			continue
-		result.append(
-			{
-				"name": config.get_value(section, "name", ""),
-				"platform": config.get_value(section, "platform", ""),
-				"runnable": bool(config.get_value(section, "runnable", false)),
-				"export_path": String(config.get_value(section, "export_path", "")),
-				"templates": _template_available(String(config.get_value(section, "platform", "")))
-			}
+		(
+			result
+			. append(
+				{
+					"name": config.get_value(section, "name", ""),
+					"platform": config.get_value(section, "platform", ""),
+					"runnable": bool(config.get_value(section, "runnable", false)),
+					"export_path": String(config.get_value(section, "export_path", "")),
+				}
+			)
 		)
 	result.sort_custom(func(a, b): return String(a.name) < String(b.name))
 	return {"ok": true, "presets": result}
@@ -43,9 +49,17 @@ static func run(body: Dictionary) -> Dictionary:
 
 	var parent := output.get_base_dir()
 	DirAccess.make_dir_recursive_absolute(parent)
-	var flag := "--export-pack" if String(found.platform) != "Android" else "--export-debug"
+	# 子进程必须用 --recovery-mode 启动：否则它会再次加载 gdapi 编辑器插件，
+	# 覆盖并删除父编辑器正在使用的 .godot/gdapi.json（实测会导致编辑器失联）。
 	var args := [
-		"--headless", "--path", ProjectSettings.globalize_path("res://"), flag, preset_name, output
+		"--editor",
+		"--headless",
+		"--recovery-mode",
+		"--path",
+		ProjectSettings.globalize_path("res://"),
+		"--export-pack",
+		preset_name,
+		output,
 	]
 	var process := OS.execute_with_pipe(OS.get_executable_path(), args, false)
 	if process.is_empty() or not process.has_all(["stdio", "stderr", "pid"]):
@@ -53,22 +67,40 @@ static func run(body: Dictionary) -> Dictionary:
 	var stdout: FileAccess = process["stdio"]
 	var stderr: FileAccess = process["stderr"]
 	var pid := int(process["pid"])
-	var output_text := ""
+	# 管道缓冲区只有几 KiB：子进程运行期间必须持续排空，否则写出会阻塞直到超时。
+	var captured := PackedByteArray()
 	var deadline := (
 		Time.get_ticks_msec() + clampi(int(body.get("timeout_ms", 120000)), 10000, 600000)
 	)
 	while OS.is_process_running(pid) and Time.get_ticks_msec() < deadline:
+		_drain_pipes(stdout, stderr, captured)
 		OS.delay_msec(10)
-	if OS.is_process_running(pid):
+	var timed_out := OS.is_process_running(pid)
+	if timed_out:
 		OS.kill(pid)
 	while OS.is_process_running(pid):
 		OS.delay_msec(10)
-	output_text = stdout.get_as_text() + stderr.get_as_text()
-	if output_text.length() > 262144:
-		output_text = output_text.substr(0, 262144)
+	_drain_pipes(stdout, stderr, captured)
 	var exit_code := OS.get_process_exit_code(pid)
 	stdout.close()
 	stderr.close()
+	var output_text := _sanitize_output(captured.get_string_from_utf8())
+	if timed_out:
+		if FileAccess.file_exists(output):
+			DirAccess.remove_absolute(output)
+		AuditLog.record(
+			"export/run",
+			"dangerous",
+			{"preset": preset_name, "path": checked.path},
+			false,
+			ErrorCodes.TIMEOUT
+		)
+		return {
+			"ok": false,
+			"code": ErrorCodes.TIMEOUT,
+			"error": "export timed out",
+			"details": {"platform": found.platform, "preset": preset_name},
+		}
 	if exit_code != 0 or not FileAccess.file_exists(output):
 		if FileAccess.file_exists(output):
 			DirAccess.remove_absolute(output)
@@ -114,20 +146,34 @@ static func run(body: Dictionary) -> Dictionary:
 	}
 
 
+## 无阻塞管道在子进程运行期间必须持续排空：写满缓冲区会让子进程阻塞，
+## 表现为导出"一直不结束"直到超时被杀。超出上限的输出被丢弃但仍然读走。
+static func _drain_pipes(stdout: FileAccess, stderr: FileAccess, captured: PackedByteArray) -> void:
+	for stream: FileAccess in [stdout, stderr]:
+		while stream.get_length() > 0:
+			var chunk := stream.get_buffer(DRAIN_CHUNK_BYTES)
+			if chunk.is_empty():
+				break
+			var room := MAX_OUTPUT_BYTES - captured.size()
+			if room > 0:
+				captured.append_array(chunk.slice(0, mini(room, chunk.size())))
+
+
+## Godot 的进度输出带 ANSI 转义与 '\r' 等控制字符；原样放进 JSON 会让响应非法。
+static func _sanitize_output(text: String) -> String:
+	var pattern := RegEx.new()
+	if pattern.compile(ANSI_ESCAPE_PATTERN) == OK:
+		text = pattern.sub(text, "", true)
+	if pattern.compile(CONTROL_CHARACTER_PATTERN) == OK:
+		text = pattern.sub(text, "", true)
+	return text
+
+
 static func _find_preset(name: String) -> Dictionary:
 	for preset in presets().presets:
 		if String(preset.name) == name:
 			return preset
 	return {}
-
-
-static func _template_available(platform: String) -> bool:
-	return (
-		platform != "Android"
-		or FileAccess.file_exists(
-			ProjectSettings.globalize_path("res://.godot/export_template_check")
-		)
-	)
 
 
 static func _err(code: String, message: String) -> Dictionary:

@@ -39,9 +39,11 @@ static func repair(body: Dictionary) -> Dictionary:
 		change["new_uid"] = new_uid
 		planned.append(change)
 	if not dry_run:
+		var applied: Array = []
 		for change in planned:
 			var error := ResourceSaver.set_uid(change.path, int(change.new_uid))
 			if error != OK:
+				var rollback_failures := _rollback_applied(applied)
 				AuditLog.record(
 					"uid/repair", "dangerous", {"path": change.path}, false, ErrorCodes.GODOT_ERROR
 				)
@@ -49,8 +51,15 @@ static func repair(body: Dictionary) -> Dictionary:
 					"ok": false,
 					"code": ErrorCodes.GODOT_ERROR,
 					"error": "failed to set UID",
-					"changes": planned
+					"changes": planned,
+					"details":
+					{
+						"failed_path": change.path,
+						"applied": applied.size(),
+						"rollback_failures": rollback_failures
+					}
 				}
+			applied.append(change)
 	AuditLog.record(
 		"uid/repair",
 		"dangerous",
@@ -66,6 +75,20 @@ static func repair(body: Dictionary) -> Dictionary:
 		"changed": not dry_run and not changes.is_empty(),
 		"undoable": false
 	}
+
+
+## 回滚已写入的 UID。原值为空的条目（此前缺失 UID）无法还原，计入失败列表。
+static func _rollback_applied(applied: Array) -> Array:
+	var failures: Array = []
+	for raw_index in range(applied.size() - 1, -1, -1):
+		var change: Dictionary = applied[raw_index]
+		var previous := String(change.old_uid)
+		if previous.is_empty() or not previous.is_valid_int():
+			failures.append(change.path)
+			continue
+		if ResourceSaver.set_uid(change.path, int(previous)) != OK:
+			failures.append(change.path)
+	return failures
 
 
 static func _collect(path: String, result: Array) -> void:

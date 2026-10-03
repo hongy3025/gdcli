@@ -13,7 +13,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-GODOT_BIN_DEFAULT = "D:/app/devel/Godot/v4.7.1/godot_console.exe"
+GODOT_BIN_DEFAULT = (
+    "D:/app/devel/Godot/v4.7.2/godot_console.exe"
+    if sys.platform == "win32"
+    else "godot"
+)
 
 
 # ── Paths and binaries ─────────────────────────────────────────────────────
@@ -191,7 +195,12 @@ def tree_digest(project: Path) -> str:
 # ── gdapi_test bridge ──────────────────────────────────────────────────────
 
 
-def wait_for_test_result(env: dict, timeout: float = 2.0) -> dict:
+def wait_for_test_result(env: dict, timeout: float = 10.0) -> dict:
+    """等待 fixture 插件写回 undo/redo 结果。
+
+    插件在下一帧处理命令；全量套件高负载时 2s 会偶发超时
+    （观测到 "gdapi_test plugin never produced a result"），因此放宽到 10s。
+    """
     result_path = env["project"] / ".godot" / "gdapi-test-result.json"
     deadline = time.time() + timeout
     while time.time() < deadline:

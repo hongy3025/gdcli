@@ -94,10 +94,17 @@ static func _find(path: String) -> Dictionary:
 	var root := EditorInterface.get_edited_scene_root()
 	if root == null:
 		return _error(ErrorCodes.NOT_FOUND, "no scene is currently open")
-	var node := root if path == String(root.name) else root.get_node_or_null(NodePath(path))
+	# 接受「/root/<场景根>/...」、场景根相对路径与裸节点名，返回统一绝对路径。
+	var absolute := _absolute(path)
+	var prefix := "/root/" + String(root.name)
+	var node: Node = null
+	if absolute == prefix:
+		node = root
+	elif absolute.begins_with(prefix + "/"):
+		node = root.get_node_or_null(NodePath(absolute.trim_prefix(prefix + "/")))
 	if node == null:
 		return _error(ErrorCodes.NOT_FOUND, "node not found")
-	return {"ok": true, "node": node, "path": path}
+	return {"ok": true, "node": node, "path": absolute}
 
 
 static func _absolute(path: Variant) -> String:

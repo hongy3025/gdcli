@@ -10,7 +10,12 @@ func _send(res: GdApiResponse, result: Dictionary) -> void:
 	if result.ok:
 		res.json(result)
 	else:
-		res.error(result.error, result.code, ErrorCodes.http_status(result.code))
+		res.error(
+			result.error,
+			result.code,
+			ErrorCodes.http_status(result.code),
+			result.get("details", {})
+		)
 
 
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:

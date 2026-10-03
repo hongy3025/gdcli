@@ -75,6 +75,9 @@ def m5_editor(shared_m5_editor: dict[str, Any]):
     try:
         yield shared_m5_editor
     finally:
+        # 共享基线也要在收尾恢复：否则本模块最后一个用例的改动会泄漏到其它模块
+        # （uid/repair 会写入 .tres 的 uid，编辑器随后还会异步重写这些文件）。
+        restore_file_state(shared_m5_editor, shared_m5_editor["file_baseline"])
         restore_snapshot(shared_m5_editor)
 
 

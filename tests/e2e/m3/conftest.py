@@ -41,6 +41,7 @@ from e2e.shared_fixture import (  # noqa: E402,F401
     m3_lifecycle,
     m3_running,
     reset_shared_state,
+    wait_for_scene,
 )
 
 M3_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m3_project"
@@ -418,6 +419,17 @@ def exec_ok(env: dict, route: str, data: dict | None = None, extra_args: list[st
         raise _harness_failure(
             env, args, result, f"{route}: expected ok:true payload"
         )
+    if route == "scene/open" and isinstance(data, dict) and data.get("path"):
+        # `scene/open` 由编辑器延迟生效：不等切换完成就继续，后续 mutation 会把
+        # UndoRedo 绑到旧场景的 history（表现为 history.undo() 偶发返回 false）。
+        expected = str(data["path"])
+        if not wait_for_scene(env, expected):
+            raise _harness_failure(
+                env,
+                args,
+                result,
+                f"scene/open: editor never switched to {expected}",
+            )
     return payload
 
 
@@ -546,7 +558,13 @@ def runtime_counter(env: dict, name: str) -> int:
     return int(value) if not isinstance(value, dict) else 0
 
 
-def wait_for(predicate, timeout: float = 5.0, interval: float = 0.05) -> None:
+def wait_for(predicate, timeout: float = 15.0, interval: float = 0.05) -> None:
+    """等待 game 侧可观察状态变化。
+
+    全量套件高负载时，game 处理输入事件并更新计数器可能晚于 5s
+    （观测到 `test_input_sequence_over_five_seconds...` 偶发超时），
+    因此默认放宽到 15s；谓词始终不成立时仍然失败。
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():

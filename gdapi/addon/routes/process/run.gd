@@ -16,6 +16,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		return
 	var started := Service.start(checked, res)
 	if not started.ok:
+		AuditLog.record(ROUTE, "dangerous", {"executable": checked.executable}, false, started.code)
 		res.error(started.error, started.code, ErrorCodes.http_status(started.code))
 		return
 	var terminal := func(outcome):
@@ -37,6 +38,9 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		)
 	):
 		Service.cancel(started.state, "registration failed")
+		AuditLog.record(
+			ROUTE, "dangerous", {"executable": checked.executable}, false, ErrorCodes.GODOT_ERROR
+		)
 		res.error("process task could not be registered", ErrorCodes.GODOT_ERROR, 500)
 		return
 
