@@ -59,14 +59,18 @@ def editor_redo(env: dict[str, Any]) -> None:
 
 
 def _editor_history_action(env: dict[str, Any], action: str) -> None:
-    """Use the private fixture plugin to operate the editor history."""
+    """Use the private fixture plugin to operate the editor history.
+
+    插件在下一帧处理命令；全量套件高负载时 2s 会偶发超时
+    （观测到 "gdapi_test plugin did not complete redo"），因此放宽到 10s。
+    """
     project = Path(env["project"])
     result_path = project / ".godot" / "gdapi-test-result.json"
     result_path.unlink(missing_ok=True)
     (project / ".godot" / "gdapi-test-command.json").write_text(
         json.dumps({"action": action}), encoding="utf-8"
     )
-    deadline = time.monotonic() + 2.0
+    deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         if result_path.exists():
             payload = json.loads(result_path.read_text(encoding="utf-8"))

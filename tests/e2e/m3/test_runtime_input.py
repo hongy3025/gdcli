@@ -69,25 +69,25 @@ def test_input_key_mouse_gamepad_touch_increments_counter(m3_running, counter_na
     }
     route, payload = route_map[counter_name]
     exec_ok(m3_running, route, payload)
-    wait_for(lambda: get_counter(m3_running, counter_name) == before + 1, timeout=2.0)
+    wait_for(lambda: get_counter(m3_running, counter_name) == before + 1, timeout=10.0)
 
 
 def test_input_action_counts_false_to_true_edges_once(m3_running):
     before = get_counter(m3_running, "input_actions")
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": True})
-    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 1, timeout=2.0)
+    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 1, timeout=10.0)
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": True})
     time.sleep(0.2)
     assert get_counter(m3_running, "input_actions") == before + 1
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": False})
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": True})
-    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 2, timeout=2.0)
+    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 2, timeout=10.0)
 
 
 def test_zero_delay_action_sequence_observes_release_press_edge(m3_running):
     before = get_counter(m3_running, "input_actions")
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": True})
-    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 1, timeout=2.0)
+    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 1, timeout=10.0)
     result = exec_ok(m3_running, "runtime/input/sequence", {
         "events": [
             {
@@ -108,7 +108,7 @@ def test_zero_delay_action_sequence_observes_release_press_edge(m3_running):
         ],
     })
     assert result["events"] == 3
-    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 2, timeout=2.0)
+    wait_for(lambda: get_counter(m3_running, "input_actions") == before + 2, timeout=10.0)
 
 
 @pytest.mark.parametrize("route,payload", [
@@ -305,7 +305,7 @@ def test_stale_generation_file_request_is_removed_without_dispatch(m3_running):
         "payload": {"keycode": 32, "pressed": True},
         "generation": f"{current_generation}-stale",
     }), encoding="utf-8")
-    wait_for(lambda: not inbox.exists(), timeout=2.0, interval=0.02)
+    wait_for(lambda: not inbox.exists(), timeout=10.0, interval=0.02)
     time.sleep(0.1)
     assert get_counter(m3_running, "input_keys") == before
     assert not (probe_root / "outbox" / f"{request_id}.json").exists()
