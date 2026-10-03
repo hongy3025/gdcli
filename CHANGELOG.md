@@ -20,7 +20,8 @@
 - 批量文件操作失败时给出 `details.rollback_failures`：replace/delete 的回滚与 recover 的中途失败都会检查每一步结果，并回滚已应用/已恢复项；`plan_hash` 现在绑定 `root`/`find`/`replace`（此前只绑定文件哈希与替换计数）。
 - `network/http_request` 与 `process/run` 的失败/超时按真实终态写入审计（deferred registry 不再以「响应已发送」推断成功）；进程 spawn 失败与任务注册失败也会入审计。
 - `audio/player/create` 返回 `/root/<场景根>/...`（此前返回编辑器内部路径，无法再被其它路由使用）；`physics/*` 的 `node_path` 同时接受绝对路径、场景根相对路径与裸节点名，并回传规范化绝对路径。
-- `uid/repair` 在部分写入失败时回滚已改 UID，并在 `details` 中给出失败路径与无法还原项。
+- 修复 `uid/repair` 失败响应的类型错误：此前把 `changes`(Array) 当作 `res.error()` 的第 4 个参数（要求 Dictionary），失败路径会在 GDScript 抛类型错误、响应永远发不出去（CLI 只能等到超时）；现在返回带 `changes` 与失败详情的 `details`。
+- 项目设置/InputMap/Autoload/`uid/repair` 现在会**回读校验落盘结果**：Godot 在目标文件不可写时会返回 OK 却什么都没写（临时文件 rename 失败被吞），此前会误报成功；现在改为回滚内存状态并返回 `godot_error`，`uid/repair` 还会回滚已写入的 UID 并在 `details` 给出 `expected_uid`/`written_uid`/`rollback_failures`。
 
 ### Maintenance
 - 修正 E2E 隔离：`default_bus_layout.tres` 由 Godot 自身维护，不再纳入文件基线（此前导致 M2/M4 隔离断言间歇失败）；`restore_file_state` 写回后校验并在失败时重试，仍不一致则报错而不是静默吞掉。

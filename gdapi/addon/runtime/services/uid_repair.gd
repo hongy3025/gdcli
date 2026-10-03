@@ -42,7 +42,10 @@ static func repair(body: Dictionary) -> Dictionary:
 		var applied: Array = []
 		for change in planned:
 			var error := ResourceSaver.set_uid(change.path, int(change.new_uid))
-			if error != OK:
+			var written_uid := int(ResourceLoader.get_resource_uid(change.path))
+			if error != OK or written_uid != int(change.new_uid):
+				# 回读校验：Godot 在目标不可写时可能返回 OK 却什么都没写，
+				# 必须当成失败，否则会留下「改了一半」的 UID。
 				var rollback_failures := _rollback_applied(applied)
 				AuditLog.record(
 					"uid/repair", "dangerous", {"path": change.path}, false, ErrorCodes.GODOT_ERROR
@@ -55,6 +58,8 @@ static func repair(body: Dictionary) -> Dictionary:
 					"details":
 					{
 						"failed_path": change.path,
+						"expected_uid": int(change.new_uid),
+						"written_uid": written_uid,
 						"applied": applied.size(),
 						"rollback_failures": rollback_failures
 					}

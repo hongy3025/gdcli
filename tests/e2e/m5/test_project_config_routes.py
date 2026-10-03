@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
 
 from .conftest import (
     assert_snapshot_restored,
+    exec_error,
     exec_ok,
     m5_editor,
     project_snapshot,
@@ -75,4 +77,42 @@ def test_input_map_and_autoload_are_persisted_to_project_file(m5_editor):
     assert "m5_persist_action" in text, text
     assert "M5PersistAuto" in text, text
     restore_snapshot(m5_editor)
+    assert_snapshot_restored(m5_editor, before)
+
+
+def test_unwritable_project_file_fails_and_rolls_back(m5_editor, read_only_project_file):
+    """project.godot 不可写时：必须报错、回滚内存状态、文件保持不变。
+
+    Godot 在编辑器上下文里会返回 OK 却什么都没写（临时文件 rename 失败被吞），
+    因此路由需要自己校验落盘结果，这条用例正是覆盖该路径。
+    """
+    project_godot = Path(m5_editor["project"]) / "project.godot"
+    assert not os.access(project_godot, os.W_OK), "前置条件：project.godot 必须不可写"
+    before = project_snapshot(m5_editor)
+    before_bytes = project_godot.read_bytes()
+
+    error = exec_error(m5_editor, "project/settings/set", {
+        "name": "application/config/m5_rollback_value", "value": 3,
+    })
+    assert error["code"] == "godot_error", error
+    settings = exec_ok(m5_editor, "project/settings/list", {
+        "filter": "application/config/m5_rollback_value",
+    })
+    assert "application/config/m5_rollback_value" not in settings["items"], settings
+
+    error = exec_error(m5_editor, "project/input_map/action/add", {
+        "action": "m5_rollback_action",
+    })
+    assert error["code"] == "godot_error", error
+    actions = exec_ok(m5_editor, "project/input_map/list", {"filter": "m5_rollback_action"})
+    assert all(item["action"] != "m5_rollback_action" for item in actions["items"]), actions
+
+    error = exec_error(m5_editor, "project/autoload/add", {
+        "name": "M5RollbackAuto", "path": "res://fixtures/state.gd",
+    })
+    assert error["code"] == "godot_error", error
+    autoloads = exec_ok(m5_editor, "project/autoload/list", {})["autoloads"]
+    assert all(item["name"] != "M5RollbackAuto" for item in autoloads), autoloads
+
+    assert project_godot.read_bytes() == before_bytes
     assert_snapshot_restored(m5_editor, before)

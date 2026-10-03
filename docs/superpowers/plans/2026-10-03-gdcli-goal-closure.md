@@ -299,8 +299,8 @@
 **Steps**
 - [x] `uid/repair`：dry-run 不写文件（新增 `.uid` 摘要断言）；apply 部分失败时回滚已写入 UID，并在 `details` 返回 `failed_path`/`applied`/`rollback_failures`（无法还原的「原先缺失 UID」项会被列出）。
 - [x] 项目配置：`project/input_map/*` 现在把 InputMap 状态写回 `ProjectSettings` 的 `input/<action>`（否则重载即丢），`project/autoload/*` 同理；保存失败时通过 restore 回调还原 `ProjectSettings` 与 InputMap 内存状态，并记录失败审计。
-- [x] 测试：新增「InputMap/Autoload 变更写入 `project.godot`」的持久化断言。
-- ⚠️ 未能构造「保存失败」的 E2E 注入：实测（两次探针）只读 `project.godot` 时 Godot 4.7.2 在编辑器上下文中 `ProjectSettings.save()` 仍返回 OK（写临时文件后 rename 失败被吞掉，留下 `project.godot<rand>.tmp`），`ResourceSaver.set_uid` 同样返回 OK；因此回滚分支目前只有代码审查覆盖，已如实记录，不用假探针伪装通过。
+- [x] 测试：新增「InputMap/Autoload 变更写入 `project.godot`」的持久化断言；新增只读 `project.godot` / 只读目标资源的失败路径用例（断言报错、内存回滚、文件不变、`uid/repair` 失败后 dry-run 与失败前完全一致）。
+- [x] 保存失败注入问题已解决（不再依赖注入）：路由/服务现在**回读校验落盘结果**——Godot 在目标不可写时会静默返回 OK，服务将其判定为失败并执行回滚；因此回滚分支由只读文件这种真实手段覆盖，无需假探针。
 
 **Verification**
 - [x] `uv run pytest tests/e2e/m5 -q` → 18 passed（含 uid/repair 与 project_config 用例）

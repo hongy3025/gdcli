@@ -9,7 +9,13 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if out.ok:
 		res.json(out)
 	else:
-		res.error(out.error, out.code, ErrorCodes.http_status(out.code), out.get("changes", {}))
+		# details 必须是 Dictionary：此前把 changes(Array) 直接当第 4 个参数，
+		# 失败路径会在 GDScript 里抛类型错误、响应永远发不出去（CLI 只能超时）。
+		var details := {"changes": out.get("changes", [])}
+		var extra: Variant = out.get("details", {})
+		if typeof(extra) == TYPE_DICTIONARY:
+			details.merge(extra)
+		res.error(out.error, out.code, ErrorCodes.http_status(out.code), details)
 
 
 func doc() -> GdApiRouteDoc:

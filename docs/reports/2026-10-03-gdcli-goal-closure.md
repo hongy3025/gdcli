@@ -27,7 +27,9 @@ Android 平台能力整体移出目标并**删除实现**：删除 `export/andro
 | 10 | 审计真实性：deferred registry 以「响应已发送」推断成功；`network/http_request`、`process/run` 早退路径无审计 | registry 无 outcome 即判失败（新增单元用例）；早退路径补审计；`test_network_request.py`/`test_process_run.py` 断言失败审计 |
 | 11 | 批量文件：`plan_hash` 未绑定 `find`/`replace`（不同替换可共享 hash）、回滚不检查每步结果、`recover` 中途失败会留下部分状态、replace 未逐文件做写入校验 | 绑定全部参数；回滚/recover 检查并回滚（`details.rollback_failures`）；扫描阶段拒绝保护路径；`test_bulk_files.py` 7 passed |
 | 12 | 项目配置：InputMap 变更只改内存、重载即丢；保存失败不回滚内存 | InputMap/Autoload 写回 `ProjectSettings`；保存失败回滚并记录失败审计；新增持久化断言 |
+| 12b | **Godot 在目标文件不可写时会静默"成功"**（临时文件 rename 失败被吞，`ProjectSettings.save()`/`ResourceSaver.set_uid` 仍返回 OK，磁盘未变），导致路由误报 `ok:true` | 项目设置/InputMap/Autoload/`uid/repair` 增加**回读校验**：未落盘即判定失败、回滚内存状态与已写 UID，并返回 `godot_error`；由只读文件的 E2E 用例覆盖（无需假探针） |
 | 13 | 测试隔离：`default_bus_layout.tres` 被当作固定文件（Godot 自行增删）；`restore_file_state` 静默吞掉恢复失败；`scene/open` 延迟生效导致 UndoRedo 绑到旧场景 history；M6 无文件恢复；fixture 把 `cargo build` 失败当作 skip | 统一 `is_tracked_project_file` 例外、恢复校验+重试+报错、`exec_ok` 打开场景后等待切换完成、M6 每测试文件恢复、只有缺 cargo 才 skip |
+| 14 | `uid/repair` 失败路径的类型错误：`changes`(Array) 被当作 `res.error()` 第 4 个参数（要求 Dictionary），GDScript 抛错后响应发不出去 → CLI 只能等到超时（潜伏 bug，因失败从未被触发而未被发现） | 路由改为传 `details`（合并 `changes` 与失败详情）；由新的只读目标资源用例覆盖（此前该用例表现为 90s 无响应） |
 
 ## 3. 任务执行结果
 
@@ -95,7 +97,7 @@ Android 平台能力整体移出目标并**删除实现**：删除 `export/andro
 
 ## 5. 未完成 / 未验证事项（如实记录）
 
-1. **保存失败回滚缺少 E2E 注入**：两次探针证明只读 `project.godot` 时 Godot 4.7.2 在编辑器上下文仍让 `ProjectSettings.save()` 返回 OK（临时文件 rename 失败被吞，留下 `project.godot<rand>.tmp`），`ResourceSaver.set_uid` 同样返回 OK。因此 `uid/repair` 与项目配置的回滚分支只有代码审查 + 单元级逻辑覆盖，未用假探针伪装通过。
+1. ~~保存失败回滚缺少 E2E 注入~~ **已解决**：不再依赖"注入失败"，而是让服务自己回读校验落盘结果（Godot 在目标不可写时会静默返回 OK）。回滚分支现由只读 `project.godot` 与只读目标资源两个 E2E 用例覆盖（断言报错、内存回滚、文件不变、`uid/repair` 失败后 dry-run 与失败前完全一致）。
 2. **运行时 harness 偶发握手失败**：一次全量运行中 `m3_running` 的 probe 在 60s 内未连接，级联同模块 14 个用例 error；单独运行 `tests/e2e/m3` 为 123 passed，其余运行也全绿。已保留 `attach_game` 的一次重试与失败诊断（含 status/log tail），触发条件仍未定位。
 3. **负载敏感的超时**：`gdapi_test` undo 桥 2s 与 `wait_for` 5s 在重负载下偏紧（各观测 1 次），已分别放宽到 10s / 15s；这类放宽只影响失败路径耗时，不改变断言语义。
 4. **GUI / EngineDebugger 数据面**：本机验收均为 headless（file transport）。GUI 下的 EngineDebugger 数据面、渲染截图、真实输入注入未在 4.7.2 上重新验收。

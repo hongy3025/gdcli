@@ -5,6 +5,7 @@ extends RefCounted
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
+const PROJECT_FILE := "res://project.godot"
 const MAX_LIMIT := 500
 
 
@@ -40,20 +41,18 @@ static func set_setting(name: String, value: Variant) -> Dictionary:
 		return _err(ErrorCodes.PERMISSION_DENIED, "setting is not writable")
 	var previous = ProjectSettings.get_setting(name) if ProjectSettings.has_setting(name) else null
 	ProjectSettings.set_setting(name, value)
-	var error := ProjectSettings.save()
-	if error != OK:
-		if previous == null:
-			ProjectSettings.clear(name)
-		else:
-			ProjectSettings.set_setting(name, previous)
+	var saved := _write_project_settings(
+		func():
+			if previous == null:
+				ProjectSettings.clear(name)
+			else:
+				ProjectSettings.set_setting(name, previous)
+	)
+	if not saved.ok:
 		AuditLog.record(
 			"project/settings/set", "dangerous", {"name": name}, false, ErrorCodes.GODOT_ERROR
 		)
-		return {
-			"ok": false,
-			"code": ErrorCodes.GODOT_ERROR,
-			"error": "project settings could not be saved"
-		}
+		return saved
 	AuditLog.record("project/settings/set", "dangerous", {"name": name}, true)
 	return {"ok": true, "name": name, "value": value, "changed": true, "undoable": false}
 
@@ -65,17 +64,12 @@ static func reset(name: String) -> Dictionary:
 		return _err(ErrorCodes.NOT_FOUND, "setting not found")
 	var previous = ProjectSettings.get_setting(name)
 	ProjectSettings.clear(name)
-	var error := ProjectSettings.save()
-	if error != OK:
-		ProjectSettings.set_setting(name, previous)
+	var saved := _write_project_settings(func(): ProjectSettings.set_setting(name, previous))
+	if not saved.ok:
 		AuditLog.record(
 			"project/settings/reset", "dangerous", {"name": name}, false, ErrorCodes.GODOT_ERROR
 		)
-		return {
-			"ok": false,
-			"code": ErrorCodes.GODOT_ERROR,
-			"error": "project settings could not be saved"
-		}
+		return saved
 	AuditLog.record("project/settings/reset", "dangerous", {"name": name}, true)
 	return {"ok": true, "name": name, "changed": true, "undoable": false}
 
@@ -214,6 +208,27 @@ static func remove_autoload(name: String) -> Dictionary:
 	return _save_project(key, func(): ProjectSettings.set_setting(key, previous))
 
 
+## 保存项目设置，并确认真的写进了 project.godot。
+
+
+## Godot 4.7.2 在目标文件不可写时会返回 OK（先写临时文件，rename 失败被吞掉），
+## 因此这里比较保存前后的文件摘要：没有变化即视为失败，并回滚内存状态。
+static func _write_project_settings(restore: Callable = Callable()) -> Dictionary:
+	var before := _project_file_digest()
+	var error := ProjectSettings.save()
+	if error != OK or _project_file_digest() == before:
+		if restore.is_valid():
+			restore.call()
+		return _err(ErrorCodes.GODOT_ERROR, "project settings were not written to project.godot")
+	return {"ok": true}
+
+
+static func _project_file_digest() -> String:
+	if not FileAccess.file_exists(PROJECT_FILE):
+		return ""
+	return FileAccess.get_sha256(PROJECT_FILE)
+
+
 ## 把 InputMap 的当前状态写回项目设置：只改 InputMap 不会随项目重载保留。
 static func _persist_action(name: String) -> void:
 	(
@@ -229,27 +244,23 @@ static func _persist_action(name: String) -> void:
 
 
 static func _save_input(name: String, changed: bool, restore: Callable = Callable()) -> Dictionary:
-	var error := ProjectSettings.save()
-	if error != OK:
-		if restore.is_valid():
-			restore.call()
+	var saved := _write_project_settings(restore)
+	if not saved.ok:
 		AuditLog.record(
 			"project/input_map", "dangerous", {"action": name}, false, ErrorCodes.GODOT_ERROR
 		)
-		return _err(ErrorCodes.GODOT_ERROR, "project settings could not be saved")
+		return saved
 	AuditLog.record("project/input_map", "dangerous", {"action": name}, true)
 	return {"ok": true, "action": name, "changed": changed, "undoable": false}
 
 
 static func _save_project(name: String, restore: Callable = Callable()) -> Dictionary:
-	var error := ProjectSettings.save()
-	if error != OK:
-		if restore.is_valid():
-			restore.call()
+	var saved := _write_project_settings(restore)
+	if not saved.ok:
 		AuditLog.record(
 			"project/autoload", "dangerous", {"name": name}, false, ErrorCodes.GODOT_ERROR
 		)
-		return _err(ErrorCodes.GODOT_ERROR, "project settings could not be saved")
+		return saved
 	AuditLog.record("project/autoload", "dangerous", {"name": name}, true)
 	return {"ok": true, "name": name.trim_prefix("autoload/"), "changed": true, "undoable": false}
 
