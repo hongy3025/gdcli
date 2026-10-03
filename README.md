@@ -87,6 +87,12 @@ uv run pytest tests/e2e/m3 -v
 
 通过 `GODOT_BIN` 环境变量可覆盖 Godot 路径；共享 E2E fixture 在 Windows 上默认使用 `D:\app\devel\Godot\v4.7.2\godot_console.exe`，其他平台默认使用 PATH 中的 `godot`。直接调用 `build_environment(godot_bin=...)` 时，显式参数优先于环境变量。
 
+E2E fixture 默认强制 file transport（保证确定性）；需要验收 EngineDebugger 数据面时：
+
+```bash
+GDAPI_E2E_TRANSPORT=engine_debugger uv run pytest tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_runtime_nodes.py -q
+```
+
 Windows PowerShell 示例：
 
 ```powershell
@@ -404,7 +410,7 @@ M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项�
 | 文件/资源操作 | ❌ `undoable:false` | 直接覆盖 |
 | 运行期 mutation（M3 runtime/*） | ❌ `undoable:false` | 不适用 |
 
-所有 mutation 响应包含 `ok`、`changed`、`undoable` 字段。危险操作记录审计日志。
+所有 mutation 响应包含 `ok`、`changed`、`undoable` 字段。危险操作记录审计日志（含成功与失败）；其余 mutation 由 router 统一补记一条 `safety=mutation` 审计条目（路由/service 已自行审计的不会重复）。
 
 ### M3 运行时验证
 

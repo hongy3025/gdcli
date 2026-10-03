@@ -22,10 +22,12 @@
 - `audio/player/create` 返回 `/root/<场景根>/...`（此前返回编辑器内部路径，无法再被其它路由使用）；`physics/*` 的 `node_path` 同时接受绝对路径、场景根相对路径与裸节点名，并回传规范化绝对路径。
 - 修复 `uid/repair` 失败响应的类型错误：此前把 `changes`(Array) 当作 `res.error()` 的第 4 个参数（要求 Dictionary），失败路径会在 GDScript 抛类型错误、响应永远发不出去（CLI 只能等到超时）；现在返回带 `changes` 与失败详情的 `details`。
 - 项目设置/InputMap/Autoload/`uid/repair` 现在会**回读校验落盘结果**：Godot 在目标文件不可写时会返回 OK 却什么都没写（临时文件 rename 失败被吞），此前会误报成功；现在改为回滚内存状态并返回 `godot_error`，`uid/repair` 还会回滚已写入的 UID 并在 `details` 给出 `expected_uid`/`written_uid`/`rollback_failures`。
+- mutation 审计补全：router 为「响应含 `changed` 且本次请求未新增审计条目」的请求统一补记一条 `safety=mutation` 审计；已自行审计的危险/文件类操作不会被重复记录。HTTP 层拒绝码 `method_not_allowed` 收进 `error_codes.gd`（含 HTTP 405 映射）。
 
 ### Maintenance
 - 修正 E2E 隔离：`default_bus_layout.tres` 由 Godot 自身维护，不再纳入文件基线（此前导致 M2/M4 隔离断言间歇失败）；`restore_file_state` 写回后校验并在失败时重试，仍不一致则报错而不是静默吞掉。
-- E2E harness 收口：会话级断言「只允许启动一个编辑器」（并打印 pid/时间线/调用栈），修掉测试模块导入 fixture 函数导致的重复定义（实测会真的启动两个编辑器）；`scene/open` 之后等待场景切换完成（避免 UndoRedo 绑到旧场景）；M6 增加每测试文件恢复；`teardown_environment` 不再吞掉重置失败；只有缺少 cargo 才 skip；undo 桥等待放宽到 10s；budget 测试默认排除（`pyproject.toml` 与文档一致）。
+- E2E harness 收口：会话级断言「只允许启动一个编辑器」（并打印 pid/时间线/调用栈），修掉测试模块导入 fixture 函数导致的重复定义（实测会真的启动两个编辑器）；`scene/open` 之后等待场景切换完成（避免 UndoRedo 绑到旧场景）；M6 增加每测试文件恢复；`teardown_environment` 不再吞掉重置失败；只有缺少 cargo 才 skip；undo 桥等待放宽到 10s（m2/m4 两份）、`wait_for` 默认与 m3 输入等待放宽；budget 测试默认排除（`pyproject.toml` 与文档一致）；`attach_game` 握手失败时打印 status/运行期目录/编辑器 console 诊断。
+- 新增 `GDAPI_E2E_TRANSPORT=engine_debugger`：让整套 E2E 走 EngineDebugger 数据面（默认仍是确定性的 file transport），并补 [外部 godot-mcp 能力对比](docs/reports/2026-10-03-external-parity-comparison.md)。
 - 里程碑 route manifest 调整为 M5 = 25、M6 = 7；新增桌面导出验收 `tests/e2e/m5/test_export.py`。
 - 修正 fixture 导出预设平台名（`Windows` → `Windows Desktop`）——此前 Godot 会忽略该预设，导致桌面导出用例无法执行。
 - Godot 开发验证基线更新为 4.7.2，Windows 测试默认路径改为 `D:\app\devel\Godot\v4.7.2\godot_console.exe`；其他平台仍默认使用 PATH 中的 `godot`。

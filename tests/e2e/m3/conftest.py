@@ -265,6 +265,44 @@ def _harness_failure(
     return HarnessFailure(message, _diagnostics(env, args, result))
 
 
+def _report_handshake_failure(
+    env: dict[str, Any], attempt: int, total: int, exc: BaseException
+) -> None:
+    """握手失败时收集「游戏侧是否起来」的证据，便于定位偶发失败。
+
+    历史问题：运行期偶发 `probe never reached connected`（单独跑 m3 时正常），
+    只有 status / 编辑器日志不足以判断游戏进程是否启动、probe 是否运行。
+    """
+    project = Path(env["project"])
+    runtime_root = project / ".godot" / "gdapi_runtime"
+    try:
+        runtime_files = sorted(p.name for p in runtime_root.iterdir()) if runtime_root.is_dir() else []
+    except OSError:
+        runtime_files = ["<unreadable>"]
+    console_tail = ""
+    try:
+        payload = exec_ok(env, "console/output", {"offset": 0, "limit": 200})
+        lines = payload.get("lines")
+        if isinstance(lines, list):
+            console_tail = "\n".join(str(line) for line in lines[-25:])
+        else:
+            console_tail = str(payload.get("text", ""))[-1500:]
+    except BaseException as console_exc:
+        console_tail = f"<console/output unavailable: {console_exc}>"
+    status: Any = {}
+    try:
+        status = exec_ok(env, "runtime/status")
+    except BaseException as status_exc:
+        status = {"error": str(status_exc)}
+    print(
+        f"\n[attach_game] 第 {attempt}/{total} 次握手失败: {exc}\n"
+        f"runtime/status={json.dumps(status, ensure_ascii=False)}\n"
+        f"runtime 目录内容={runtime_files}\n"
+        f"editor console 尾部:\n{console_tail}",
+        flush=True,
+    )
+
+
 def attach_game(env: dict[str, Any], *, recovery_restarts: int = RECOVERY_RESTART_LIMIT) -> None:
     """Start the game and retry readiness at most once after explicit cleanup."""
     last_error: BaseException | None = None
@@ -277,6 +315,7 @@ def attach_game(env: dict[str, Any], *, recovery_restarts: int = RECOVERY_RESTAR
             return
         except BaseException as exc:
             last_error = exc
+            _report_handshake_failure(env, attempt + 1, recovery_restarts + 1, exc)
             try:
                 detach_game(env)
             except BaseException:

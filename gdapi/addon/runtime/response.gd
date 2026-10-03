@@ -8,6 +8,9 @@
 class_name GdApiResponse
 extends RefCounted
 
+## 最近一次 JSON 响应体：router 用它识别 mutation 响应并补记审计。
+var payload: Dictionary = {}
+
 ## HTTP 响应状态码
 var _status: int = 200
 ## 响应头字典
@@ -64,6 +67,7 @@ func type(content_type: String) -> GdApiResponse:
 ## 将字典数据序列化为 JSON 并发送。自动设置 Content-Type 为 application/json。
 ## @param data 要序列化的字典数据
 func json(data: Dictionary) -> void:
+	payload = data
 	_send(JSON.stringify(data).to_utf8_buffer())
 
 

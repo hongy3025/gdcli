@@ -9,6 +9,13 @@ const MAX_ARRAY_ITEMS := 32
 const MAX_DEPTH := 8
 const REDACTED := "[REDACTED]"
 
+## 已记录条目总数：router 用它判断 handler 是否已自行审计（避免重复记录）。
+static var _total: int = 0
+
+
+static func total() -> int:
+	return _total
+
 
 static func record(
 	route: String, safety: String, summary: Dictionary, ok: bool, code: String = ""
@@ -18,6 +25,7 @@ static func record(
 	var plugin = Engine.get_meta("gdapi_plugin")
 	if not plugin or not plugin.has_method("audit_event"):
 		return
+	_total += 1
 	var safe_summary: Variant = summarize(summary)
 	(
 		plugin

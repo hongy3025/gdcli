@@ -24,6 +24,14 @@
 - 🔧 Task 13/14/15 代码已完成，聚焦测试待跑：network/process 失败审计真实性、deferred registry 不再以「响应已发送」推断成功、bulk `plan_hash` 绑定全部参数 + 回滚/recover 失败可见、replace 逐文件写入校验、uid/repair 回滚、项目配置持久化与保存失败回滚。
 - ⬜ Task 8–12、16、17 未开始（Task 8/9 为验收补齐，Task 10–12 为验收基础设施，Task 16/17 为全量验证与收口）。
 
+**收口后追加项（2026-10-03 第二轮，用户确认 1~5 全做）：**
+- ✅ 推送分支到 origin。
+- ✅ EngineDebugger 数据面验收：headless 与真实 GUI 会话实测 `transport=engine_debugger`（协议 v2、PNG 截图、输入生效、stop 正常）；新增 `GDAPI_E2E_TRANSPORT=engine_debugger` 可重复入口（m3 status+nodes 29 passed）。
+- ✅ harness 稳定性：`attach_game` 握手失败打印 status/运行期目录/编辑器 console 诊断；m2+m4 undo 桥与 m3 输入等待统一放宽（只影响失败路径耗时）。
+- ✅ 外部对等复核：新增 `docs/reports/2026-10-03-external-parity-comparison.md`（27 域：13 等价/11 部分/3 缺失）。
+- ✅ 审计与错误码统一：router 统一补记 mutation 审计（不重复）；`method_not_allowed` 收进 `error_codes.gd`。
+- 验证：m2+m3 status+m6 contract 84 passed；预算验收 1 passed（313s，嵌套全量绿色、`GODOT_EDITOR_STARTS=1`）。
+
 ## Global Constraints
 
 1. 验证基线 Godot `D:\app\devel\Godot\v4.7.2\godot_console.exe`；支持范围 4.7.x 不变；不提高 `compatibility_minimum`。

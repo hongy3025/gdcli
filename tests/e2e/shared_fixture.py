@@ -154,6 +154,25 @@ def _gdcli_ping(env: dict[str, Any]) -> bool:
 # ── fixture source and install ─────────────────────────────────────────
 
 
+def _apply_transport_override(project: Path) -> None:
+    """`GDAPI_E2E_TRANSPORT=engine_debugger` 时去掉 fixture 的强制 file transport。
+
+    fixture 默认写死 `runtime_force_file_transport=true` 以保证测试确定性；
+    需要验收 EngineDebugger 数据面时用它把整套 E2E 切到 debugger 通道。
+    """
+    if os.environ.get("GDAPI_E2E_TRANSPORT", "file").lower() != "engine_debugger":
+        return
+    config_path = project / "project.godot"
+    if not config_path.is_file():
+        return
+    kept = [
+        line
+        for line in config_path.read_text(encoding="utf-8").splitlines()
+        if "runtime_force_file_transport" not in line
+    ]
+    config_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
 def _copy_unified_project(source: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for entry in source.iterdir():
@@ -504,6 +523,7 @@ def build_environment(
         raise RuntimeError(f"cargo build failed:\n{build.stderr}")
 
     _copy_unified_project(E2E_FIXTURE_SOURCE, project)
+    _apply_transport_override(project)
 
     install = subprocess.run(
         [str(gdcli_bin()), "install", "--project", str(project), "--force"],

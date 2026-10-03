@@ -12,6 +12,8 @@ const PERMISSION_DENIED := "permission_denied"
 const UNSAFE_OPERATION := "unsafe_operation"
 const TIMEOUT := "timeout"
 const GODOT_ERROR := "godot_error"
+## HTTP 层专用：非 POST 请求被 router 直接拒绝（不属于 route 业务错误码）。
+const METHOD_NOT_ALLOWED := "method_not_allowed"
 
 const HTTP_STATUS := {
 	MISSING_PARAM: 400,
@@ -24,6 +26,7 @@ const HTTP_STATUS := {
 	TIMEOUT: 408,
 	NOT_SUPPORTED: 501,
 	GODOT_ERROR: 500,
+	METHOD_NOT_ALLOWED: 405,
 }
 
 

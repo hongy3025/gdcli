@@ -13,6 +13,8 @@ const GdApiRequest := preload("res://addons/gdapi/runtime/request.gd")
 const GdApiResponse := preload("res://addons/gdapi/runtime/response.gd")
 ## 错误码常量
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
+## 审计日志（用于为未自行审计的 mutation 补记）
+const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 ## 内置 ping 命令处理器
 const BuiltinPing := preload("res://addons/gdapi/runtime/builtin_ping.gd")
 ## 内置路由名列表处理器
@@ -157,7 +159,7 @@ func dispatch(req_dict: Dictionary, server) -> void:
 
 	# 只支持 POST 方法
 	if method != "POST":
-		_reply_error(server, id, 405, "only POST is supported", "method_not_allowed")
+		_reply_error(server, id, 405, "only POST is supported", ErrorCodes.METHOD_NOT_ALLOWED)
 		return
 
 	var key: String = path.trim_prefix("/")
@@ -193,7 +195,29 @@ func dispatch(req_dict: Dictionary, server) -> void:
 	var handler_script: Script = _routes[key]
 	var handler = handler_script.new()
 
+	var audit_before := AuditLog.total()
 	handler.handle(req, res)
+	_audit_mutation(key, res, audit_before)
+
+
+## 为未自行审计的 mutation 响应补一条统一审计。
+##
+## 判定依据：响应体包含 `changed` 字段（mutation 契约），且本次请求期间
+## 没有新增审计记录（dangerous/file 类操作通常在 service 里已自行审计，
+## 因此不会被重复记录）。
+func _audit_mutation(route: String, res, audit_before: int) -> void:
+	var body: Variant = res.payload
+	if typeof(body) != TYPE_DICTIONARY or not (body as Dictionary).has("changed"):
+		return
+	if AuditLog.total() != audit_before:
+		return
+	AuditLog.record(
+		route,
+		"mutation",
+		{"changed": bool(body.get("changed", false))},
+		bool(body.get("ok", true)),
+		String(body.get("code", ""))
+	)
 
 
 ## 发送错误响应

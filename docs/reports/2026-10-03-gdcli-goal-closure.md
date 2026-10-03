@@ -30,6 +30,8 @@ Android 平台能力整体移出目标并**删除实现**：删除 `export/andro
 | 12b | **Godot 在目标文件不可写时会静默"成功"**（临时文件 rename 失败被吞，`ProjectSettings.save()`/`ResourceSaver.set_uid` 仍返回 OK，磁盘未变），导致路由误报 `ok:true` | 项目设置/InputMap/Autoload/`uid/repair` 增加**回读校验**：未落盘即判定失败、回滚内存状态与已写 UID，并返回 `godot_error`；由只读文件的 E2E 用例覆盖（无需假探针） |
 | 13 | 测试隔离：`default_bus_layout.tres` 被当作固定文件（Godot 自行增删）；`restore_file_state` 静默吞掉恢复失败；`scene/open` 延迟生效导致 UndoRedo 绑到旧场景 history；M6 无文件恢复；fixture 把 `cargo build` 失败当作 skip | 统一 `is_tracked_project_file` 例外、恢复校验+重试+报错、`exec_ok` 打开场景后等待切换完成、M6 每测试文件恢复、只有缺 cargo 才 skip |
 | 14 | `uid/repair` 失败路径的类型错误：`changes`(Array) 被当作 `res.error()` 第 4 个参数（要求 Dictionary），GDScript 抛错后响应发不出去 → CLI 只能等到超时（潜伏 bug，因失败从未被触发而未被发现） | 路由改为传 `details`（合并 `changes` 与失败详情）；由新的只读目标资源用例覆盖（此前该用例表现为 90s 无响应） |
+| 15 | mutation 审计覆盖不全：只有危险/文件类操作自行审计，节点/属性/场景等编辑器状态 mutation 无审计 | router 统一补记：响应含 `changed` 且本次请求未新增审计条目时记一条 `safety=mutation`（自行审计的路由不会重复）；`tests/e2e/m2/test_mutation_audit.py` 断言「补记恰好一条」与「自行审计不被重复」 |
+| 16 | HTTP 层错误码未入表：router 对非 POST 请求硬编码 `"method_not_allowed"` 字符串 | `error_codes.gd` 增加 `METHOD_NOT_ALLOWED`（HTTP 405）常量并注明为 HTTP 层专用码，router 改为引用常量 |
 
 ## 3. 任务执行结果
 
@@ -95,10 +97,27 @@ Android 平台能力整体移出目标并**删除实现**：删除 `export/andro
 | D | 预算验收 1 passed（嵌套全量绿色，301s） | — |
 | E | 368 passed, 1 failed | `test_input_sequence_over_five_seconds_honors_explicit_timeout` 的 `wait_for` 默认 5s 在重负载下偏紧 → 放宽到 15s，单跑该文件 32 passed；`GODOT_EDITOR_STARTS=1` |
 
+### 4.4 GUI / EngineDebugger 数据面（本轮新增验收）
+
+此前所有 E2E 都跑在 headless + **file transport**（fixture 里写死 `runtime_force_file_transport=true`），debugger 数据面长期未验。本轮实测（临时项目、去掉 force-file 开关）：
+
+| 会话 | 结果 |
+|---|---|
+| `--editor --headless`（无 force-file） | `runtime/status`: `state=connected`、**`transport=engine_debugger`**、`protocol_version=2`、`session_id=0`；截图返回合法 PNG；`runtime/input/key` 使游戏内 `input_keys` 0 → 1；`project/stop` 正常 |
+| 真实 GUI 会话（去掉 `--headless`） | 同上：`transport=engine_debugger`、PNG 截图、输入生效、stop 正常 |
+
+为让这项验收可重复，共享 fixture 支持 `GDAPI_E2E_TRANSPORT=engine_debugger`（去掉 fixture 的强制 file 开关）：
+
+```bash
+GDAPI_E2E_TRANSPORT=engine_debugger uv run pytest tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_runtime_nodes.py -q
+# → 29 passed（生命周期 + 节点数据面走 debugger 通道）
+```
+
 ## 5. 未完成 / 未验证事项（如实记录）
 
 1. ~~保存失败回滚缺少 E2E 注入~~ **已解决**：不再依赖"注入失败"，而是让服务自己回读校验落盘结果（Godot 在目标不可写时会静默返回 OK）。回滚分支现由只读 `project.godot` 与只读目标资源两个 E2E 用例覆盖（断言报错、内存回滚、文件不变、`uid/repair` 失败后 dry-run 与失败前完全一致）。
-2. **运行时 harness 偶发握手失败**：一次全量运行中 `m3_running` 的 probe 在 60s 内未连接，级联同模块 14 个用例 error；单独运行 `tests/e2e/m3` 为 123 passed，其余运行也全绿。已保留 `attach_game` 的一次重试与失败诊断（含 status/log tail），触发条件仍未定位。
-3. **负载敏感的超时**：`gdapi_test` undo 桥 2s 与 `wait_for` 5s 在重负载下偏紧（各观测 1 次），已分别放宽到 10s / 15s；这类放宽只影响失败路径耗时，不改变断言语义。
-4. **GUI / EngineDebugger 数据面**：本机验收均为 headless（file transport）。GUI 下的 EngineDebugger 数据面、渲染截图、真实输入注入未在 4.7.2 上重新验收。
-5. **未执行**：导出模板相关路径（本机无模板；桌面 PCK 导出已实测不需要模板）；Android 已整体移出范围。
+2. **运行时 harness 偶发握手失败**（唯一未定位项）：一次全量运行中 `m3_running` 的 probe 在 60s 内未连接，级联同模块 14 个用例 error；单独运行 `tests/e2e/m3` 为 123 passed，其余运行也全绿。已加入失败诊断（`runtime/status` + runtime 目录内容 + 编辑器 console 尾部）与一次重试，触发条件仍未定位。
+3. ~~负载敏感的超时~~ **已加固**：`gdapi_test` undo 桥（m2 与 m4 两份）统一放宽到 10s，`wait_for` 默认 5s → 15s，m3 输入用例中 6 处显式 2s → 10s；只影响失败路径耗时，断言语义不变。
+4. ~~GUI / EngineDebugger 数据面未验收~~ **已完成**：headless 与真实 GUI 会话下均实测 `transport=engine_debugger`、协议 v2、PNG 截图、输入生效、stop 正常；并提供 `GDAPI_E2E_TRANSPORT=engine_debugger` 作为可重复验收入口（见 §4.4）。
+5. ~~外部功能对等未复核~~ **已完成抽样复核**：见 [外部 godot-mcp 能力对比](2026-10-03-external-parity-comparison.md)——27 个能力域中 13 等价 / 11 部分 / 3 缺失（3D 场景搭建、粒子、跨场景批量重构），差距项均不在本分支已批准目标内。
+6. **未执行**：导出模板相关路径（本机无模板；桌面 PCK 导出已实测不需要模板）；Android 已整体移出范围。
