@@ -19,6 +19,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("清空 TileMapLayer")
+		. mutates()
 		. param("layer_path", "String", true, "TileMapLayer 路径", "")
 		. example('{"layer_path":"TileMapLayer"}')
 		. returns("清空结果", {"undoable": "true"})

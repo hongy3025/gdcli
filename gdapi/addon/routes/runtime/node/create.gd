@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建运行期节点")
+		. mutates()
 		. desc("只允许在当前场景根节点下创建 allowlist 中的节点类型；properties 使用 VariantCodec 编码。操作不可撤销。")
 		. param("parent_path", "String", true, "专用父节点绝对路径", "")
 		. param("type", "String", true, "allowlist 节点类型", "Node2D")

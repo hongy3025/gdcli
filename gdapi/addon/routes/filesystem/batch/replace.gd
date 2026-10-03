@@ -25,6 +25,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("可验证计划的批量文本替换")
+		. mutates()
 		. desc("计划包含源文件哈希；应用前源文件变化会返回 conflict。")
 		. param("root", "String", true, "扫描根目录")
 		. param("find", "String", true, "字面搜索文本")

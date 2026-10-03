@@ -18,6 +18,6 @@ func handle(_req: GdApiRequest, res: GdApiResponse) -> void:
 
 
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("清空 gdapi 审计日志").desc("清空内存审计缓冲区。").returns(
+	return GdApiRouteDoc.make("清空 gdapi 审计日志").mutates().desc("清空内存审计缓冲区。").returns(
 		"清空结果", {"ok": "bool", "cleared": "bool", "changed": "bool", "undoable": "bool"}
 	)

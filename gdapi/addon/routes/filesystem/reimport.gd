@@ -51,6 +51,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("重新导入一组项目资源")
+		. mutates()
 		. desc(
 			"通过 EditorInterface.get_resource_filesystem().reimport_files 触发导入。返回 reimported 路径数组。"
 		)

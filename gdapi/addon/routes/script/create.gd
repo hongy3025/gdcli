@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建 .gd 脚本文件")
+		. mutates()
 		. desc("通过临时文件 + rename 原子写入。目标存在时直接覆盖。不修改不接 UndoRedo,产生 audit 记录。")
 		. param("path", "String", true, "目标 res:// 路径")
 		. param("content", "String", true, "完整脚本内容")

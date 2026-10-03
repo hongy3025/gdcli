@@ -58,6 +58,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置编辑器 selection")
+		. mutates()
 		. desc("默认先清空,再按 node_paths 顺序添加。clear=false 时叠加。任一路径无效返回 not_found,不修改 selection。")
 		. param("node_paths", "Array<String>", false, "节点路径列表,留空表示清空")
 		. param("clear", "bool", false, "是否先清空已有 selection", "true")

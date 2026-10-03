@@ -31,6 +31,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("关闭当前场景")
+		. mutates()
 		. desc(
 			(
 				"调用 EditorInterface.close_scene(),仅支持关闭当前编辑场景。"

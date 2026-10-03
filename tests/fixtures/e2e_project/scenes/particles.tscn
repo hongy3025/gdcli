@@ -1,0 +1,39 @@
+[gd_scene load_steps=6 format=3]
+
+[sub_resource type="ParticleProcessMaterial" id="Material_2d"]
+particle_flag_disable_z = true
+gravity = Vector3(0, 12, 0)
+initial_velocity_min = 2.0
+initial_velocity_max = 4.0
+
+[sub_resource type="Gradient" id="Gradient_white"]
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 1)
+
+[sub_resource type="GradientTexture2D" id="Texture_2d"]
+gradient = SubResource("Gradient_white")
+width = 8
+height = 8
+
+[sub_resource type="ParticleProcessMaterial" id="Material_3d"]
+gravity = Vector3(0, -3, 0)
+initial_velocity_min = 1.0
+initial_velocity_max = 2.0
+
+[sub_resource type="QuadMesh" id="Mesh_3d"]
+size = Vector2(0.1, 0.1)
+
+[node name="ParticlesFixture" type="Node"]
+
+[node name="GPU2D" type="GPUParticles2D" parent="."]
+emitting = false
+amount = 12
+lifetime = 2.5
+process_material = SubResource("Material_2d")
+texture = SubResource("Texture_2d")
+
+[node name="GPU3D" type="GPUParticles3D" parent="."]
+emitting = false
+amount = 18
+lifetime = 3.5
+process_material = SubResource("Material_3d")
+draw_pass_1 = SubResource("Mesh_3d")

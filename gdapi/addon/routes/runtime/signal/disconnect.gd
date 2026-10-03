@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("断开运行期信号连接")
+		. mutates()
 		. desc("必须指定之前 connect 过的 target path + method;若未连接返回 not_found。")
 		. param("node_path", "String", true, "源节点路径", "")
 		. param("signal", "String", true, "信号名", "")

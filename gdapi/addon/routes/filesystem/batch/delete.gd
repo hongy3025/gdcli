@@ -34,6 +34,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("可恢复的批量删除")
+		. mutates()
 		. desc("先 dry_run 获取 plan_hash，再以 plan_hash 应用；文件进入 gdapi trash。")
 		. param("paths", "Array[String]", true, "项目文件路径")
 		. param("dry_run", "bool", true, "仅规划")

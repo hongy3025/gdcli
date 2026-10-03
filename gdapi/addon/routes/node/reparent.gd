@@ -35,6 +35,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("把节点挂接到新父节点接 UndoRedo")
+		. mutates()
 		. desc("拒绝把节点挂到自己的后代;新父节点和原父节点必须解析到同一场景有效 Node。")
 		. param("node_path", "String", true, "被挂接的节点路径")
 		. param("parent_path", "String", true, "新父节点路径")

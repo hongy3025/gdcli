@@ -18,6 +18,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("构建固定 UI 布局")
+		. mutates()
 		. param("node_path", "String", true, "Control 路径", "")
 		. param("layout", "String", true, "full_rect 或 center", "")
 		. example('{"node_path":"Button","layout":"center"}')

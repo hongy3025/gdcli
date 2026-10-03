@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("注入 InputEventMouseButton / Motion")
+		. mutates()
 		. desc("kind=button 必填 button(1..8) 和 position;kind=motion 只填 position。")
 		. param("kind", "String", false, "button|motion,默认 button", "button")
 		. param("button", "int", false, "kind=button 时必填 1..8", "")

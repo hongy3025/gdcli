@@ -1,6 +1,7 @@
 extends Node2D
 
 const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
+const ParticlesScene := preload("res://scenes/particles.tscn")
 
 
 class CaptureBoundaryTexture:
@@ -42,6 +43,7 @@ class CaptureBoundaryTexture:
 
 func reset_fixture() -> Dictionary:
 	_remove_runtime_children(self)
+	add_child(ParticlesScene.instantiate())
 	probe_target.reset_fixture()
 	return {"changed": true, "undoable": false}
 

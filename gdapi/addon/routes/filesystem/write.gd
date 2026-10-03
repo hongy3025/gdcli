@@ -57,6 +57,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("写入文本文件 (非脚本资源)")
+		. mutates()
 		. desc("目标存在直接覆盖;写入通过 temp file + rename 原子化。")
 		. param("path", "String", true, "res:// 文件路径")
 		. param("content", "String", true, "完整文本内容")

@@ -38,6 +38,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("在指定父节点下创建节点")
+		. mutates()
 		. desc(
 			"使用 EditorUndoRedoManager 提交 add_child + set_owner 组合,可 undo/redo。仅支持 Node 子类类型;name 自动避开冲突。"
 		)

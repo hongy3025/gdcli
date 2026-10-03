@@ -153,3 +153,223 @@ static func list_open_scenes() -> Array:
 			paths.append(path)
 	paths.sort()
 	return paths
+
+
+static func instantiate_scene(
+	path: String, parent_path: String, node_name: String = ""
+) -> Dictionary:
+	var checked := resolve(path)
+	if not checked.ok:
+		return checked
+	var NodeEditor := preload("res://addons/gdapi/runtime/services/node_editor.gd")
+	var lookup := NodeEditor.find(parent_path)
+	if not lookup.ok:
+		return lookup
+	var packed: Resource = ResourceLoader.load(checked.path)
+	if not packed is PackedScene:
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "path is not a PackedScene"}
+	if checked.path == current_path():
+		return {
+			"ok": false,
+			"code": ErrorCodes.CONFLICT,
+			"error": "cannot instantiate a scene into itself"
+		}
+	for dep in ResourceLoader.get_dependencies(checked.path):
+		if str(dep).get_slice("::", str(dep).count("::")) == current_path():
+			return {
+				"ok": false,
+				"code": ErrorCodes.CONFLICT,
+				"error": "scene depends on the current scene"
+			}
+	if (
+		node_name != ""
+		and (node_name.validate_node_name() != node_name or node_name in [".", ".."])
+	):
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "invalid node name"}
+	var instance: Node = packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
+	if instance == null:
+		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "scene instantiation failed"}
+	var parent: Node = lookup.node
+	var root := current_root()
+	var manager := preload("res://addons/gdapi/runtime/edit_action.gd").undo_redo()
+	if manager == null:
+		instance.free()
+		return {
+			"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "UndoRedo manager unavailable"
+		}
+	instance.name = node_editor._unique_name(
+		parent, node_name if node_name != "" else str(instance.name)
+	)
+	manager.create_action("gdcli: instantiate scene", UndoRedo.MERGE_DISABLE, root)
+	manager.add_do_method(parent, "add_child", instance, true)
+	# Only the instance root belongs to this scene. Descendants retain the packed-scene owner.
+	manager.add_do_method(instance, "set_owner", root)
+	manager.add_do_reference(instance)
+	manager.add_undo_method(parent, "remove_child", instance)
+	manager.commit_action()
+	if (
+		instance.get_parent() != parent
+		or instance.owner != root
+		or instance.scene_file_path != checked.path
+	):
+		manager.get_history_undo_redo(manager.get_object_history_id(root)).undo()
+		return {
+			"ok": false,
+			"code": ErrorCodes.GODOT_ERROR,
+			"error": "instance read-back failed; rolled back"
+		}
+	return {
+		"ok": true,
+		"changed": true,
+		"undoable": true,
+		"path": checked.path,
+		"node_path": node_editor._user_path_for(instance),
+		"scene_file_path": instance.scene_file_path
+	}
+
+
+static func delete_scene(path: String, dry_run: bool, close_open: bool) -> Dictionary:
+	var checked := PathGuard.validate(path, "delete")
+	if not checked.ok:
+		return checked
+	path = checked.path
+	if path.get_extension().to_lower() not in ["tscn", "scn"]:
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "scene/delete requires a .tscn or .scn scene"
+		}
+	if not FileAccess.file_exists(path):
+		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "scene does not exist"}
+	var references: Array = []
+	_scene_references("res://", path, references)
+	var main_scene := ResourceUID.ensure_path(
+		str(ProjectSettings.get_setting("application/run/main_scene", ""))
+	)
+	if main_scene == path:
+		references.append("project.godot:application/run/main_scene")
+	for root in EditorInterface.get_open_scene_roots():
+		_live_scene_references(root, path, references)
+	var opened := path in EditorInterface.get_open_scenes()
+	if dry_run:
+		AuditLog.record(
+			"scene/delete",
+			"dangerous",
+			{"path": path, "dry_run": true, "references": references, "open": opened},
+			true,
+			""
+		)
+		return {
+			"ok": true,
+			"changed": false,
+			"undoable": false,
+			"dry_run": true,
+			"path": path,
+			"references": references,
+			"open": opened,
+			"can_delete":
+			references.is_empty() and (not opened or (close_open and current_path() == path))
+		}
+	if not references.is_empty():
+		return {
+			"ok": false,
+			"code": ErrorCodes.CONFLICT,
+			"error": "scene is still referenced: " + str(references)
+		}
+	if opened and (not close_open or current_path() != path):
+		return {
+			"ok": false,
+			"code": ErrorCodes.CONFLICT,
+			"error":
+			"open scene must be current and close_open=true; switch/close other tabs explicitly"
+		}
+	if opened and path in EditorInterface.get_unsaved_scenes():
+		return {
+			"ok": false,
+			"code": ErrorCodes.CONFLICT,
+			"error": "save or discard unsaved scene changes before deletion"
+		}
+	var original := FileAccess.get_file_as_bytes(path)
+	var uid_path := path + ".uid"
+	var had_uid := FileAccess.file_exists(uid_path)
+	var uid_bytes := FileAccess.get_file_as_bytes(uid_path) if had_uid else PackedByteArray()
+	var uid := ResourceLoader.get_resource_uid(path)
+	if opened:
+		var close_error := EditorInterface.close_scene()
+		if close_error != OK:
+			return {
+				"ok": false,
+				"code": ErrorCodes.CONFLICT,
+				"error": "editor refused to close scene: " + str(close_error)
+			}
+	var error := DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	if error == OK and had_uid:
+		error = DirAccess.remove_absolute(ProjectSettings.globalize_path(uid_path))
+	if error != OK or FileAccess.file_exists(path) or FileAccess.file_exists(uid_path):
+		var restore := FileAccess.open(path, FileAccess.WRITE)
+		if restore != null:
+			restore.store_buffer(original)
+			restore.close()
+		if had_uid:
+			var restore_uid := FileAccess.open(uid_path, FileAccess.WRITE)
+			if restore_uid != null:
+				restore_uid.store_buffer(uid_bytes)
+				restore_uid.close()
+		if opened:
+			EditorInterface.open_scene_from_path(path)
+		return {
+			"ok": false,
+			"code": ErrorCodes.GODOT_ERROR,
+			"error": "scene deletion failed; restored original files: " + str(error)
+		}
+	if uid != ResourceUID.INVALID_ID and ResourceUID.has_id(uid):
+		ResourceUID.remove_id(uid)
+	EditorInterface.get_resource_filesystem().scan()
+	AuditLog.record(
+		"scene/delete",
+		"dangerous",
+		{"path": path, "dry_run": false, "closed": opened, "undoable": false},
+		true,
+		""
+	)
+	return {
+		"ok": true,
+		"changed": true,
+		"undoable": false,
+		"deleted": true,
+		"path": path,
+		"closed": opened
+	}
+
+
+static func _scene_references(directory: String, target: String, references: Array) -> void:
+	for file in DirAccess.get_files_at(directory):
+		var candidate := directory.path_join(file)
+		if (
+			candidate == target
+			or file.get_extension().to_lower() not in ["tscn", "scn", "tres", "res"]
+		):
+			continue
+		for dep in ResourceLoader.get_dependencies(candidate):
+			var dependency := str(dep)
+			var pieces := dependency.split("::")
+			if (
+				pieces[pieces.size() - 1] == target
+				or (
+					pieces[0].begins_with("uid://")
+					and ResourceUID.text_to_id(pieces[0]) == ResourceLoader.get_resource_uid(target)
+				)
+			):
+				references.append(candidate)
+				break
+	for child in DirAccess.get_directories_at(directory):
+		if child.begins_with(".") or directory.path_join(child) == "res://addons/gdapi":
+			continue
+		_scene_references(directory.path_join(child), target, references)
+
+
+static func _live_scene_references(node: Node, target: String, references: Array) -> void:
+	for child in node.get_children():
+		if child.scene_file_path == target:
+			references.append("open scene instance: " + str(child.get_path()))
+		_live_scene_references(child, target, references)

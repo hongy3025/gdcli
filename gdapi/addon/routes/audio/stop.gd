@@ -18,6 +18,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("停止音频")
+		. mutates()
 		. desc(
 			"在编辑器当前打开的场景中调用 AudioStreamPlayer.stop()（作用于编辑器节点，" + "不是运行中的游戏），并回读节点真实的 playing 状态。"
 		)

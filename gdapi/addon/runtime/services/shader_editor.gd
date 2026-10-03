@@ -6,6 +6,7 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
+const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_editor.gd")
 
 
 static func read(path: Variant) -> Dictionary:
@@ -106,26 +107,14 @@ static func set_param(path: Variant, name: Variant, value: Variant) -> Dictionar
 	var decoded := _decode_uniform_value(value, specification.type)
 	if not decoded.ok:
 		return decoded
+	var previous: Variant = material.get_shader_parameter(String(name))
 	material.set_shader_parameter(String(name), decoded.value)
-	var saved := ResourceSaver.save(material, checked.path)
-	if saved != OK:
-		AuditLog.record(
-			"shader/param/set",
-			"file",
-			{"path": checked.path, "name": name},
-			false,
-			ErrorCodes.GODOT_ERROR
-		)
-		return _error(ErrorCodes.GODOT_ERROR, "ResourceSaver.save failed: " + str(saved))
-	AuditLog.record("shader/param/set", "file", {"path": checked.path, "name": name}, true)
-	return {
-		"ok": true,
-		"changed": true,
-		"saved": true,
-		"undoable": false,
-		"path": checked.path,
-		"name": String(name)
-	}
+	var result := ResourceEditor.save_verified(material, checked.path, "shader/param/set")
+	if not result.ok:
+		material.set_shader_parameter(String(name), previous)
+		return result
+	result["name"] = String(name)
+	return result
 
 
 static func parse_uniforms(source: String) -> Array:
@@ -183,15 +172,7 @@ static func _save_material(material: ShaderMaterial, path: Variant, route: Strin
 	if not checked.ok:
 		AuditLog.record(route, "file", {"path": path}, false, checked.code)
 		return checked
-	DirAccess.make_dir_recursive_absolute(
-		ProjectSettings.globalize_path(checked.path).get_base_dir()
-	)
-	var saved := ResourceSaver.save(material, checked.path)
-	if saved != OK:
-		AuditLog.record(route, "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR)
-		return _error(ErrorCodes.GODOT_ERROR, "ResourceSaver.save failed: " + str(saved))
-	AuditLog.record(route, "file", {"path": checked.path}, true)
-	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": checked.path}
+	return ResourceEditor.save_verified(material, checked.path, route)
 
 
 static func _shader_path(path: Variant, mode: String) -> Dictionary:

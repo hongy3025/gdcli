@@ -122,6 +122,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("批量更新项目中所有资源的 UID")
+		. mutates()
 		. desc("扫描指定目录下的场景文件和脚本文件，重新保存以生成或更新 UID；用于解决 UID 缺失或损坏导致的资源引用问题")
 		. param("project_path", "String", false, "要扫描的项目子目录路径，默认为 res://", "res://")
 		. example('{"project_path":"res://tests"}')

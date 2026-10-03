@@ -1,0 +1,66 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # The full fixture intentionally exercises real Windows .cmd processes.
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      GODOT_VERSION: 4.7.2
+      GALLIUM_DRIVER: llvmpipe
+      GDAPI_E2E_BUDGET_SECONDS: "360"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Install Python gates and gdtoolkit
+        run: uv sync --group dev
+      - name: Install Godot 4.7.2 and software OpenGL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:GODOT_VERSION
+          $godotDir = Join-Path $env:RUNNER_TEMP "godot"
+          Invoke-WebRequest "https://github.com/godotengine/godot-builds/releases/download/$version-stable/Godot_v$version-stable_win64.exe.zip" -OutFile "$env:RUNNER_TEMP/godot.zip"
+          Expand-Archive "$env:RUNNER_TEMP/godot.zip" -DestinationPath $godotDir
+          $godot = Join-Path $godotDir "Godot_v$version-stable_win64_console.exe"
+          # Mesa is a real software OpenGL renderer, not Godot's dummy renderer.
+          $mesaArchive = Join-Path $env:RUNNER_TEMP "mesa.7z"
+          Invoke-WebRequest "https://github.com/pal1000/mesa-dist-win/releases/download/26.2.3/mesa3d-26.2.3-release-msvc.7z" -OutFile $mesaArchive
+          if ((Get-FileHash $mesaArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne "3f3613adb43cfd0f2e665ce2400b130c275f0b3317cb3a05566320a3a67589ed") {
+            throw "Mesa archive SHA256 mismatch"
+          }
+          $mesaDir = Join-Path $env:RUNNER_TEMP "mesa"
+          & 7z x $mesaArchive "-o$mesaDir" -y
+          if ($LASTEXITCODE -ne 0) { throw "Mesa extraction failed" }
+          Copy-Item "$mesaDir/x64/*.dll" $godotDir
+          if (-not (Test-Path "$godotDir/opengl32.dll")) { throw "Mesa OpenGL loader missing" }
+          $reported = (& $godot --version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $reported -notmatch "^4\.7\.2\.") { throw "Expected Godot 4.7.2, got $reported" }
+          "GODOT_BIN=$godot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Format, lint, clippy, Rust and Python unit gates
+        run: uv run python scripts/check.py --gate format --gate clippy --gate unit
+      - name: Full file session then independent EngineDebugger protocol-2 session
+        run: uv run python scripts/check.py --gate file --gate engine
+      - name: Parent wall-clock full-suite budget
+        run: uv run python scripts/check.py --gate budget
+      - name: Publish measured waits and budget
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wait-timings-and-budget
+          path: .pytest-artifacts/*.json
+          if-no-files-found: warn

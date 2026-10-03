@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建 2D 物理关节")
+		. mutates()
 		. desc(
 			"在当前编辑场景中创建 PinJoint2D/GrooveJoint2D/DampedSpringJoint2D 并挂到 parent_path 下，接入 UndoRedo。"
 		)

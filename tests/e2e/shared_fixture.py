@@ -29,6 +29,8 @@ from typing import Any, Iterator
 
 import pytest
 
+from .timing import positive_seconds, successful_wait
+
 from .m2.helpers import (
     gdcli_bin,
     repo_root,
@@ -185,14 +187,16 @@ def _copy_unified_project(source: Path, target: Path) -> None:
             shutil.copy2(entry, destination)
 
 def _copy_native_library(env: dict[str, Any]) -> None:
-    """Copy the gdapi native library into the addon bin/ directory on Windows."""
-    if sys.platform != "win32":
-        return
-    root = repo_root()
-    library = root / "target" / "debug" / "gdapi.dll"
+    """Install the freshly built extension for the actual host platform."""
+    platform, filename = (
+        ("windows", "gdapi.dll") if sys.platform == "win32"
+        else ("macos", "libgdapi.dylib") if sys.platform == "darwin"
+        else ("linux", "libgdapi.so")
+    )
+    library = repo_root() / "target" / "debug" / filename
     if not library.exists():
         return
-    destination_dir = env["project"] / "addons" / "gdapi" / "bin" / "windows"
+    destination_dir = env["project"] / "addons" / "gdapi" / "bin" / platform
     destination_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(library, destination_dir / library.name)
 
@@ -258,7 +262,9 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
             process.wait(timeout=10)
         raise
 
-    deadline = time.monotonic() + 180.0
+    started = time.monotonic()
+    ping_timeout = positive_seconds("GDAPI_E2E_PING_TIMEOUT_SECONDS")
+    deadline = started + ping_timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
             log_handle.close()
@@ -274,9 +280,11 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
         process.wait(timeout=10)
         log_handle.close()
         raise RuntimeError(
-            f"gdapi ping never succeeded within 180s; log tail:\n{_read_log_tail(log_path)}"
+            f"gdapi ping never succeeded within {ping_timeout:g}s; log tail:\n{_read_log_tail(log_path)}"
         )
 
+    from .timing import TIMINGS
+    TIMINGS.record("editor_ping", time.monotonic() - started)
     wait_for_godot_ready(env["project"])
     env["meta"] = meta
     return process
@@ -438,6 +446,7 @@ def _current_scene_path(env: dict[str, Any]) -> str:
     return ""
 
 
+@successful_wait("scene_switch")
 def wait_for_scene(
     env: dict[str, Any],
     expected: str,
@@ -448,6 +457,7 @@ def wait_for_scene(
     `scene/open` 由编辑器延迟生效：如果下一次 mutation 抢在切换完成之前，
     UndoRedo 会绑到旧场景的 history，表现为 `history.undo()` 偶发返回 false。
     """
+    timeout = positive_seconds("GDAPI_E2E_SCENE_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if _current_scene_path(env) == expected:
@@ -620,6 +630,8 @@ def e2e_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     try:
         yield env
     finally:
+        from .timing import TIMINGS
+        TIMINGS.enabled = True
         _record_editor_event("teardown", pid=int(env.get("editor_pid", -1)), project=env.get("project"))
         teardown_environment(env)
         assert_single_editor_session()
@@ -656,6 +668,8 @@ _BUCKET_RULES: tuple[tuple[str, str | None, int], ...] = (
     ("m3/test_runtime_assert_signal.py", None, 3),
     ("m3/test_runtime_capture.py", None, 3),
     ("m3/test_runtime_observability.py", None, 3),
+    ("m3/test_runtime_extensions.py", None, 3),
+    ("m3/test_engine_transport.py", None, 3),
     # Bucket 2: m2 / m4 / m3 contract / m5 lightweight (default fallback)
 )
 

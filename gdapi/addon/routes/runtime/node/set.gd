@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置运行期节点属性")
+		. mutates()
 		. desc(
 			"通过 VariantCodec 解码 value,写入对应属性。返回值含 undoable:false 表示该操作不会被 Godot 的 UndoRedo 系统记录。"
 		)

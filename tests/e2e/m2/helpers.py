@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from e2e.timing import positive_seconds, successful_wait
+
 GODOT_BIN_DEFAULT = (
     "D:/app/devel/Godot/v4.7.2/godot_console.exe"
     if sys.platform == "win32"
@@ -79,10 +81,12 @@ def copy_native_library(root: Path, project: Path) -> None:
     shutil.copy2(source, destination)
 
 
+@successful_wait("editor_metadata")
 def wait_for_metadata(project: Path, timeout: float = 45.0) -> dict:
     meta = project / ".godot" / "gdapi.json"
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    timeout = positive_seconds("GDAPI_E2E_METADATA_TIMEOUT_SECONDS", timeout)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if meta.exists():
             try:
                 return json.loads(meta.read_text(encoding="utf-8"))
@@ -92,11 +96,13 @@ def wait_for_metadata(project: Path, timeout: float = 45.0) -> dict:
     raise RuntimeError(f"gdapi metadata never appeared at {meta}")
 
 
+@successful_wait("editor_ready")
 def wait_for_godot_ready(project: Path, timeout: float = 30.0) -> None:
     """Wait until the editor fully finishes loading (logs include 'loading_editor_layout' DONE)."""
     log = project / ".godot" / "godot.log"
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    timeout = positive_seconds("GDAPI_E2E_READY_TIMEOUT_SECONDS", timeout)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if log.exists():
             try:
                 content = log.read_text(encoding="utf-8", errors="replace")
@@ -195,15 +201,13 @@ def tree_digest(project: Path) -> str:
 # ── gdapi_test bridge ──────────────────────────────────────────────────────
 
 
+@successful_wait("undo_bridge")
 def wait_for_test_result(env: dict, timeout: float = 10.0) -> dict:
-    """等待 fixture 插件写回 undo/redo 结果。
-
-    插件在下一帧处理命令；全量套件高负载时 2s 会偶发超时
-    （观测到 "gdapi_test plugin never produced a result"），因此放宽到 10s。
-    """
+    """Wait for the fixture plugin's next-frame history result."""
     result_path = env["project"] / ".godot" / "gdapi-test-result.json"
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    timeout = positive_seconds("GDAPI_E2E_UNDO_TIMEOUT_SECONDS", timeout)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if result_path.exists():
             return json.loads(result_path.read_text(encoding="utf-8"))
         time.sleep(0.05)

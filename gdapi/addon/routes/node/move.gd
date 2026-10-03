@@ -39,6 +39,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("调整 sibling index 接 UndoRedo")
+		. mutates()
 		. desc("在同一父节点下将 node 排到 target 的 before/after;否则返回 invalid_param。")
 		. param("node_path", "String", true, "被移动节点路径")
 		. param("target_path", "String", true, "锚点节点路径,必须与 node 共享同一父节点")

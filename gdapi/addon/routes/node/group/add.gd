@@ -64,6 +64,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("节点加入 group")
+		. mutates()
 		. desc(
 			"通过 Node.add_to_group 添加,persistent=true 时落盘保留。重复加入返回 conflict。通过 EditorUndoRedoManager 提交，可撤销。"
 		)

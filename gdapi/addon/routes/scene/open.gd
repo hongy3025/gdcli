@@ -35,6 +35,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("在编辑器中打开 res:// 路径场景")
+		. mutates()
 		. desc("将指定 res:// 场景加载到当前编辑器,替换当前打开的场景(若有)。目标不存在返回 not_found。")
 		. param("path", "String", true, "目标场景的 res:// 路径")
 		. example('{"path":"res://scenes/main.tscn"}')

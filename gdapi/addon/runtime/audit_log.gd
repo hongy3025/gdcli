@@ -9,58 +9,145 @@ const MAX_ARRAY_ITEMS := 32
 const MAX_DEPTH := 8
 const REDACTED := "[REDACTED]"
 
-## 已记录条目总数：router 用它判断 handler 是否已自行审计（避免重复记录）。
-static var _total: int = 0
+## 当前同步调用栈的请求上下文；异步完成必须显式传入 response 持有的上下文。
+static var _context: Dictionary = {}
 
 
-static func total() -> int:
-	return _total
+static func enter_request(context: Dictionary) -> Dictionary:
+	var previous := _context
+	_context = context
+	return previous
+
+
+static func safety_for_route(route: String) -> String:
+	if (
+		(
+			route
+			in [
+				"editor/eval",
+				"runtime/eval",
+				"process/run",
+				"network/http_request",
+				"export/run",
+				"gdapi/audit/clear",
+				"scene/create",
+				"scene/add_node",
+				"scene/save",
+				"scene/load_sprite",
+				"scene/export_mesh_library",
+				"uid/repair",
+				"uid/update_all",
+				"tilemap/layer/clear",
+				"project/settings/set",
+				"project/settings/reset",
+			]
+		)
+		or route.begins_with("filesystem/batch/")
+		or route.begins_with("project/autoload/")
+		or route.begins_with("project/input_map/")
+	):
+		return "dangerous"
+	if route.begins_with("runtime/"):
+		return "runtime"
+	if (
+		(
+			route
+			in [
+				"scene/open",
+				"scene/close",
+				"scene/current/save",
+				"navigation/mesh/bake",
+				"audio/bus/add",
+				"audio/bus/remove",
+				"material/save",
+				"shader/write",
+				"shader/param/set",
+				"script/create",
+				"script/write",
+				"script/patch",
+				"resource/create",
+				"resource/move",
+				"resource/delete",
+				"resource/reimport",
+			]
+		)
+		or route.begins_with("filesystem/")
+		or route.begins_with("theme/")
+	):
+		return "file"
+	return "mutation"
+
+
+static func complete_request(context: Dictionary, body: Dictionary, status: int) -> void:
+	if context.is_empty() or bool(context.get("completed", false)):
+		return
+	context["completed"] = true
+	var ok := status < 400 and not body.has("error") and bool(body.get("ok", true))
+	var event: Dictionary = context.get("event", {})
+	if event.is_empty():
+		if not bool(context.get("mutation", false)) and not body.has("changed"):
+			return
+		event = {
+			"route": context["route"],
+			"safety": safety_for_route(context["route"]),
+			"summary": {"changed": bool(body.get("changed", false))},
+		}
+	event["ok"] = ok
+	event["code"] = String(body.get("code", ""))
+	_emit(event)
 
 
 static func record(
-	route: String, safety: String, summary: Dictionary, ok: bool, code: String = ""
+	route: String,
+	safety: String,
+	summary: Dictionary,
+	ok: bool,
+	code: String = "",
+	context: Dictionary = {}
 ) -> void:
+	var owner := context if not context.is_empty() else _context
+	var event := {
+		"route": String(owner.get("route", route)),
+		"safety": safety,
+		"summary": summarize(summary),
+		"ok": ok,
+		"code": code,
+	}
+	if not owner.is_empty():
+		if not bool(owner.get("completed", false)) and not owner.has("event"):
+			owner["event"] = event
+		return
+	_emit(event)
+
+
+static func _emit(event: Dictionary) -> void:
 	if not Engine.has_meta("gdapi_plugin"):
 		return
 	var plugin = Engine.get_meta("gdapi_plugin")
 	if not plugin or not plugin.has_method("audit_event"):
 		return
-	_total += 1
-	var safe_summary: Variant = summarize(summary)
-	(
-		plugin
-		. audit_event(
-			{
-				"route": route,
-				"safety": safety,
-				"summary":
-				(
-					safe_summary
-					if typeof(safe_summary) == TYPE_DICTIONARY
-					else {
-						"type": type_string(typeof(summary)),
-					}
-				),
-				"ok": ok,
-				"code": code,
-			}
-		)
-	)
+	plugin.audit_event(event)
 
 
 static func record_runtime(
-	route: String, payload: Variant, result: Variant, ok: bool, code: String = ""
+	route: String,
+	payload: Variant,
+	result: Variant,
+	ok: bool,
+	code: String = "",
+	context: Dictionary = {}
 ) -> void:
 	record(
 		route,
-		"runtime",
+		"dangerous" if route == "runtime/eval" else "runtime",
 		{
 			"operation": route,
 			"payload": summarize(payload),
 			"result": summarize(result),
 		},
 		ok,
-		code
+		code,
+		context
 	)
 
 

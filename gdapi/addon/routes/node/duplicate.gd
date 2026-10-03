@@ -37,6 +37,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("复制节点及子结构并接 UndoRedo")
+		. mutates()
 		. desc(
 			"采用 Node.DUPLICATE_USE_INSTANTIATION|DUPLICATE_SCRIPTS|DUPLICATE_GROUPS|DUPLICATE_SIGNALS。"
 		)

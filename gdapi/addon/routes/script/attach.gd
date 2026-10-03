@@ -25,6 +25,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("挂接脚本到节点")
+		. mutates()
 		. desc(
 			"通过 EditorUndoRedoManager 提交 set_script;可 undo/redo。脚本必须是 res:// 路径下的 .gd Script 资源。"
 		)

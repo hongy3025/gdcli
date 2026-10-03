@@ -18,6 +18,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("通过 UndoRedo 赋值项目材质")
+		. mutates()
 		. param("node_path", "String", true, "目标节点", "")
 		. param("path", "String", true, "Material 的 res:// 路径", "")
 		. example('{"node_path":"Sprite","path":"res://materials/sprite.tres"}')

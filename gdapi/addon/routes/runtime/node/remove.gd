@@ -14,6 +14,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("删除运行期节点(异步 queue_free)")
+		. mutates()
 		. desc(
 			"通过 queue_free 释放节点,不能删除 SceneTree.root,也不能删除当前 probe 持有的节点。操作不可撤销,固定返回 undoable:false。"
 		)

@@ -48,14 +48,48 @@ from e2e.shared_fixture import (  # noqa: E402,F401 — re-export
     reset_shared_state,
     teardown_environment,
 )
+from e2e.timing import TIMINGS, positive_seconds, validate_configuration, write_report
 
 
-E2E_DEADLOCK_TIMEOUT_SECONDS = 180
+def pytest_configure(config):
+    try:
+        validate_configuration()
+    except ValueError as exc:
+        raise pytest.UsageError(str(exc)) from exc
+    TIMINGS.samples.clear()
+    TIMINGS.enabled = False
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    # Unit/mocked harness tests coexist with real E2E tests in the file session.
+    # Only the actual shared-editor fixture closure supplies measured samples.
+    TIMINGS.enabled = "e2e_editor" in item.fixturenames
+
+
+def pytest_sessionfinish(session, exitstatus):
+    path = Path(os.environ.get("GDAPI_E2E_TIMING_JSON", ".pytest-artifacts/wait-timings.json"))
+    if not path.is_absolute():
+        path = Path(session.config.rootpath) / path
+    write_report(path, exitstatus=int(exitstatus), editor_starts=int(EDITOR_START_COUNTER["starts"]))
+
+
+def pytest_terminal_summary(terminalreporter):
+    terminalreporter.section("Successful wait timings (seconds; recommendations only)")
+    for group, row in TIMINGS.summary().items():
+        terminalreporter.write_line(
+            f"{group}: count={row['count']} P50={row['p50_seconds']:.4f} "
+            f"P95={row['p95_seconds']:.4f} P99={row['p99_seconds']:.4f} "
+            f"max={row['max_seconds']:.4f} P99*3={row['recommended_timeout_seconds']:.4f}"
+        )
+    terminalreporter.write_line(
+        "JSON: " + os.environ.get("GDAPI_E2E_TIMING_JSON", ".pytest-artifacts/wait-timings.json")
+    )
 
 
 def pytest_collection_modifyitems(items):
     """Bound deadlocks and reorder collected tests by wall-time bucket."""
-    timeout_marker = pytest.mark.timeout(E2E_DEADLOCK_TIMEOUT_SECONDS)
+    timeout_marker = pytest.mark.timeout(positive_seconds("GDAPI_E2E_DEADLOCK_TIMEOUT_SECONDS"))
     for item in items:
         if item.get_closest_marker("budget") is None:
             item.add_marker(timeout_marker)

@@ -28,6 +28,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("删除资源文件")
+		. mutates()
 		. desc("reimport 自动更新引用。产生 audit 记录。")
 		. param("path", "String", true, "res:// 资源路径")
 		. example('{"path":"res://resources/moved.tres"}')

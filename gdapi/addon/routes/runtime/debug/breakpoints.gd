@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("编辑断点")
+		. mutates()
 		. desc("M3 不支持此能力;EditorDebugger session 不暴露 break/bp_set 给 probe。返回 not_supported。")
 		. returns("错误结果", {"error": "String", "code": "not_supported"})
 	)

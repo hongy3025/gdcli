@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("复制运行期节点")
+		. mutates()
 		. desc("只允许复制当前场景内的专用节点，并在原父节点下使用不冲突的新名称创建副本。操作不可撤销。")
 		. param("node_path", "String", true, "专用源节点绝对路径", "")
 		. param("name", "String", true, "副本名称", "")

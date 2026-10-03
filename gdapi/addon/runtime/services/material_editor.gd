@@ -8,6 +8,7 @@ const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
 const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.gd")
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
+const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_editor.gd")
 
 const EDITABLE_PROPERTIES := {
 	"CanvasItemMaterial":
@@ -152,15 +153,7 @@ static func _save_resource(resource: Material, path: Variant, route: String) -> 
 	if not checked.ok:
 		AuditLog.record(route, "file", {"path": path}, false, checked.code)
 		return checked
-	DirAccess.make_dir_recursive_absolute(
-		ProjectSettings.globalize_path(checked.path).get_base_dir()
-	)
-	var save_error := ResourceSaver.save(resource, checked.path)
-	if save_error != OK:
-		AuditLog.record(route, "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR)
-		return _error(ErrorCodes.GODOT_ERROR, "ResourceSaver.save failed: " + str(save_error))
-	AuditLog.record(route, "file", {"path": checked.path}, true)
-	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": checked.path}
+	return ResourceEditor.save_verified(resource, checked.path, route)
 
 
 static func _project_path(path: Variant, mode: String) -> Dictionary:

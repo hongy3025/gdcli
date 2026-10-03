@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("覆盖写入 .gd 脚本文件")
+		. mutates()
 		. desc("与 script/create 等价;目标存在直接覆盖。M2 中不允许任意 patch,使用 /patch 行级替换。")
 		. param("path", "String", true, "目标 res:// 路径")
 		. param("content", "String", true, "完整脚本内容")

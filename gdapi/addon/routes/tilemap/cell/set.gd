@@ -27,6 +27,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置 TileMap 单元格")
+		. mutates()
 		. param("layer_path", "String", true, "TileMapLayer 路径", "")
 		. param("cell", "Vector2i", true, "单元格坐标", "")
 		. param("source_id", "int", true, "TileSet source", "")

@@ -15,7 +15,6 @@ if str(_REPO_ROOT_CANDIDATE) not in sys.path:
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
-from e2e.route_manifests import M3_RUNTIME_ROUTES
 from .helpers import command_doc, exec_ok
 
 

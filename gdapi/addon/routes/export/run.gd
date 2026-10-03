@@ -22,6 +22,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("执行受控项目导出")
+		. mutates()
 		. param("preset", "String", true, "预设名")
 		. param("path", "String", true, "项目内输出路径")
 		. returns(

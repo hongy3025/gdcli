@@ -22,6 +22,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("扫描并修复资源 UID")
+		. mutates()
 		. param("roots", "Array[String]", false, "扫描根", ["res://"])
 		. param("dry_run", "bool", false, "只规划不写入", true)
 		. returns(

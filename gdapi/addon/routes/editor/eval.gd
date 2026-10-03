@@ -22,6 +22,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("执行受限的无副作用编辑器表达式")
+		. mutates()
 		. desc("仅允许固定输入和受支持的 Variant 类型；源码上限 16 KiB，禁止语句/成员访问/赋值。")
 		. param("source", "String", true, "受限 Expression 源码")
 		. param("inputs", "Dictionary", false, "输入值（任意 key，值需为受支持的 Variant 类型）")

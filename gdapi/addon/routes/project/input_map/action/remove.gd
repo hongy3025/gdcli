@@ -13,6 +13,10 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("删除输入动作").returns("变更结果", {"ok": "bool", "undoable": "bool"}).example(
-		'{"action":"temporary"}'
+	return (
+		GdApiRouteDoc
+		. make("删除输入动作")
+		. mutates()
+		. returns("变更结果", {"ok": "bool", "undoable": "bool"})
+		. example('{"action":"temporary"}')
 	)

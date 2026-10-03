@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("触发 InputMap action")
+		. mutates()
 		. desc("必须先在项目 InputMap 中存在;按下=true 走 action_press,false 走 action_release。")
 		. param("action", "String", true, "InputMap action 名,如 ui_accept", "")
 		. param("pressed", "bool", false, "true 按下,false 弹起", "true")

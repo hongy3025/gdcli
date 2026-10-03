@@ -33,6 +33,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("保存当前编辑场景")
+		. mutates()
 		. desc("调用 EditorInterface.save_scene() 或 save_scene_as(target)。目标存在时直接覆盖。")
 		. param("path", "String", false, "另存为的 res:// 路径,默认保存到当前路径")
 		. example('{"path":"res://scenes/main.tscn"}')

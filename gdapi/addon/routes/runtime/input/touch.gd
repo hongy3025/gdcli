@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("注入 touch 事件")
+		. mutates()
 		. desc("index 是触摸点 id;pressed=true 表示按下,false 弹起。")
 		. param("index", "int", false, "触摸点 index,默认 0", "0")
 		. param("pressed", "bool", false, "是否按下", "true")

@@ -14,6 +14,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("顺序触发多个输入事件")
+		. mutates()
 		. desc("events 是按 after_ms 延迟触发的输入事件列表;每项指向 runtime/input/* 子路由。最多 100 项,累计 10 秒。")
 		. param("events", "Array", true, "数组,每项 {after_ms, route, data}", "[]")
 		. example(

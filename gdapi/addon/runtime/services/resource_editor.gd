@@ -14,6 +14,335 @@ const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
 
+## Generic property access uses the actual property list, not arbitrary Object.set().
+static func get_property(path: Variant, property: Variant) -> Dictionary:
+	var target := _property_target(path, property, "read")
+	if not target.ok:
+		return target
+	return {
+		"ok": true,
+		"path": target.path,
+		"property": property,
+		"value": VariantCodec.from_variant(target.resource.get(property)),
+		"type": type_string(int(target.spec.type)),
+		"usage": int(target.spec.usage),
+		"writable": _writable_property(target.resource, target.spec),
+		"undoable": false,
+	}
+
+
+static func set_property(path: Variant, property: Variant, value: Variant) -> Dictionary:
+	var target := _property_target(path, property, "write")
+	if not target.ok:
+		return target
+	if not _writable_property(target.resource, target.spec):
+		return _failure(ErrorCodes.PERMISSION_DENIED, "resource property is protected or read-only")
+	var decoded := decode_property(value, target.spec)
+	if not decoded.ok:
+		return decoded
+	var resource: Resource = target.resource
+	var previous: Variant = resource.get(property)
+	resource.set(property, decoded.value)
+	if not _equivalent(resource.get(property), decoded.value):
+		resource.set(property, previous)
+		return _failure(ErrorCodes.GODOT_ERROR, "resource rejected the property value")
+	var result := save_verified(resource, target.path, "resource/set")
+	if not result.ok:
+		resource.set(property, previous)
+		return result
+	result["property"] = property
+	result["value"] = VariantCodec.from_variant(resource.get(property))
+	result["changed"] = not _equivalent(previous, resource.get(property))
+	return result
+
+
+static func _property_target(path: Variant, property: Variant, mode: String) -> Dictionary:
+	if typeof(path) != TYPE_STRING or typeof(property) != TYPE_STRING:
+		return _failure(ErrorCodes.INVALID_PARAM, "path and property must be strings")
+	if String(property).is_empty():
+		return _failure(ErrorCodes.MISSING_PARAM, "property is required")
+	var checked := PathGuard.validate(path, mode)
+	if not checked.ok:
+		return checked
+	if mode == "write" and not checked.path.get_extension() in ["tres", "res"]:
+		return _failure(ErrorCodes.INVALID_PATH, "resource/set requires a .tres or .res resource")
+	if not ResourceLoader.exists(checked.path):
+		return _failure(ErrorCodes.NOT_FOUND, "resource not found: " + checked.path)
+	var resource := ResourceLoader.load(
+		checked.path,
+		"",
+		(
+			ResourceLoader.CACHE_MODE_REPLACE_DEEP
+			if mode == "write"
+			else ResourceLoader.CACHE_MODE_IGNORE_DEEP
+		)
+	)
+	if resource == null:
+		return _failure(ErrorCodes.GODOT_ERROR, "failed to load resource")
+	for spec in resource.get_property_list():
+		if String(spec.name) == property:
+			return {"ok": true, "resource": resource, "spec": spec, "path": checked.path}
+	return _failure(ErrorCodes.NOT_FOUND, "resource property not found: " + String(property))
+
+
+static func _writable_property(resource: Resource, spec: Dictionary) -> bool:
+	var name := String(spec.name)
+	return (
+		not resource is Script
+		and not resource is Shader
+		and name not in ["script", "source_code", "code", "resource_path"]
+		and not name.begins_with("_")
+		and bool(int(spec.usage) & PROPERTY_USAGE_STORAGE)
+		and not bool(int(spec.usage) & PROPERTY_USAGE_READ_ONLY)
+	)
+
+
+static func decode_property(value: Variant, spec: Dictionary) -> Dictionary:
+	var decoded := VariantCodec.decode(value)
+	if not decoded.ok:
+		return _failure(ErrorCodes.INVALID_PARAM, decoded.error)
+	var expected := int(spec.type)
+	var actual := typeof(decoded.value)
+	if expected == TYPE_INT and actual == TYPE_FLOAT:
+		var number := float(decoded.value)
+		if not is_finite(number) or number != floor(number):
+			return _failure(ErrorCodes.INVALID_PARAM, "property requires a finite integer")
+		decoded.value = int(number)
+	elif expected == TYPE_FLOAT and actual == TYPE_INT:
+		decoded.value = float(decoded.value)
+	elif expected == TYPE_STRING_NAME and actual == TYPE_STRING:
+		decoded.value = StringName(decoded.value)
+	elif expected != TYPE_NIL and actual != expected:
+		if not (expected == TYPE_OBJECT and decoded.value == null):
+			return _failure(ErrorCodes.INVALID_PARAM, "property requires " + type_string(expected))
+	if expected == TYPE_OBJECT and decoded.value != null:
+		if not decoded.value is Resource:
+			return _failure(ErrorCodes.INVALID_PARAM, "object properties require a Resource")
+		var classes := String(spec.get("hint_string", "")).split(",", false)
+		if int(spec.get("hint", 0)) == PROPERTY_HINT_RESOURCE_TYPE and not classes.is_empty():
+			var matches := false
+			for class_type in classes:
+				if decoded.value.is_class(class_type.strip_edges()):
+					matches = true
+			if not matches:
+				return _failure(ErrorCodes.INVALID_PARAM, "resource class does not match property")
+	return decoded
+
+
+## One save strategy for resource, material, shader-material and Theme mutations.
+## Capture bytes before writing and compare the actual uncached disk resource.
+static func save_verified(resource: Resource, path: String, route: String) -> Dictionary:
+	var checked := PathGuard.validate(path, "write")
+	if not checked.ok:
+		return checked
+	path = checked.path
+	var existed := FileAccess.file_exists(path)
+	var before := PackedByteArray()
+	if existed:
+		var probe := FileAccess.open(path, FileAccess.READ_WRITE)
+		if probe == null:
+			return _save_failure(
+				route, path, "resource file is not writable", ErrorCodes.PERMISSION_DENIED
+			)
+		before = probe.get_buffer(probe.get_length())
+		probe.close()
+	var previous_path := resource.resource_path
+	var uid_path := path + ".uid"
+	var uid_existed := FileAccess.file_exists(uid_path)
+	var uid_before := FileAccess.get_file_as_bytes(uid_path) if uid_existed else PackedByteArray()
+	var mkdir_error := DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(path).get_base_dir()
+	)
+	if mkdir_error != OK:
+		return _save_failure(route, path, "failed to create resource directory")
+	var save_error := ResourceSaver.save(resource, path)
+	var persisted: Resource = null
+	if save_error == OK:
+		persisted = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE_DEEP)
+	if save_error != OK or persisted == null or not _equivalent(resource, persisted):
+		var restored := _restore_file(path, existed, before)
+		restored = _restore_file(uid_path, uid_existed, uid_before) and restored
+		resource.resource_path = previous_path
+		var message := "resource save/read-back failed: " + str(save_error)
+		if not restored:
+			message += "; disk rollback failed"
+		return _save_failure(route, path, message)
+	AuditLog.record(route, "file", {"path": path}, true)
+	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": path}
+
+
+static func _restore_file(path: String, existed: bool, bytes: PackedByteArray) -> bool:
+	if not existed:
+		return not FileAccess.file_exists(path) or DirAccess.remove_absolute(path) == OK
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		return FileAccess.get_file_as_bytes(path) == bytes
+	file.store_buffer(bytes)
+	file.close()
+	return FileAccess.get_file_as_bytes(path) == bytes
+
+
+static func _equivalent(a: Variant, b: Variant, visited: Array = []) -> bool:
+	if a is Resource and b is Resource:
+		if a.get_class() != b.get_class():
+			return false
+		var pair := [a.get_instance_id(), b.get_instance_id()]
+		if pair in visited:
+			return true
+		visited.append(pair)
+		for spec in a.get_property_list():
+			if int(spec.usage) & PROPERTY_USAGE_STORAGE and spec.name != "resource_path":
+				if not _equivalent(a.get(spec.name), b.get(spec.name), visited):
+					return false
+		return true
+	if typeof(a) == TYPE_FLOAT and typeof(b) == TYPE_FLOAT:
+		return is_equal_approx(a, b)
+	if a is Array and b is Array:
+		if a.size() != b.size():
+			return false
+		for index in a.size():
+			if not _equivalent(a[index], b[index], visited):
+				return false
+		return true
+	if a is Dictionary and b is Dictionary:
+		if a.size() != b.size():
+			return false
+		for key in a:
+			if not b.has(key) or not _equivalent(a[key], b[key], visited):
+				return false
+		return true
+	if a is Color and b is Color:
+		return a.is_equal_approx(b)
+	return a == b
+
+
+static func _save_failure(
+	route: String, path: String, message: String, code: String = ErrorCodes.GODOT_ERROR
+) -> Dictionary:
+	AuditLog.record(route, "file", {"path": path}, false, code)
+	return _failure(code, message)
+
+
+static func _failure(code: String, message: String) -> Dictionary:
+	return {"ok": false, "code": code, "error": message, "changed": false, "undoable": false}
+
+
+class PreviewResult:
+	extends RefCounted
+	var complete := false
+	var texture: Texture2D
+
+	func receive(
+		_path: String, preview_texture: Texture2D, _small: Texture2D, _data: Variant
+	) -> void:
+		texture = preview_texture
+		complete = true
+
+
+static func preview(
+	path: Variant, width: Variant = 0, height: Variant = 0, deadline_ms: Variant = 5000
+) -> Dictionary:
+	if typeof(path) != TYPE_STRING:
+		return _failure(ErrorCodes.INVALID_PARAM, "path must be a string")
+	for size in [width, height, deadline_ms]:
+		if (
+			not (typeof(size) in [TYPE_INT, TYPE_FLOAT])
+			or not is_finite(float(size))
+			or float(size) != floor(float(size))
+		):
+			return _failure(
+				ErrorCodes.INVALID_PARAM, "preview dimensions/deadline must be integers"
+			)
+	if (
+		width < 0
+		or height < 0
+		or width > 4096
+		or height > 4096
+		or deadline_ms < 1
+		or deadline_ms > 30000
+	):
+		return _failure(
+			ErrorCodes.INVALID_PARAM, "dimensions must be 0-4096; deadline_ms must be 1-30000"
+		)
+	var checked := PathGuard.validate(path, "read")
+	if not checked.ok:
+		return checked
+	if not ResourceLoader.exists(checked.path):
+		return _failure(ErrorCodes.NOT_FOUND, "resource not found")
+	var resource := ResourceLoader.load(checked.path)
+	if resource == null:
+		return _failure(ErrorCodes.GODOT_ERROR, "failed to load resource")
+	var image: Image
+	var source := "texture"
+	if resource is Texture2D:
+		image = resource.get_image()
+	elif Engine.is_editor_hint():
+		var generator := EditorInterface.get_resource_previewer()
+		if generator == null:
+			return _failure(
+				ErrorCodes.NOT_SUPPORTED,
+				"EditorResourcePreview unavailable for " + resource.get_class()
+			)
+		var pending := PreviewResult.new()
+		generator.queue_edited_resource_preview(resource, pending, &"receive", null)
+		var deadline := Time.get_ticks_msec() + int(deadline_ms)
+		var tree := EditorInterface.get_base_control().get_tree()
+		while not pending.complete and Time.get_ticks_msec() < deadline:
+			await tree.create_timer(0.02).timeout
+		if not pending.complete:
+			return _failure(ErrorCodes.TIMEOUT, "resource preview generation exceeded deadline")
+		if pending.texture == null:
+			return _failure(
+				ErrorCodes.NOT_SUPPORTED,
+				"no preview generator for resource class " + resource.get_class()
+			)
+		image = pending.texture.get_image()
+		source = "editor_resource_preview"
+	else:
+		return _failure(
+			ErrorCodes.NOT_SUPPORTED, "non-texture previews require EditorResourcePreview"
+		)
+	if image == null or image.is_empty():
+		return _failure(
+			ErrorCodes.GODOT_ERROR,
+			"preview generator returned no image for " + resource.get_class()
+		)
+	if image.is_compressed() and image.decompress() != OK:
+		return _failure(ErrorCodes.GODOT_ERROR, "failed to decompress preview image")
+	var original_width := image.get_width()
+	var original_height := image.get_height()
+	var out_width := int(width)
+	var out_height := int(height)
+	if out_width == 0 and out_height == 0:
+		var ratio := minf(1.0, 256.0 / maxf(original_width, original_height))
+		out_width = maxi(1, int(round(original_width * ratio)))
+		out_height = maxi(1, int(round(original_height * ratio)))
+	elif out_width == 0:
+		out_width = maxi(1, int(round(float(original_width) * out_height / original_height)))
+	elif out_height == 0:
+		out_height = maxi(1, int(round(float(original_height) * out_width / original_width)))
+	if out_width > 4096 or out_height > 4096:
+		return _failure(ErrorCodes.INVALID_PARAM, "aspect-preserving output exceeds 4096 pixels")
+	if out_width != original_width or out_height != original_height:
+		image.resize(out_width, out_height, Image.INTERPOLATE_NEAREST)
+	var png := image.save_png_to_buffer()
+	if png.is_empty():
+		return _failure(ErrorCodes.GODOT_ERROR, "PNG encoding failed")
+	return {
+		"ok": true,
+		"path": checked.path,
+		"class": resource.get_class(),
+		"source": source,
+		"format": "png",
+		"png_base64": Marshalls.raw_to_base64(png),
+		"width": image.get_width(),
+		"height": image.get_height(),
+		"original_width": original_width,
+		"original_height": original_height,
+		"undoable": false,
+	}
+
+
 ## 读取资源元数据
 static func info(path: String) -> Dictionary:
 	var checked := PathGuard.validate(path, "read")
@@ -175,25 +504,10 @@ static func create(path: String, type: String, properties: Dictionary) -> Dictio
 				"error": "property not found on resource: " + key
 			}
 		instance.set(key, decoded.value)
-	var err := ResourceSaver.save(instance, checked.path)
-	if err != OK:
-		AuditLog.record(
-			"resource/create", "file", {"path": checked.path}, false, ErrorCodes.GODOT_ERROR
-		)
-		return {
-			"ok": false,
-			"code": ErrorCodes.GODOT_ERROR,
-			"error": "ResourceSaver.save failed: " + str(err)
-		}
-	AuditLog.record("resource/create", "file", {"path": checked.path, "type": type}, true, "")
-	return {
-		"ok": true,
-		"changed": true,
-		"saved": true,
-		"undoable": false,
-		"path": checked.path,
-		"class": type
-	}
+	var result := save_verified(instance, checked.path, "resource/create")
+	if result.ok:
+		result["class"] = type
+	return result
 
 
 ## 把资源赋给节点的属性,接 UndoRedo

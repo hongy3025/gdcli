@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("把 .gd 脚本加载到 Script Editor")
+		. mutates()
 		. desc("line/column 为 1-based;省略时只加载脚本不定位。")
 		. param("path", "String", true, "res:// 路径")
 		. param("line", "int", false, "1-based 行号,省略仅打开", "-1")

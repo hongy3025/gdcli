@@ -31,6 +31,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("替换脚本中 [start_line, end_line] 行区间")
+		. mutates()
 		. desc("1-based 闭区间替换;text 支持多行,通过换行拆分。写入磁盘使用 temp file + rename 原子化;无变化时直接返回成功不写盘。")
 		. param("path", "String", true, "res:// 路径")
 		. param("start_line", "int", true, "起始行号 (1-based, inclusive)")

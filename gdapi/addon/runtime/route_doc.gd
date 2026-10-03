@@ -22,6 +22,8 @@ var returns_desc: String = ""
 var returns_fields: Dictionary = {}
 ## 调用示例（JSON 请求体字符串数组）
 var examples: Array[String] = []
+## 请求级 mutation 声明：错误响应尚无 changed 时仍需审计。
+var mutation: bool = false
 
 
 ## 静态工厂：创建一个带 summary 的 RouteDoc
@@ -41,6 +43,12 @@ static func make(summary_: String) -> GdApiRouteDoc:
 ## @return self 以便链式调用
 func desc(text: String) -> GdApiRouteDoc:
 	description = text
+	return self
+
+
+## 声明路由会修改编辑器、项目文件或运行时状态。
+func mutates() -> GdApiRouteDoc:
+	mutation = true
 	return self
 
 

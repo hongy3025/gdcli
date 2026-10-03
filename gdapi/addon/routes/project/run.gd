@@ -108,6 +108,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("运行 Godot 场景")
+		. mutates()
 		. desc(
 			(
 				"不带 scene_path 时运行主场景；带 scene_path 时运行指定路径的自定义场景；"

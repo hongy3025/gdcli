@@ -13,6 +13,10 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("删除自动加载").returns("变更结果", {"ok": "bool", "undoable": "bool"}).example(
-		'{"name":"State"}'
+	return (
+		GdApiRouteDoc
+		. make("删除自动加载")
+		. mutates()
+		. returns("变更结果", {"ok": "bool", "undoable": "bool"})
+		. example('{"name":"State"}')
 	)

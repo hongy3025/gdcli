@@ -19,6 +19,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建或覆盖项目 Shader")
+		. mutates()
 		. param("path", "String", true, "res:// .gdshader 目标", "")
 		. param("source", "String", true, "完整 shader 源码", "")
 		. example('{"path":"res://shaders/basic.gdshader","source":"shader_type canvas_item;"}')

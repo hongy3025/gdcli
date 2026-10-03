@@ -64,6 +64,7 @@ func dispatch(
 		}
 		if mutation:
 			_audit(
+				res,
 				public_route if not public_route.is_empty() else op,
 				payload,
 				disconnected,
@@ -85,6 +86,7 @@ func dispatch(
 		}
 		if mutation:
 			_audit(
+				res,
 				public_route if not public_route.is_empty() else op,
 				payload,
 				unavailable,
@@ -220,7 +222,9 @@ func _complete(
 			body["changed"] = bool(body.get("changed", true))
 			body["undoable"] = false
 			body["operation"] = op
-			_audit(public_route if not public_route.is_empty() else op, payload, reply, true, "")
+			_audit(
+				res, public_route if not public_route.is_empty() else op, payload, reply, true, ""
+			)
 		res.json(body)
 		return
 
@@ -228,7 +232,9 @@ func _complete(
 	if code.is_empty():
 		code = ErrorCodes.GODOT_ERROR
 	if mutation:
-		_audit(public_route if not public_route.is_empty() else op, payload, reply, false, code)
+		_audit(
+			res, public_route if not public_route.is_empty() else op, payload, reply, false, code
+		)
 	_send_error(res, reply)
 
 
@@ -254,6 +260,7 @@ func _reject(
 	if mutation:
 		var payload: Variant = req.body if req != null else null
 		_audit(
+			res,
 			public_route if not public_route.is_empty() else op,
 			payload,
 			failure,
@@ -263,5 +270,7 @@ func _reject(
 	_send_error(res, failure)
 
 
-func _audit(op: String, payload: Variant, result: Variant, ok: bool, code: String) -> void:
-	AuditLog.record_runtime(op, payload, result, ok, code)
+func _audit(
+	res: GdApiResponse, op: String, payload: Variant, result: Variant, ok: bool, code: String
+) -> void:
+	AuditLog.record_runtime(op, payload, result, ok, code, res.audit_context)

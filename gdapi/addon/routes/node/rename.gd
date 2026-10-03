@@ -36,6 +36,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("重命名节点接 UndoRedo")
+		. mutates()
 		. desc("通过 EditAction.commit_property 提交 name 属性,自动避开兄弟节点同名。")
 		. param("node_path", "String", true, "节点路径")
 		. param("name", "String", true, "新节点名")

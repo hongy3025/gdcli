@@ -1,0 +1,22 @@
+[gd_scene load_steps=3 format=3 uid="uid://dcsbatchaaa"]
+
+[ext_resource type="PackedScene" path="res://scene_batch/base.tscn" id="1"]
+[ext_resource type="Shape2D" path="res://scene_batch/shape.tres" id="2"]
+
+[node name="BatchA" type="Node2D"]
+
+[node name="Target" type="Node2D" parent="." groups=["batch_targets"]]
+position = Vector2(1, 2)
+
+[node name="Twin" type="Node2D" parent="."]
+
+[node name="Reference" type="RemoteTransform2D" parent="."]
+remote_path = NodePath("../Target")
+
+[node name="Collision" type="CollisionShape2D" parent="."]
+shape = ExtResource("2")
+
+[node name="Shared" parent="." instance=ExtResource("1")]
+position = Vector2(11, 12)
+
+[connection signal="visibility_changed" from="Target" to="Twin" method="hide"]

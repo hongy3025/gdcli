@@ -40,6 +40,12 @@ static func find(node_path: String) -> Dictionary:
 	if rel == "" or rel == String(edited.name):
 		return {"ok": true, "node": edited, "node_path": "/root/" + String(edited.name)}
 	var rel_parts := rel.split("/", false)
+	if ".." in rel_parts or ":" in rel:
+		return {
+			"ok": false,
+			"code": ErrorCodes.PERMISSION_DENIED,
+			"error": "node paths must remain inside the edited scene"
+		}
 	if rel_parts.size() > 0 and rel_parts[0] == String(edited.name):
 		rel_parts = rel_parts.slice(1)
 	var rel_clean := "/".join(rel_parts)
@@ -48,12 +54,22 @@ static func find(node_path: String) -> Dictionary:
 	var node: Node = edited.get_node_or_null(NodePath(rel_clean))
 	if node == null:
 		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "node not found: " + node_path}
+	if node != edited and not edited.is_ancestor_of(node):
+		return {
+			"ok": false,
+			"code": ErrorCodes.PERMISSION_DENIED,
+			"error": "node is outside the edited scene"
+		}
 	return {"ok": true, "node": node, "node_path": "/root/" + String(edited.name) + "/" + rel_clean}
 
 
 ## 验证属性名,拒绝脚本源码类保留属性
 static func check_property(target: Object, property: StringName) -> Dictionary:
-	if property in RESERVED_PROPERTIES:
+	if (
+		property in RESERVED_PROPERTIES
+		or String(property).begins_with("metadata/gdapi_")
+		or String(property).begins_with("metadata/_")
+	):
 		return {
 			"ok": false,
 			"code": ErrorCodes.PERMISSION_DENIED,
@@ -552,3 +568,254 @@ static func select_user_paths(nodes: Array) -> Array:
 	for n in nodes:
 		out.append(_user_path_for(n))
 	return out
+
+
+static func metadata(
+	node_path: String, key: String, operation: String, encoded: Variant = null
+) -> Dictionary:
+	var lookup := find(node_path)
+	if not lookup.ok:
+		return lookup
+	var node: Node = lookup.node
+	if key == "" or not key.is_valid_identifier():
+		return {
+			"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "key must be a valid identifier"
+		}
+	if operation == "get":
+		if not node.has_meta(key):
+			return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "metadata does not exist"}
+		return {
+			"ok": true,
+			"node_path": lookup.node_path,
+			"key": key,
+			"value": VariantCodec.from_variant(node.get_meta(key))
+		}
+	if key.begins_with("_") or key.begins_with("gdapi_"):
+		return {
+			"ok": false,
+			"code": ErrorCodes.PERMISSION_DENIED,
+			"error": "internal and API authorization metadata is protected"
+		}
+	var existed := node.has_meta(key)
+	var previous: Variant = node.get_meta(key) if existed else null
+	if operation == "remove" and not existed:
+		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "metadata does not exist"}
+	var value: Variant = null
+	if operation == "set":
+		var decoded := VariantCodec.decode(encoded)
+		if not decoded.ok:
+			return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": decoded.error}
+		value = decoded.value
+		if (
+			value == null
+			or typeof(value) == TYPE_OBJECT
+			or typeof(value) == TYPE_CALLABLE
+			or typeof(value) == TYPE_SIGNAL
+		):
+			return {
+				"ok": false,
+				"code": ErrorCodes.INVALID_PARAM,
+				"error": "metadata requires a non-null serializable value"
+			}
+	var manager := EditAction.undo_redo()
+	if manager == null:
+		return {
+			"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "UndoRedo manager unavailable"
+		}
+	manager.create_action("gdcli: node metadata " + operation, UndoRedo.MERGE_DISABLE, node)
+	if operation == "set":
+		manager.add_do_method(node, "set_meta", StringName(key), value)
+	else:
+		manager.add_do_method(node, "remove_meta", StringName(key))
+	if existed:
+		manager.add_undo_method(node, "set_meta", StringName(key), previous)
+	else:
+		manager.add_undo_method(node, "remove_meta", StringName(key))
+	manager.commit_action()
+	if (
+		(operation == "set" and (not node.has_meta(key) or node.get_meta(key) != value))
+		or (operation == "remove" and node.has_meta(key))
+	):
+		manager.get_history_undo_redo(manager.get_object_history_id(node)).undo()
+		return {
+			"ok": false,
+			"code": ErrorCodes.GODOT_ERROR,
+			"error": "metadata read-back failed; rolled back"
+		}
+	return {
+		"ok": true,
+		"changed": true,
+		"undoable": true,
+		"node_path": lookup.node_path,
+		"key": key,
+		"value": VariantCodec.from_variant(value)
+	}
+
+
+static func call_method(payload: Dictionary) -> Dictionary:
+	var result := _call_checked(payload)
+	AuditLog.record(
+		"node/call",
+		"mutation",
+		{
+			"node_path": payload.get("node_path", ""),
+			"method": payload.get("method", ""),
+			"undoable": false
+		},
+		result.ok,
+		result.get("code", "")
+	)
+	return result
+
+
+static func _call_checked(payload: Dictionary) -> Dictionary:
+	var lookup := find(str(payload.get("node_path", "")))
+	if not lookup.ok:
+		return lookup
+	var node: Node = lookup.node
+	var method := str(payload.get("method", ""))
+	# No dispatch/eval/lifetime/file/network/process escape hatches, even if declared.
+	var denied := [
+		"free",
+		"queue_free",
+		"call",
+		"callv",
+		"call_deferred",
+		"set",
+		"set_deferred",
+		"set_script",
+		"set_meta",
+		"remove_meta",
+		"emit_signal",
+		"notification",
+		"propagate_call",
+		"propagate_notification",
+		"rpc",
+		"rpc_id",
+		"rpc_config",
+		"get_script",
+		"get_tree",
+		"get_node",
+		"get_parent",
+		"get_viewport",
+		"duplicate",
+		"add_child",
+		"remove_child",
+		"replace_by",
+		"reparent",
+		"request_ready"
+	]
+	if method == "" or method.begins_with("_") or method in denied:
+		return {
+			"ok": false, "code": ErrorCodes.PERMISSION_DENIED, "error": "method is not permitted"
+		}
+	var safe_native := [
+		"get_class",
+		"get_name",
+		"is_visible",
+		"is_visible_in_tree",
+		"show",
+		"hide",
+		"get_position",
+		"get_rotation",
+		"get_scale",
+		"get_child_count",
+		"is_in_group",
+		"get_groups",
+		"get_text"
+	]
+	var script: Script = node.get_script()
+	var script_method := false
+	if script != null:
+		for info in script.get_script_method_list():
+			if str(info.name) == method:
+				script_method = true
+	var declared: Variant = node.get_meta("gdapi_callable_methods", PackedStringArray())
+	var explicit := (declared is PackedStringArray or declared is Array) and method in declared
+	if script_method:
+		if not explicit or not script.is_tool():
+			return {
+				"ok": false,
+				"code": ErrorCodes.PERMISSION_DENIED,
+				"error": "script methods require @tool and gdapi_callable_methods"
+			}
+	elif method not in safe_native:
+		return {
+			"ok": false,
+			"code": ErrorCodes.PERMISSION_DENIED,
+			"error": "native method is not in the safe allowlist"
+		}
+	if not node.has_method(method):
+		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "method does not exist"}
+	var raw_args: Variant = payload.get("args", [])
+	if not raw_args is Array:
+		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "args must be an array"}
+	var signature: Dictionary = {}
+	for info in node.get_method_list():
+		if str(info.name) == method:
+			signature = info
+			break
+	var parameters: Array = signature.get("args", [])
+	var defaults: Array = signature.get("default_args", [])
+	if raw_args.size() < parameters.size() - defaults.size() or raw_args.size() > parameters.size():
+		return {
+			"ok": false,
+			"code": ErrorCodes.INVALID_PARAM,
+			"error": "argument count does not match method signature"
+		}
+	var args: Array = []
+	for i in raw_args.size():
+		var decoded := VariantCodec.decode(raw_args[i])
+		if not decoded.ok:
+			return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": decoded.error}
+		var value: Variant = decoded.value
+		var expected := int(parameters[i].get("type", TYPE_NIL))
+		if typeof(value) in [TYPE_OBJECT, TYPE_CALLABLE, TYPE_SIGNAL]:
+			return {
+				"ok": false,
+				"code": ErrorCodes.PERMISSION_DENIED,
+				"error": "object/callable/signal arguments are forbidden"
+			}
+		if expected != TYPE_NIL and typeof(value) != expected:
+			if expected == TYPE_STRING_NAME and value is String:
+				value = StringName(value)
+			elif expected == TYPE_FLOAT and (value is int or value is float):
+				value = float(value)
+			elif (
+				expected == TYPE_INT and value is float and is_finite(value)
+				and value == floor(value)
+				and value >= -9223372036854775808.0
+				and value < 9223372036854775808.0
+			):
+				value = int(value)
+			else:
+				return {
+					"ok": false,
+					"code": ErrorCodes.INVALID_PARAM,
+					"error": "argument type does not match signature at index " + str(i)
+				}
+		args.append(value)
+	var output: Variant = node.callv(method, args)
+	if not is_instance_valid(node):
+		return {
+			"ok": false,
+			"code": ErrorCodes.GODOT_ERROR,
+			"error": "declared method destroyed its target"
+		}
+	if output == null and int(signature.get("return", {}).get("type", TYPE_NIL)) != TYPE_NIL:
+		return {
+			"ok": false,
+			"code": ErrorCodes.GODOT_ERROR,
+			"error": "method returned null despite a non-Variant return type"
+		}
+	var changed := script_method or method in ["show", "hide"]
+	if changed:
+		EditorInterface.mark_scene_as_unsaved()
+	return {
+		"ok": true,
+		"changed": changed,
+		"undoable": false,
+		"node_path": lookup.node_path,
+		"method": method,
+		"result": VariantCodec.from_variant(output)
+	}

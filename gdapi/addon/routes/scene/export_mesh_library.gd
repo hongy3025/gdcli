@@ -126,6 +126,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("从场景导出 MeshLibrary 资源")
+		. mutates()
 		. desc("从场景中的 MeshInstance3D 节点提取网格和碰撞形状，生成 MeshLibrary 资源")
 		. param("scene_path", "String", true, "源场景路径")
 		. param("output_path", "String", true, "MeshLibrary 输出路径")

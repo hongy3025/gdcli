@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("注入 InputEventKey")
+		. mutates()
 		. desc("keycode 是 Godot 4.7 keycode 整数(SPACE=32)。pressed=true 按下,false 弹起。")
 		. param("keycode", "int", true, "Key code 整数", "")
 		. param("pressed", "bool", false, "是否按下,默认 true", "true")

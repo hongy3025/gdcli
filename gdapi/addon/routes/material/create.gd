@@ -18,6 +18,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建并赋值受支持的材质")
+		. mutates()
 		. param("node_path", "String", true, "目标 CanvasItem 节点", "")
 		. param("type", "CanvasItemMaterial | StandardMaterial2D", true, "受支持材质类型", "")
 		. example('{"node_path":"Sprite","type":"CanvasItemMaterial"}')

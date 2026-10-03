@@ -27,6 +27,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建并保存 Resource 子类")
+		. mutates()
 		. desc("type 必须是 Resource 子类。properties 通过 VariantCodec 解码,逐个属性 set 后保存。目标存在直接覆盖。")
 		. param("path", "String", true, "目标 res:// 路径")
 		. param("type", "String", true, "ClassDB 中可实例化的 Resource 子类")

@@ -1,27 +1,20 @@
 #!/usr/bin/env python3
-"""Run gdlint once per GDScript file in the repository.
+"""Lint the same applicable GDScript files as format-gd.py.
 
-gdlint does not provide a repository-wide batch mode, so this script discovers
-the files and invokes it separately for each file. A non-zero exit status is
-returned when any file fails.
+Intentionally malformed diagnostic fixtures follow the formatter's exclusions;
+their parse failures are exercised by the E2E diagnostics tests.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import runpy
 import subprocess
 import sys
 from pathlib import Path
 
 
-SKIP_DIRECTORIES = {
-    ".git",
-    ".godot",
-    ".pytest-m5",
-    "__pycache__",
-    "target",
-}
 
 
 def repository_root() -> Path:
@@ -29,14 +22,8 @@ def repository_root() -> Path:
 
 
 def gdscript_files(root: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in root.rglob("*.gd")
-        if not any(
-            part in SKIP_DIRECTORIES or part.startswith(".")
-            for part in path.relative_to(root).parts
-        )
-    )
+    formatter = runpy.run_path(str(Path(__file__).with_name("format-gd.py")))
+    return formatter["gdscript_files"](root)
 
 
 def command_environment() -> dict[str, str]:

@@ -21,6 +21,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建 ShaderMaterial 资源")
+		. mutates()
 		. param("shader_path", "String", true, "源 .gdshader", "")
 		. param("path", "String", true, "目标 .tres/.res", "")
 		. example(

@@ -25,6 +25,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("恢复批量删除操作")
+		. mutates()
 		. desc("从 gdapi trash 恢复文件，不覆盖现有目标。")
 		. param("operation_id", "String", true, "删除返回的操作 ID")
 		. returns("恢复结果", {"restored": "int", "changed": "bool"})

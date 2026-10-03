@@ -21,6 +21,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("复制材质到新的项目资源")
+		. mutates()
 		. param("node_path", "String", true, "源材质节点", "")
 		. param("path", "String", true, "不同的 res:// .tres/.res 目标", "")
 		. example('{"node_path":"Sprite","path":"res://materials/sprite_copy.tres"}')

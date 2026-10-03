@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("删除动画 key")
+		. mutates()
 		. param("player_path", "String", true, "AnimationPlayer 路径", "")
 		. param("name", "String", true, "动画名", "")
 		. param("track_index", "int", true, "track 索引", "")

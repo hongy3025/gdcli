@@ -28,6 +28,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置 Theme 颜色")
+		. mutates()
 		. desc("修改项目内 .tres Theme 的 color item 并保存（不可撤销）。")
 		. param("path", "String", true, "Theme 的 res:// 路径")
 		. param("type", "String", false, "控件类型名", "Control")

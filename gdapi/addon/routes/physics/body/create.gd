@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建 2D 物理体")
+		. mutates()
 		. desc("在当前编辑场景中创建 StaticBody2D/CharacterBody2D/RigidBody2D 并挂到 parent_path 下，接入 UndoRedo。")
 		. param("parent_path", "String", true, "父节点绝对路径")
 		. param("name", "String", true, "新节点名称")

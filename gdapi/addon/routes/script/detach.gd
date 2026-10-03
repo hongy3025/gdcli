@@ -24,6 +24,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("卸下节点的脚本")
+		. mutates()
 		. desc("UndoRedo 操作: do set_script(null), undo set_script(previous)。无脚本时报 not_found。")
 		. param("node_path", "String", true, "节点路径")
 		. example('{"node_path":"/root/Main/Player"}')

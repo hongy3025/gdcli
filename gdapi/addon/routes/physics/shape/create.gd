@@ -24,6 +24,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建 2D 碰撞形状")
+		. mutates()
 		. desc("给物理体挂 CollisionShape2D；shape 支持 rectangle/circle/capsule，接入 UndoRedo。")
 		. param("body_path", "String", true, "物理体节点路径")
 		. param("shape", "String", true, "形状类型 rectangle|circle|capsule")

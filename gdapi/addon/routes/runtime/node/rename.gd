@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("重命名运行期节点")
+		. mutates()
 		. desc("只允许重命名当前场景中的专用节点；名称不能为空、含路径分隔符、覆盖保护节点或与兄弟节点冲突。操作不可撤销。")
 		. param("node_path", "String", true, "专用节点绝对路径", "")
 		. param("name", "String", true, "新节点名", "")

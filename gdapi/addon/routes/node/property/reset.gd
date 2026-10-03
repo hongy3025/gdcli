@@ -25,6 +25,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("重置属性为类默认值接 UndoRedo")
+		. mutates()
 		. desc(
 			"使用 ClassDB.class_get_property_default_value 获取默认值,通过 EditAction.commit_property 提交变更。"
 		)

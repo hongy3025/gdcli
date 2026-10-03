@@ -14,15 +14,12 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		)
 		res.error(checked.error, checked.code, ErrorCodes.http_status(checked.code))
 		return
+	res.audit_summary("dangerous", {"executable": checked.executable})
 	var started := Service.start(checked, res)
 	if not started.ok:
 		AuditLog.record(ROUTE, "dangerous", {"executable": checked.executable}, false, started.code)
 		res.error(started.error, started.code, ErrorCodes.http_status(started.code))
 		return
-	var terminal := func(outcome):
-		AuditLog.record(
-			ROUTE, "dangerous", {"executable": checked.executable}, outcome.ok, outcome.code
-		)
 	var plugin = Engine.get_meta("gdapi_plugin", null)
 	if (
 		plugin == null
@@ -32,7 +29,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
 				"tick": func(now): return Service.tick(started.state, now),
 				"cancel": func(reason): Service.cancel(started.state, reason),
-				"finish": terminal,
 				"state": started.state,
 			}
 		)
@@ -49,6 +45,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("执行无 shell 的受限外部进程")
+		. mutates()
 		. desc("executable 与 argv 原样传递，不经过 shell；timeout 上限 60s、输出上限 1 MiB")
 		. param("executable", "String", true, "可执行文件路径")
 		. param("args", "Array[String]", false, "原样 argv")

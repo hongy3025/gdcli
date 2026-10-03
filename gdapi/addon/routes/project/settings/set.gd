@@ -15,6 +15,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("写入项目设置")
+		. mutates()
 		. param("name", "String", true, "设置名")
 		. param("value", "Variant", true, "设置值")
 		. returns("变更结果", {"ok": "bool", "changed": "bool", "undoable": "bool"})

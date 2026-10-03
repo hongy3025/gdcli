@@ -19,11 +19,11 @@ def test_audio_routes_are_discoverable_and_documented(m4_env):
 def test_audio_bus_add_and_remove_require_safe_semantics(m4_env):
     exec_ok(m4_env, "scene/open", {"path": "res://scenes/audio.tscn"})
     added = exec_ok(m4_env, "audio/bus/add", {"name": "Effects"})
-    assert added["undoable"] is False
+    assert added["undoable"] is True
     assert "Effects" in exec_ok(m4_env, "audio/bus/list")["buses"]
     removed = exec_ok(m4_env, "audio/bus/remove", {"name": "Effects"})
     assert removed["changed"] is True
-    assert removed["undoable"] is False
+    assert removed["undoable"] is True
     assert "Effects" not in exec_ok(m4_env, "audio/bus/list")["buses"]
 
 def test_audio_player_creation_is_undoable(m4_env):

@@ -25,6 +25,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置控件锚点")
+		. mutates()
 		. param("node_path", "String", true, "Control 路径", "")
 		. param("anchors", "Dictionary", true, "left/top/right/bottom", "")
 		. param("offsets", "Dictionary", false, "可选偏移", "{}")

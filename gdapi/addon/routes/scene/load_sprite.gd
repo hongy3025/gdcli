@@ -128,6 +128,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("为精灵节点加载纹理")
+		. mutates()
 		. desc("加载指定场景，找到目标精灵节点（Sprite2D/Sprite3D/TextureRect），设置新纹理并保存场景")
 		. param("scene_path", "String", true, "场景路径")
 		. param("node_path", "String", true, "精灵节点路径（如 root/Sprite2D）")

@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置 2D 碰撞层")
+		. mutates()
 		. desc("设置节点 collision_layer/collision_mask 属性，接入 UndoRedo。")
 		. param("node_path", "String", true, "目标节点路径")
 		. param("property", "String", true, "collision_layer 或 collision_mask")

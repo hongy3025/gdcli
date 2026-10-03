@@ -90,6 +90,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建新 Godot 场景文件")
+		. mutates()
 		. desc("创建指定类型的根节点，打包为场景并保存到指定路径；自动创建不存在的目录；创建后自动重新加载场景到编辑器中")
 		. param("root_node_type", "String", false, "根节点类型名称，默认为 Node2D", "Node2D")
 		. example('{"scene_path":"res://new_scene.tscn","root_node_type":"Node2D"}')

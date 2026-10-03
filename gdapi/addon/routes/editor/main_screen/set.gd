@@ -39,6 +39,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("切换 Godot 编辑器主面板")
+		. mutates()
 		. desc("通过 EditorInterface.set_main_screen_editor 切换,只接受 2D/3D/Script/AssetLib 等内置标识。")
 		. param("screen", "String", true, "主面板标识,允许 2D, 3D, Script, AssetLib 等")
 		. example('{"screen":"Script"}')

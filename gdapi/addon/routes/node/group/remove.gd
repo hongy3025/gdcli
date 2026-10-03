@@ -62,6 +62,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("节点退出 group")
+		. mutates()
 		. desc("通过 Node.remove_from_group。节点不在 group 中返回 not_found。")
 		. param("node_path", "String", true, "节点路径")
 		. param("group", "String", true, "组名")

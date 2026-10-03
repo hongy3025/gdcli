@@ -12,13 +12,12 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		AuditLog.record(ROUTE, "dangerous", {"url": req.get_body("url", "")}, false, checked.code)
 		res.error(checked.error, checked.code, ErrorCodes.http_status(checked.code))
 		return
+	res.audit_summary("dangerous", {"url": checked.url})
 	var started := Service.start(checked, res)
 	if not started.ok:
 		AuditLog.record(ROUTE, "dangerous", {"url": checked.url}, false, started.code)
 		res.error(started.error, started.code, ErrorCodes.http_status(started.code))
 		return
-	var terminal := func(outcome):
-		AuditLog.record(ROUTE, "dangerous", {"url": checked.url}, outcome.ok, outcome.code)
 	var plugin = Engine.get_meta("gdapi_plugin", null)
 	if (
 		plugin == null
@@ -28,7 +27,6 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
 				"tick": func(_now): return bool(started.state.done),
 				"cancel": func(_reason): started.state.node.cancel_request(),
-				"finish": terminal,
 				"state": started.state,
 			}
 		)
@@ -42,6 +40,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("HTTP 请求")
+		. mutates()
 		. desc("仅 http/https，下载上限 4 MiB、重定向 ≤5、超时 ≤60s。")
 		. param("url", "String", true, "目标 URL")
 		. param("method", "String", false, "GET 或 HEAD")

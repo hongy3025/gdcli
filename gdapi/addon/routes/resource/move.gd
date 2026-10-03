@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("在编辑器文件系统中移动资源")
+		. mutates()
 		. desc("通过 EditorFileSystem.move_file 重命名/移动文件并触发 reimport。目标存在时由 EditorFileSystem 处理。")
 		. param("from", "String", true, "源 res:// 路径")
 		. param("to", "String", true, "目标 res:// 路径")

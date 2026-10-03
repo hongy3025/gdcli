@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("将 Resource 赋给节点的属性 (UndoRedo)")
+		. mutates()
 		. desc("通过 set/UndoRedo 提交,可 undo/redo。仅支持属性类型为 Resource 或其子类的字段。")
 		. param("node_path", "String", true, "目标节点路径")
 		. param("property", "String", true, "属性名")

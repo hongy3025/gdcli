@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("调用运行期节点方法(allowlist)")
+		. mutates()
 		. desc("只有节点元数据 gdapi_callable_methods 中列出的方法名才会被允许;其它方法返回 permission_denied。args 是位置参数数组。")
 		. param("node_path", "String", true, "节点路径", "")
 		. param("method", "String", true, "方法名", "")

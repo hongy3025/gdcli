@@ -16,6 +16,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("添加 AnimationTree state")
+		. mutates()
 		. param("tree_path", "String", true, "AnimationTree 路径", "")
 		. param("name", "String", true, "state 名", "")
 		. example('{"tree_path":"AnimationTree","name":"idle"}')

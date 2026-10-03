@@ -25,6 +25,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("还原节点属性到默认值")
+		. mutates()
 		. desc("M2 范围内与 reset 等价;后续与 inspector history 集成时可改为还原到打开场景时的值。")
 		. param("node_path", "String", true, "节点路径")
 		. param("property", "String", true, "属性名")

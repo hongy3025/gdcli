@@ -155,79 +155,35 @@ func _scan_dir(dir_path: String, prefix: String, seen_files: Dictionary) -> void
 func dispatch(req_dict: Dictionary, server) -> void:
 	var id: int = req_dict["id"]
 	var method: String = req_dict["method"]
-	var path: String = req_dict["path"]
-
-	# 只支持 POST 方法
-	if method != "POST":
-		_reply_error(server, id, 405, "only POST is supported", ErrorCodes.METHOD_NOT_ALLOWED)
-		return
-
-	var key: String = path.trim_prefix("/")
-
-	var req := GdApiRequest.new(req_dict)
+	var key: String = String(req_dict["path"]).trim_prefix("/")
+	var handler
+	match key:
+		"gdapi/routes":
+			handler = _builtin_routes_handler
+		"command/list":
+			handler = _builtin_commands_handler
+		"command/doc":
+			handler = _builtin_command_help_handler
+		_:
+			if _routes.has(key):
+				handler = (_routes[key] as Script).new()
 	var res := GdApiResponse.new(server, id)
-
+	var mutation := false
+	if handler != null:
+		var route_doc: GdApiRouteDoc = handler.doc()
+		mutation = route_doc != null and route_doc.mutation
+	res.bind_audit(key, mutation)
+	if method != "POST":
+		res.error("only POST is supported", ErrorCodes.METHOD_NOT_ALLOWED, 405)
+		return
+	var req := GdApiRequest.new(req_dict)
 	if not req.body_error.is_empty():
 		res.error(req.body_error, ErrorCodes.INVALID_PARAM, 400)
 		return
-
-	# 处理内置命令列表请求
-	if key == "gdapi/routes":
-		_builtin_routes_handler.handle(req, res)
+	if handler == null:
+		res.error("route not found: /" + key, ErrorCodes.NOT_FOUND, 404)
 		return
-
-	# 处理内置 commands 命令
-	if key == "command/list":
-		_builtin_commands_handler.handle(req, res)
-		return
-
-	# 处理内置 command-help 命令
-	if key == "command/doc":
-		_builtin_command_help_handler.handle(req, res)
-		return
-
-	# 查找注册的命令处理器
-	if not _routes.has(key):
-		_reply_error(server, id, 404, "route not found: /" + key, "not_found")
-		return
-
-	# 实例化处理器并执行
-	var handler_script: Script = _routes[key]
-	var handler = handler_script.new()
-
-	var audit_before := AuditLog.total()
+	# 同步 service.record 复用所有者；不可将上下文跨 await 留在全局。
+	var previous := AuditLog.enter_request(res.audit_context)
 	handler.handle(req, res)
-	_audit_mutation(key, res, audit_before)
-
-
-## 为未自行审计的 mutation 响应补一条统一审计。
-##
-## 判定依据：响应体包含 `changed` 字段（mutation 契约），且本次请求期间
-## 没有新增审计记录（dangerous/file 类操作通常在 service 里已自行审计，
-## 因此不会被重复记录）。
-func _audit_mutation(route: String, res, audit_before: int) -> void:
-	var body: Variant = res.payload
-	if typeof(body) != TYPE_DICTIONARY or not (body as Dictionary).has("changed"):
-		return
-	if AuditLog.total() != audit_before:
-		return
-	AuditLog.record(
-		route,
-		"mutation",
-		{"changed": bool(body.get("changed", false))},
-		bool(body.get("ok", true)),
-		String(body.get("code", ""))
-	)
-
-
-## 发送错误响应
-##
-## 构建并发送标准格式的错误响应。
-## @param server HTTP 服务器实例
-## @param id 请求 ID
-## @param status HTTP 状态码
-## @param msg 错误描述信息
-## @param code 错误代码标识符
-func _reply_error(server, id: int, status: int, msg: String, code: String) -> void:
-	var res := GdApiResponse.new(server, id)
-	res.error(msg, code, status)
+	AuditLog.enter_request(previous)

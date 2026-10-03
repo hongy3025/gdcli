@@ -25,6 +25,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("创建音频播放器")
+		. mutates()
 		. param("parent_path", "String", false, "父节点", "/root/AudioDomain")
 		. param("name", "String", true, "节点名", "")
 		. param("stream_path", "String", true, "AudioStream 资源路径", "")

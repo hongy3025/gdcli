@@ -19,7 +19,8 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("删除音频总线")
+		. mutates()
 		. param("name", "String", true, "总线名", "")
 		. example('{"name":"SFX"}')
-		. returns("bus", {"changed": "bool", "undoable": "false"})
+		. returns("bus", {"changed": "bool", "undoable": "true"})
 	)

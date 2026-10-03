@@ -51,6 +51,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("查询或设置全局日志级别")
+		. mutates()
 		. desc("不带 level 参数时查询当前日志级别；带 level 参数时设置新级别。级别可选：debug, info, warn, error")
 		. param("level", "String", false, "要设置的日志级别（debug/info/warn/error），留空则查询当前级别", "")
 		. example('{"level":"info"}')

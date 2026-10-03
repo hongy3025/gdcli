@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("连接运行期信号")
+		. mutates()
 		. desc(
 			"目标方法必须在 target 节点的 gdapi_callable_methods allowlist 中;非 allowlist 方法返回 permission_denied。"
 		)

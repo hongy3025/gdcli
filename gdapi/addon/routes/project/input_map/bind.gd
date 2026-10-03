@@ -12,6 +12,10 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("绑定输入事件").returns("变更结果", {"ok": "bool", "undoable": "bool"}).example(
-		'{"action":"ui_accept","event":{"type":"InputEventKey","keycode":1}}'
+	return (
+		GdApiRouteDoc
+		. make("绑定输入事件")
+		. mutates()
+		. returns("变更结果", {"ok": "bool", "undoable": "bool"})
+		. example('{"action":"ui_accept","event":{"type":"InputEventKey","keycode":1}}')
 	)

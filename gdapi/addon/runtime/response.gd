@@ -8,8 +8,11 @@
 class_name GdApiResponse
 extends RefCounted
 
-## 最近一次 JSON 响应体：router 用它识别 mutation 响应并补记审计。
+const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
+
+## 已完成的 JSON 响应体与独立请求审计所有者。
 var payload: Dictionary = {}
+var audit_context: Dictionary = {}
 
 ## HTTP 响应状态码
 var _status: int = 200
@@ -32,6 +35,16 @@ func _init(server, request_id: int) -> void:
 	_server = server
 	_request_id = request_id
 	_headers["Content-Type"] = "application/json; charset=utf-8"
+
+
+## Router 在校验 body 之前绑定，异步 handler 继续持有同一所有者。
+func bind_audit(route: String, mutation: bool) -> void:
+	audit_context = {"route": route, "mutation": mutation, "completed": false}
+
+
+## 异步危险操作在响应完成前提供摘要，不再在延迟 task finish 后补写。
+func audit_summary(safety: String, summary: Dictionary) -> void:
+	AuditLog.record("", safety, summary, true, "", audit_context)
 
 
 ## 设置 HTTP 状态码
@@ -67,6 +80,8 @@ func type(content_type: String) -> GdApiResponse:
 ## 将字典数据序列化为 JSON 并发送。自动设置 Content-Type 为 application/json。
 ## @param data 要序列化的字典数据
 func json(data: Dictionary) -> void:
+	if _sent:
+		return
 	payload = data
 	_send(JSON.stringify(data).to_utf8_buffer())
 
@@ -139,6 +154,7 @@ func _send(body: PackedByteArray) -> void:
 		push_warning("GdApiResponse: already sent")
 		return
 	_sent = true
+	AuditLog.complete_request(audit_context, payload, _status)
 
 	var headers_dict: Dictionary[String, Variant] = {}
 	for key in _headers:

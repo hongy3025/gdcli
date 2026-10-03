@@ -244,13 +244,18 @@ func audit_event(event: Dictionary) -> void:
 	entry["ts"] = Time.get_unix_time_from_system()
 	_audit_buffer.append(entry)
 	if _audit_buffer.size() > MAX_AUDIT_ENTRIES:
-		_audit_buffer.pop_front()
+		var remove_index := 0
+		for index in _audit_buffer.size():
+			if String(_audit_buffer[index].get("safety", "")) not in ["dangerous", "file"]:
+				remove_index = index
+				break
+		_audit_buffer.remove_at(remove_index)
 
 
-func get_audit_since(since: int, limit: int) -> Array:
+func get_audit_since(since: int, limit: int, safety: String = "") -> Array:
 	var entries: Array = []
 	for entry in _audit_buffer:
-		if entry.seq > since:
+		if entry.seq > since and (safety.is_empty() or entry.get("safety", "") == safety):
 			entries.append(entry)
 			if entries.size() >= limit:
 				break

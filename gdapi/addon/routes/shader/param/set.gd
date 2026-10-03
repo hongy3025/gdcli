@@ -24,6 +24,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置已声明的 ShaderMaterial uniform")
+		. mutates()
 		. param("path", "String", true, "ShaderMaterial .tres/.res", "")
 		. param("name", "String", true, "Shader 中声明的 uniform", "")
 		. param("value", "Variant", true, "与 uniform 类型精确匹配的值", "")

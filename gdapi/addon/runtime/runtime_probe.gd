@@ -26,6 +26,11 @@ const RingBuffer := preload("res://addons/gdapi/runtime/runtime_ring_buffer.gd")
 const FileTransport := preload("res://addons/gdapi/runtime/runtime_transport_file_probe.gd")
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const EvalService := preload("res://addons/gdapi/runtime/services/eval_service.gd")
+const SessionOps := preload("res://addons/gdapi/runtime/runtime_session_ops.gd")
+const RuntimeQa := preload("res://addons/gdapi/runtime/services/runtime_qa.gd")
+const ImageCompare := preload("res://addons/gdapi/runtime/services/runtime_image_compare.gd")
+const ParticleEditor := preload("res://addons/gdapi/runtime/services/particle_editor.gd")
+const TweenRuntime := preload("res://addons/gdapi/runtime/services/tween_runtime.gd")
 const DEBUGGER_CHANNEL_PREFIX := "gdapi"
 const DEBUGGER_CHANNEL := "gdapi:protocol"
 const DEBUGGER_CALLBACK_CHANNEL := "protocol"
@@ -53,6 +58,8 @@ var _ring: RefCounted = RingBuffer.new(2000)
 
 ## 文件 transport 实例;非编辑器进程下 _ready() 中创建
 var _file_transport: RefCounted = null
+var _sessions: RefCounted = SessionOps.new()
+var _qa: RefCounted = RuntimeQa.new()
 
 ## 暴露给 runtime/node/get 的 file transport 断开统计属性
 # gdlint: ignore=class-definitions-order
@@ -97,10 +104,18 @@ func _ready() -> void:
 func _process(_dt: float) -> void:
 	if _file_transport != null:
 		_file_transport.tick(Time.get_ticks_msec())
+	if not Engine.is_editor_hint():
+		_sessions.tick()
+
+
+func _input(event: InputEvent) -> void:
+	_sessions.capture(event)
 
 
 ## probe 退出时清理 file transport(删除自己的子目录)
 func _exit_tree() -> void:
+	_sessions.reset()
+	_qa.reset()
 	if _engine_debugger_registered:
 		EngineDebugger.unregister_message_capture(DEBUGGER_CHANNEL_PREFIX)
 		_engine_debugger_registered = false
@@ -246,6 +261,16 @@ func _send_request_rejection(request_msg: Dictionary, verdict: Dictionary) -> bo
 func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 	var result: Dictionary
 	match op:
+		"runtime/recording/start", "runtime/recording/stop", "runtime/recording/read", "runtime/recording/replay", "runtime/recording/cancel", "runtime/monitor/start", "runtime/monitor/read", "runtime/monitor/stop":
+			result = await _sessions.dispatch(op, payload)
+		"runtime/test/run", "runtime/test/stress", "runtime/test/report", "runtime/assert/screen_text":
+			result = await _qa.dispatch(op, payload)
+		"runtime/screenshot/compare":
+			result = await ImageCompare.compare(payload)
+		"runtime/particles/info":
+			result = ParticleEditor.runtime_info(payload)
+		"runtime/tween/start", "runtime/tween/status", "runtime/tween/stop":
+			result = TweenRuntime.dispatch(op, payload)
 		"eval":
 			result = EvalService.execute(
 				String(payload.get("source", "")), payload.get("inputs", {})
@@ -499,6 +524,8 @@ func reset_shared_fixture() -> Dictionary:
 			"error": "fixture reset is unavailable",
 		}
 	var result: Variant = root.call("reset_fixture")
+	_sessions.reset()
+	_qa.reset()
 	var ring_result: Dictionary = _ring.clear()
 	if typeof(result) != TYPE_DICTIONARY:
 		result = {"changed": true, "undoable": false}

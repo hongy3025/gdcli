@@ -54,6 +54,8 @@ def test_classify_puts_m3_runtime_in_bucket_3() -> None:
         "tests/e2e/m3/test_runtime_assert_signal.py",
         "tests/e2e/m3/test_runtime_capture.py",
         "tests/e2e/m3/test_runtime_observability.py",
+        "tests/e2e/m3/test_runtime_extensions.py",
+        "tests/e2e/m3/test_engine_transport.py",
     ]:
         assert _classify(rel) == 3, rel
 

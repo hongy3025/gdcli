@@ -32,6 +32,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("添加动画 key")
+		. mutates()
 		. desc("在指定 AnimationPlayer 动画 track 的时间点添加类型化 key；编辑器修改支持 UndoRedo。")
 		. param("player_path", "String", true, "AnimationPlayer 路径", "")
 		. param("name", "String", true, "动画名", "")

@@ -66,6 +66,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("批量原子设置节点属性接 UndoRedo")
+		. mutates()
 		. desc("所有字段一次性校验,任一字段无效则整体拒绝。提交单个 UndoRedo action 便于一次撤销。")
 		. param("node_path", "String", true, "节点绝对路径")
 		. param("properties", "Dictionary<String,Variant>", true, "属性名->属性值,值通过 VariantCodec 解码")

@@ -22,6 +22,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置 AnimationTree blend")
+		. mutates()
 		. param("tree_path", "String", true, "AnimationTree 路径", "")
 		. param("parameter", "String", true, "parameters/*/blend_position", "")
 		. param("value", "Variant", true, "blend 值", "")

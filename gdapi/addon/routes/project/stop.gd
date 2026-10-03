@@ -49,6 +49,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("停止当前正在运行的场景")
+		. mutates()
 		. desc("如果当前有场景正在运行则停止；如果没有运行中的场景则返回成功并标记为未运行状态。M3 同时让所有在途 pending 请求同步收到 conflict")
 		. returns(
 			"停止结果",

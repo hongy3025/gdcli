@@ -24,6 +24,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("重新导入一组资源")
+		. mutates()
 		. desc("通过 EditorInterface.get_resource_filesystem().reimport_files 触发导入。")
 		. param("paths", "Array<String>", true, "res:// 资源路径列表")
 		. example('{"paths":["res://icon.svg"]}')

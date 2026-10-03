@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("注入 joypad button / axis")
+		. mutates()
 		. desc("device 默认 0;kind=button 时 pressed=true 表示按下;kind=axis 时填 axis 索引和 value(-1..1)。")
 		. param("device", "int", false, "手柄 device id,默认 0", "0")
 		. param("kind", "String", false, "button|axis,默认 button", "button")

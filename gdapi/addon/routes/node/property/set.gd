@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置节点属性接 UndoRedo")
+		. mutates()
 		. desc(
 			(
 				"通过 VariantCodec.decode 解码输入,EditAction.commit_property 提交。"

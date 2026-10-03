@@ -13,6 +13,10 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 
 
 func doc() -> GdApiRouteDoc:
-	return GdApiRouteDoc.make("删除项目设置").returns("变更结果", {"ok": "bool", "undoable": "bool"}).example(
-		'{"name":"application/config/name"}'
+	return (
+		GdApiRouteDoc
+		. make("删除项目设置")
+		. mutates()
+		. returns("变更结果", {"ok": "bool", "undoable": "bool"})
+		. example('{"name":"application/config/name"}')
 	)

@@ -23,6 +23,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("添加动画 value track")
+		. mutates()
 		. param("player_path", "String", true, "AnimationPlayer 路径", "")
 		. param("name", "String", true, "动画名", "")
 		. param("path", "String", true, "目标 NodePath", "")

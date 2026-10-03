@@ -20,6 +20,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("播放动画")
+		. mutates()
 		. param("player_path", "String", true, "AnimationPlayer 节点路径", "")
 		. param("name", "String", true, "动画名", "")
 		. example('{"player_path":"AnimationPlayer","name":"idle"}')

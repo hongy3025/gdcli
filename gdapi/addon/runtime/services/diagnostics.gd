@@ -3,6 +3,38 @@ class_name GdApiDiagnostics
 extends RefCounted
 
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
+const Analysis := preload("res://addons/gdapi/runtime/services/diagnostics_analysis.gd")
+
+
+static func extended(kind: String, body: Dictionary) -> Dictionary:
+	var roots = body.get("roots", ["res://"])
+	if body.has("path"):
+		roots = [body.path]
+	if not roots is Array or roots.is_empty():
+		return {"ok": false, "code": "invalid_param", "error": "roots must be a nonempty array"}
+	if not body.get("include_addons", false) is bool:
+		return {"ok": false, "code": "invalid_param", "error": "include_addons must be boolean"}
+	var files: Array = []
+	for root in roots:
+		if not root is String:
+			return {"ok": false, "code": "invalid_param", "error": "roots must contain strings"}
+		var checked := PathGuard.validate(root, "read")
+		if not checked.ok:
+			return checked
+		if (
+			not FileAccess.file_exists(checked.path)
+			and not DirAccess.dir_exists_absolute(checked.path)
+		):
+			return {"ok": false, "code": "not_found", "error": "root not found: " + checked.path}
+		var collected := _collect(checked.path, files, true, body.get("include_addons", false))
+		if not collected.ok:
+			return collected
+	var selected: Array = []
+	for path in files:
+		if not selected.has(path):
+			selected.append(path)
+	selected.sort()
+	return Analysis.analyze(kind, selected, body)
 
 
 static func analyze(kind: String, body: Dictionary) -> Dictionary:
@@ -196,20 +228,41 @@ static func _dependencies(path: String) -> Array:
 	return result
 
 
-static func _collect(path: String, result: Array) -> void:
+static func _collect(
+	path: String, result: Array, strict: bool = false, include_addons: bool = true
+) -> Dictionary:
+	if (
+		not include_addons
+		and (path.trim_suffix("/") == "res://addons" or path.begins_with("res://addons/"))
+	):
+		return {"ok": true}
+	if strict and path.get_extension().to_lower() in ["uid", "import"]:
+		return {"ok": true}
+	for segment in path.trim_prefix("res://").trim_prefix("user://").split("/", false):
+		if segment.begins_with("."):
+			return {"ok": true}
 	if FileAccess.file_exists(ProjectSettings.globalize_path(path)):
+		if strict and FileAccess.open(path, FileAccess.READ) == null:
+			return {"ok": false, "code": "godot_error", "error": "Cannot read file: " + path}
 		result.append(path)
-		return
+		return {"ok": true}
 	var dir := DirAccess.open(path)
 	if dir == null:
-		return
-	dir.list_dir_begin()
+		return {"ok": not strict, "code": "godot_error", "error": "Cannot read directory: " + path}
+	if dir.list_dir_begin() != OK:
+		return {"ok": not strict, "code": "godot_error", "error": "Cannot list directory: " + path}
 	var name := dir.get_next()
 	while not name.is_empty():
-		if not name.begins_with("."):
-			_collect(path.trim_suffix("/") + "/" + name, result)
+		if not name.begins_with(".") and not dir.is_link(name):
+			var collected := _collect(
+				path.trim_suffix("/") + "/" + name, result, strict, include_addons
+			)
+			if not collected.ok:
+				dir.list_dir_end()
+				return collected
 		name = dir.get_next()
 	dir.list_dir_end()
+	return {"ok": true}
 
 
 static func _page(values: Array, body: Dictionary) -> Array:

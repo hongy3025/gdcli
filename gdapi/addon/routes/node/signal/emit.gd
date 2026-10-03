@@ -48,6 +48,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("在编辑器中触发节点信号 (不可撤销)")
+		. mutates()
 		. desc("通过 source.emit_signal 同步派发,仅对无参信号有意义;参数信号请通过编辑器 inspector 编辑。")
 		. param("source_path", "String", true, "源节点路径")
 		. param("signal", "String", true, "信号名")

@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("执行受限的运行时表达式")
+		. mutates()
 		. desc("使用与 editor/eval 相同的受限语法（源码上限 16 KiB）；运行时未连接时返回 conflict；仅 v2 协议可用。")
 		. param("source", "String", true, "受限 Expression 源码")
 		. param("inputs", "Dictionary", false, "输入值")

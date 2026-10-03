@@ -86,6 +86,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("连接节点信号到目标方法")
+		. mutates()
 		. desc(
 			"默认 flags=CONNECT_PERSIST。重复连接到同一 callable 返回 conflict。通过 EditorUndoRedoManager 提交，可撤销。"
 		)

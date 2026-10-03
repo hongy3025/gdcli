@@ -82,6 +82,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("断开节点信号与目标方法的连接")
+		. mutates()
 		. desc("未找到现有连接返回 not_found。通过 EditorUndoRedoManager 提交，撤销时用 CONNECT_PERSIST 恢复连接。")
 		. param("source_path", "String", true, "源节点路径")
 		. param("signal", "String", true, "信号名")

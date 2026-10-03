@@ -41,6 +41,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("删除节点并接 UndoRedo")
+		. mutates()
 		. desc("do: remove_child + queue_free;undo: 重新加入并保留 owner。不可删除场景根节点。")
 		. param("node_path", "String", true, "目标节点绝对路径")
 		. example('{"node_path":"/root/Main/Icon"}')

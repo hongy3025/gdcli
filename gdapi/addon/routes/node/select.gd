@@ -43,6 +43,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("选中一个或多个节点")
+		. mutates()
 		. desc("默认先清空编辑器已有 selection,再按 node_paths 顺序选中。clear=false 时在现有选择上叠加。")
 		. param("node_paths", "Array<String>", false, "节点路径列表,留空表示清空")
 		. param("clear", "bool", false, "是否先清空已有 selection", "true")

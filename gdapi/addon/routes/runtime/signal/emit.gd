@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("主动 emit 运行期信号")
+		. mutates()
 		. desc("目标节点必须声明该 signal;args 最多 4 个 literal。")
 		. param("node_path", "String", true, "源节点路径", "")
 		. param("signal", "String", true, "信号名", "")

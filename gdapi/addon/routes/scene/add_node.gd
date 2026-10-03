@@ -138,6 +138,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("向场景中添加新节点")
+		. mutates()
 		. desc("在指定场景的父节点下创建新节点，支持通过 VariantCodec 设置属性（如 Vector2、Color 等），添加后设置 owner 并保存场景")
 		. param("scene_path", "String", true, "场景路径")
 		. param("node_type", "String", true, "节点类型名称（如 Sprite2D、Node2D 等）")

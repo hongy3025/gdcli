@@ -43,6 +43,7 @@ from e2e.shared_fixture import (  # noqa: E402,F401
     reset_shared_state,
     wait_for_scene,
 )
+from e2e.timing import positive_seconds, successful_wait
 
 M3_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m3_project"
 CLI_TIMEOUT_SECONDS = 35
@@ -94,7 +95,9 @@ def _gdcli_ping(env_root: Path, godot_bin: str) -> bool:
         return False
 
 
+@successful_wait("predicate_recovery")
 def _wait_for(predicate, timeout: float, interval: float = 0.2) -> bool:
+    timeout = positive_seconds("GDAPI_E2E_WAIT_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -510,7 +513,9 @@ def _poll_runtime_status(
     return args, result, _parse_payload(result)
 
 
+@successful_wait("runtime_playing")
 def wait_for_editor_playing(env: dict, timeout: float = 15.0) -> dict[str, Any]:
+    timeout = positive_seconds("GDAPI_E2E_PLAY_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
     last_status: dict[str, Any] = {}
     last_args: list[str] = []
@@ -533,7 +538,9 @@ def wait_for_editor_playing(env: dict, timeout: float = 15.0) -> dict[str, Any]:
     )
 
 
+@successful_wait("runtime_connect")
 def wait_for_connected(env: dict, timeout: float = 60.0) -> dict[str, Any]:
+    timeout = positive_seconds("GDAPI_E2E_CONNECT_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
     last_status: dict = {}
     last_args: list[str] = []
@@ -557,7 +564,9 @@ def wait_for_connected(env: dict, timeout: float = 60.0) -> dict[str, Any]:
     )
 
 
+@successful_wait("runtime_stop")
 def wait_stopped(env: dict, timeout: float = 10.0) -> dict[str, Any]:
+    timeout = positive_seconds("GDAPI_E2E_STOP_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
     last_status: dict[str, Any] = {}
     last_args: list[str] = []
@@ -597,13 +606,10 @@ def runtime_counter(env: dict, name: str) -> int:
     return int(value) if not isinstance(value, dict) else 0
 
 
+@successful_wait("predicate")
 def wait_for(predicate, timeout: float = 15.0, interval: float = 0.05) -> None:
-    """等待 game 侧可观察状态变化。
-
-    全量套件高负载时，game 处理输入事件并更新计数器可能晚于 5s
-    （观测到 `test_input_sequence_over_five_seconds...` 偶发超时），
-    因此默认放宽到 15s；谓词始终不成立时仍然失败。
-    """
+    """Wait for observable game state; record only successful waits."""
+    timeout = positive_seconds("GDAPI_E2E_WAIT_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():

@@ -18,6 +18,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("设置控件文本")
+		. mutates()
 		. param("node_path", "String", true, "Control 路径", "")
 		. param("text", "String", true, "文本", "")
 		. example('{"node_path":"Button","text":"M4"}')
