@@ -1,8 +1,7 @@
 name: Verify
 
 on:
-  push:
-  pull_request:
+  # Temporarily manual-only; automatic CI triggers are paused by request.
   workflow_dispatch:
 
 permissions:

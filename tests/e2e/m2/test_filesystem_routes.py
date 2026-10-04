@@ -57,6 +57,25 @@ def test_filesystem_write_atomic(m2_editor):
     assert after["content"] == "second"
 
 
+def test_filesystem_write_preserves_existing_temp_name(m2_editor):
+    project = Path(m2_editor["project"])
+    target = project / "scripts" / "temp_collision.md"
+    old_temp_name = Path(str(target) + ".gdcli-tmp")
+    target_path = "res://scripts/temp_collision.md"
+    old_temp_name.write_bytes(b"unrelated user data")
+
+    try:
+        result = exec_ok(
+            m2_editor,
+            "filesystem/write",
+            {"path": target_path, "content": "replacement target"},
+        )
+        assert result["written"] is True
+        assert target.read_bytes() == b"replacement target"
+        assert old_temp_name.read_bytes() == b"unrelated user data"
+    finally:
+        target.unlink(missing_ok=True)
+        old_temp_name.unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="read-only replacement semantics are Windows-specific")

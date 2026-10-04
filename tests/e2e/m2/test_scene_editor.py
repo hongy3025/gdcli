@@ -98,6 +98,28 @@ def test_scene_current_save_overwrites_existing_without_force(m2_editor, extensi
     assert exec_ok(m2_editor, "node/property/get", request)["value"] == value
 
 
+def test_scene_save_probe_preserves_existing_temp_name(m2_editor):
+    project = Path(m2_editor["project"])
+    target_path = "res://scenes/probe_temp_collision.tscn"
+    target = project / "scenes" / "probe_temp_collision.tscn"
+    old_probe_name = Path(str(target) + ".gdapi-write-probe")
+    old_probe_name.write_bytes(b"unrelated user data")
+
+    try:
+        saved = exec_ok(m2_editor, "scene/current/save", {"path": target_path})
+        assert saved["saved"] is True and saved["path"] == target_path
+        assert target.is_file()
+        assert old_probe_name.read_bytes() == b"unrelated user data"
+    finally:
+        if exec_ok(m2_editor, "scene/current").get("path") == target_path:
+            exec_ok(m2_editor, "scene/close")
+        if exec_ok(m2_editor, "scene/current").get("path") != "res://scenes/main.tscn":
+            exec_ok(m2_editor, "scene/open", {"path": "res://scenes/main.tscn"})
+        target.unlink(missing_ok=True)
+        Path(str(target) + ".uid").unlink(missing_ok=True)
+        old_probe_name.unlink(missing_ok=True)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows read-only scene target boundary")
 def test_save_as_read_only_failure_preserves_disk_path_and_unsaved_changes(m2_editor):
     project = Path(m2_editor["project"])

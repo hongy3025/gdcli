@@ -14,6 +14,8 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 var payload: Dictionary = {}
 var audit_context: Dictionary = {}
 var request_control
+var _operation_committed := false
+var _committed_payload: Dictionary = {}
 
 ## HTTP 响应状态码
 var _status: int = 200
@@ -158,6 +160,11 @@ func cancellation_reason() -> String:
 	return String(request_control.cancellation_reason())
 
 
+func mark_operation_committed(data: Dictionary) -> void:
+	_operation_committed = true
+	_committed_payload = data
+
+
 ## Record a deferred failure even when a disconnected client cannot receive the response.
 func complete_audit_failure(message: String, code: String, status: int) -> void:
 	AuditLog.complete_request(audit_context, {"error": message, "code": code}, status)
@@ -171,7 +178,7 @@ func _send(body: PackedByteArray) -> void:
 	if _sent:
 		push_warning("GdApiResponse: already sent")
 		return
-	var reason := cancellation_reason()
+	var reason := "" if _operation_committed else cancellation_reason()
 	if not reason.is_empty():
 		_status = 504 if reason == "timeout" else 409
 		payload = {
@@ -185,8 +192,11 @@ func _send(body: PackedByteArray) -> void:
 	for key in _headers:
 		headers_dict[key] = _headers[key]
 
-	if _server.send_response(_request_id, _status, headers_dict, body):
+	var response_accepted: bool = _server.send_response(_request_id, _status, headers_dict, body)
+	if response_accepted:
 		AuditLog.complete_request(audit_context, payload, _status)
+	elif _operation_committed:
+		AuditLog.complete_request(audit_context, _committed_payload, _status)
 
 
 ## 根据文件扩展名获取 MIME 类型

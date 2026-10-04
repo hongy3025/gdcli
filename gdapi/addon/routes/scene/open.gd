@@ -45,10 +45,20 @@ func _open_validated_scene(path: String, res: GdApiResponse) -> Dictionary:
 	var cancelled := _cancellation_error(res)
 	if not cancelled.is_empty():
 		return cancelled
+	if Time.get_ticks_usec() >= deadline:
+		return {
+			"ok": false,
+			"code": ErrorCodes.TIMEOUT,
+			"status": 408,
+			"error": "scene open timed out before dispatch",
+		}
 	var result := SceneEditor.open_scene(path)
 	if not result.ok:
 		return result
-	return await _wait_for_open(tree, result.path, deadline, res)
+	var open_result := await _wait_for_open(tree, result.path, deadline)
+	if open_result.ok:
+		res.mark_operation_committed(open_result)
+	return open_result
 
 
 func _wait_for_scan(tree: SceneTree, file_system, deadline: int, res: GdApiResponse) -> Dictionary:
@@ -72,12 +82,11 @@ func _wait_for_scan(tree: SceneTree, file_system, deadline: int, res: GdApiRespo
 	return {"ok": true}
 
 
-func _wait_for_open(tree: SceneTree, path: String, deadline: int, res: GdApiResponse) -> Dictionary:
+## After open_scene_from_path is dispatched, wait for the committed editor transition
+## instead of converting a later client cancellation into a false failure.
+func _wait_for_open(tree: SceneTree, path: String, deadline: int) -> Dictionary:
 	while SceneEditor.current_path() != path and Time.get_ticks_usec() < deadline:
 		await tree.process_frame
-		var cancelled := _cancellation_error(res)
-		if not cancelled.is_empty():
-			return cancelled
 	if SceneEditor.current_path() != path:
 		return {
 			"ok": false,
@@ -86,9 +95,6 @@ func _wait_for_open(tree: SceneTree, path: String, deadline: int, res: GdApiResp
 			"error": "editor did not open scene before timeout",
 		}
 	await tree.process_frame
-	var cancelled := _cancellation_error(res)
-	if not cancelled.is_empty():
-		return cancelled
 	return {
 		"ok": true,
 		"changed": true,

@@ -10,6 +10,7 @@ extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
+const AtomicFile := preload("res://addons/gdapi/runtime/atomic_file.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 
@@ -289,25 +290,25 @@ static func _prepare_scene_save(target: String) -> Dictionary:
 		return _save_failure(
 			target, "scene save requires a .tscn or .scn path", ErrorCodes.INVALID_PARAM
 		)
-	var mkdir_error := DirAccess.make_dir_recursive_absolute(
-		ProjectSettings.globalize_path(target).get_base_dir()
-	)
-	if mkdir_error != OK:
-		return _save_failure(target, "failed to create scene directory: " + str(mkdir_error))
-	var existed := FileAccess.file_exists(target)
-	# READ_WRITE never truncates an existing target. In particular, reject read-only
-	# files before Godot's void save-as API can change the scene path or saved history.
-	# 目标不存在时用同目录的临时名探测可写性：直接创建空的 .tscn 会让编辑器扫描到
-	# 无法解析的场景文件。
-	var probe_path := target if existed else target + ".gdapi-write-probe"
-	var probe := FileAccess.open(probe_path, FileAccess.READ_WRITE if existed else FileAccess.WRITE)
-	if probe == null:
-		return _save_failure(target, "scene file is not writable", ErrorCodes.PERMISSION_DENIED)
-	var before := probe.get_buffer(probe.get_length())
-	probe.close()
-	if not existed and DirAccess.remove_absolute(ProjectSettings.globalize_path(probe_path)) != OK:
+	var probe_file := AtomicFile.create_temp_file(target, "")
+	if not probe_file.ok:
+		return _save_failure(
+			target, "scene file is not writable: " + probe_file.error, ErrorCodes.PERMISSION_DENIED
+		)
+	var abs_target: String = probe_file.target_path
+	var existed := FileAccess.file_exists(abs_target)
+	var before := PackedByteArray()
+	if existed:
+		var target_file := FileAccess.open(abs_target, FileAccess.READ_WRITE)
+		if target_file == null:
+			AtomicFile.remove(probe_file)
+			return _save_failure(target, "scene file is not writable", ErrorCodes.PERMISSION_DENIED)
+		before = target_file.get_buffer(target_file.get_length())
+		target_file.close()
+	var remove_error := AtomicFile.remove(probe_file)
+	if remove_error != OK:
 		return _save_failure(target, "could not remove scene writability probe")
-	var uid_path := target + ".uid"
+	var uid_path := abs_target + ".uid"
 	var uid_existed := FileAccess.file_exists(uid_path)
 	return {
 		"ok": true,

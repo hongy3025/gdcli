@@ -45,6 +45,8 @@
 - `scene/open` 现在等待 Godot 编辑器完成实际场景切换（最多 5s）再返回；避免后续请求作用于旧场景，并让超时以失败终态进入请求级 mutation 审计。
 - `scene/batch/apply`/`recover` 更新受影响文件的 `EditorFileSystem` 元数据并扫描；`scene/open` 等待排队扫描开始/结束后再重载 scene cache，确保重新打开读取落盘版本。
 - `scene3d` 修复 `MeshLibrary` item-ID 检查对不存在 `has_item()` 的调用；真实渲染器 gate 验证 GridMap/MultiMesh 状态读回，headless 下非空 MultiMesh 返回 `not_supported` 而不伪报 RenderingServer dummy values。
+- `filesystem/write`、脚本 create/patch 与场景保存可写探测改用同目录唯一且独占创建的临时文件；规范化路径必须留在允许根且不落入受保护目录，旧临时文件/符号链接不再被截断或跟随。
+- `scene/open` 提交打开请求后等待编辑器实际切换；切换完成后的客户端取消不再把成功操作误报为失败，断开连接时仍按成功审计。
 
 ### Maintenance
 - CLI 的同步 HTTP/install 路径不再创建 Tokio 多线程池，LSP 按需创建单线程运行时；E2E 文件隔离在遍历前剪枝 `.godot` 和安装目录，保留相同文件基线与实际字节核验。
@@ -62,3 +64,4 @@
 - 新增 `scripts/check.py` 顺序门禁与 `.github/workflows/verify.yml`：GDScript/Rust 格式与 lint、clippy、workspace 单测、独立单编辑器 file/EngineDebugger/真实 OpenGL renderer E2E 及完整 headless 360s 预算；成功等待分布（P50/P95/P99/max）仅提供 P99×3 建议，不自动改变原验收阈值。CI 固定 Godot 4.7.2 与校验 SHA256 的 Mesa 软件 OpenGL。
 - E2E walltime 优化保持测试选择与 360s 默认预算不变：M3 数据面共享 package-scoped runtime session 且每测试仍恢复状态；导出覆盖回归预置旧产物，用一次真实导出验证覆盖与摘要。
 - GUI E2E readiness 现在要求 OpenGL renderer 与 gdapi HTTP API 同时就绪，并验证 readiness 失败时终止且回收 editor 进程，避免误判启动成功和遗留孤儿进程。
+- 按请求暂时将 GitHub Actions `verify` workflow 改为仅手动触发，暂停 push/pull_request 自动 CI。

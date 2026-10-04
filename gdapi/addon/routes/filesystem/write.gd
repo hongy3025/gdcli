@@ -4,6 +4,7 @@
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
+const AtomicFile := preload("res://addons/gdapi/runtime/atomic_file.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 
@@ -25,33 +26,12 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if not checked.ok:
 		res.error(checked.error, checked.code, ErrorCodes.http_status(checked.code))
 		return
-	var abs_path := ProjectSettings.globalize_path(checked.path)
-	var dir: String = checked.path.get_base_dir()
-	if dir != "res://" and not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir)):
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
-	var tmp := abs_path + ".gdcli-tmp"
-	var f := FileAccess.open(tmp, FileAccess.WRITE)
-	if f == null:
-		res.error("cannot open temp file", ErrorCodes.GODOT_ERROR, 500)
+	var temp_file := AtomicFile.create_temp_file(checked.path, content)
+	if not temp_file.ok:
+		res.error("cannot create temp file: %s" % temp_file.error, ErrorCodes.GODOT_ERROR, 500)
 		return
-	f.store_string(content)
-	var write_error := f.get_error()
-	f.close()
-	var close_error := f.get_error()
-	if write_error != OK or close_error != OK:
-		DirAccess.remove_absolute(tmp)
-		res.error(
-			(
-				"cannot write temp file: %s"
-				% error_string(write_error if write_error != OK else close_error)
-			),
-			ErrorCodes.GODOT_ERROR,
-			500
-		)
-		return
-	var rename_error := DirAccess.rename_absolute(tmp, abs_path)
+	var rename_error := AtomicFile.commit(temp_file)
 	if rename_error != OK:
-		DirAccess.remove_absolute(tmp)
 		res.error(
 			"cannot commit file: %s" % error_string(rename_error), ErrorCodes.GODOT_ERROR, 500
 		)

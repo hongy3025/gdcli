@@ -13,6 +13,7 @@
 //! 通过 `#[gdextension]` 宏将 Rust 代码暴露为 Godot 可调用的类 `GdApiServer`。
 //! GDScript 可以直接调用 `GdApiServer.create()`、`start()`、`poll_request()` 等方法。
 
+pub mod atomic_file;
 pub mod http;
 pub mod process_runner;
 pub mod queue;
@@ -23,6 +24,7 @@ use http::validate_response_header;
 use process_runner::{PollOutcome, ProcessRunnerCore};
 use queue::{CancelReason, RequestControl};
 use server::ServerCore;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// GDExtension 入口标记结构体。
@@ -159,6 +161,46 @@ impl GdApiServer {
                 dict.to_variant()
             }
         }
+    }
+
+    /// Creates a collision-safe temporary file next to a validated target.
+    #[func]
+    fn create_temp_file_for_path(
+        target_path: GString,
+        allowed_root: GString,
+        protected_roots: PackedStringArray,
+        contents: PackedByteArray,
+    ) -> Dictionary<GString, Variant> {
+        let target = PathBuf::from(target_path.to_string());
+        let root = PathBuf::from(allowed_root.to_string());
+        let protected = protected_roots
+            .to_vec()
+            .into_iter()
+            .map(|path| PathBuf::from(path.to_string()))
+            .collect::<Vec<_>>();
+        let contents = contents.to_vec();
+        let mut result = Dictionary::<GString, Variant>::new();
+        match atomic_file::create_sibling_temp(&target, &root, &protected, &contents) {
+            Ok(temp) => {
+                result.set(&GString::from("ok"), &Variant::from(true));
+                result.set(
+                    &GString::from("path"),
+                    &Variant::from(GString::from(temp.path.to_string_lossy().as_ref())),
+                );
+                result.set(
+                    &GString::from("target_path"),
+                    &Variant::from(GString::from(temp.target_path.to_string_lossy().as_ref())),
+                );
+            }
+            Err(error) => {
+                result.set(&GString::from("ok"), &Variant::from(false));
+                result.set(
+                    &GString::from("error"),
+                    &Variant::from(GString::from(error.to_string().as_str())),
+                );
+            }
+        }
+        result
     }
 
     /// 发送 HTTP 响应。

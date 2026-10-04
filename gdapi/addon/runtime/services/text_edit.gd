@@ -9,6 +9,7 @@ extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
+const AtomicFile := preload("res://addons/gdapi/runtime/atomic_file.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
@@ -63,27 +64,17 @@ static func replace_lines(source: String, first: int, last: int, text: String) -
 	return {"ok": true, "text": "\n".join(new_lines)}
 
 
-## Write through a sibling temp file and report failure unless rename commits it.
-static func _write_temp_and_commit(abs_path: String, content: String) -> Dictionary:
-	var tmp := abs_path + ".tmp"
-	var f := FileAccess.open(tmp, FileAccess.WRITE)
-	if f == null:
-		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "cannot create temp file"}
-	f.store_string(content)
-	var write_error := f.get_error()
-	f.close()
-	var close_error := f.get_error()
-	if write_error != OK or close_error != OK:
-		DirAccess.remove_absolute(tmp)
-		var io_error: int = write_error if write_error != OK else close_error
+## Write through a unique, exclusively-created sibling temp file.
+static func _write_temp_and_commit(path: String, content: String) -> Dictionary:
+	var temp_file := AtomicFile.create_temp_file(path, content)
+	if not temp_file.ok:
 		return {
 			"ok": false,
 			"code": ErrorCodes.GODOT_ERROR,
-			"error": "cannot write temp file: " + error_string(io_error)
+			"error": "cannot create temp file: " + temp_file.error
 		}
-	var rename_error := DirAccess.rename_absolute(tmp, abs_path)
+	var rename_error := AtomicFile.commit(temp_file)
 	if rename_error != OK:
-		DirAccess.remove_absolute(tmp)
 		return {
 			"ok": false,
 			"code": ErrorCodes.GODOT_ERROR,
@@ -103,11 +94,7 @@ static func create_script(
 		return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": "content too large"}
 	if not content.ends_with("\n"):
 		content += "\n"
-	var dir: String = checked.path.get_base_dir()
-	if dir != "res://" and !DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir)):
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
-	var abs_path := ProjectSettings.globalize_path(checked.path)
-	var write_result := _write_temp_and_commit(abs_path, content)
+	var write_result := _write_temp_and_commit(checked.path, content)
 	if not write_result.ok:
 		return write_result
 	AuditLog.record(route, "file", {"path": checked.path}, true, "")
@@ -161,7 +148,7 @@ static func patch_script(path: String, first: int, last: int, text: String) -> D
 			"first": first,
 			"last": last
 		}
-	var write_result := _write_temp_and_commit(abs_path, new_text)
+	var write_result := _write_temp_and_commit(checked.path, new_text)
 	if not write_result.ok:
 		return write_result
 	AuditLog.record(

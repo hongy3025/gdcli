@@ -19,6 +19,13 @@ class FakeServer:
 		return accept_response
 
 
+class FakeCancelledRequestControl:
+	extends RefCounted
+
+	func cancellation_reason() -> String:
+		return "disconnected"
+
+
 class FakePlugin:
 	extends RefCounted
 	var events: Array[Dictionary] = []
@@ -31,6 +38,7 @@ func _init() -> void:
 	test_rejected_send_does_not_complete_audit()
 	test_accepted_send_completes_audit()
 	test_disconnected_failure_completes_audit()
+	test_committed_operation_remains_successful_after_cancellation()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -52,6 +60,23 @@ func test_accepted_send_completes_audit() -> void:
 	response.json({"ok": true, "changed": true})
 	assert_eq(server.sent_count, 1, "attempted one accepted response")
 	assert_eq(response.audit_context.completed, true, "accepted send completes audit")
+
+
+func test_committed_operation_remains_successful_after_cancellation() -> void:
+	var plugin := FakePlugin.new()
+	Engine.set_meta("gdapi_plugin", plugin)
+	var server := FakeServer.new()
+	var response := GdApiResponse.new(server, 10, FakeCancelledRequestControl.new())
+	var result := {"ok": true, "changed": true, "path": "res://scenes/target.tscn"}
+	response.bind_audit("scene/open", true)
+	response.mark_operation_committed(result)
+	response.json(result)
+	assert_eq(server.sent_count, 1, "committed operation still attempts a response")
+	assert_eq(response.payload, result, "cancellation does not replace committed success")
+	assert_eq(response.audit_context.completed, true, "disconnected commit completes audit")
+	assert_eq(plugin.events.size(), 1, "committed operation emits one audit event")
+	assert_eq(plugin.events[0].ok, true, "committed scene open is audited as successful")
+	Engine.remove_meta("gdapi_plugin")
 
 
 func test_disconnected_failure_completes_audit() -> void:

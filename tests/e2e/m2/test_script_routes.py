@@ -132,6 +132,34 @@ def test_script_create_patch_validate_attach(m2_editor):
     })
     assert attached["undoable"] is True
 
+
+def test_script_writes_preserve_existing_temp_name(m2_editor):
+    project = Path(m2_editor["project"])
+    target = project / "scripts" / "temp_collision.gd"
+    old_temp_name = Path(str(target) + ".tmp")
+    path = "res://scripts/temp_collision.gd"
+    old_temp_name.write_bytes(b"unrelated user data")
+
+    try:
+        created = exec_ok(
+            m2_editor,
+            "script/create",
+            {"path": path, "content": "extends Node\nvar value := 1\n"},
+        )
+        assert created["written"] is True
+        patched = exec_ok(
+            m2_editor,
+            "script/patch",
+            {"path": path, "start_line": 2, "end_line": 2, "text": "var value := 2"},
+        )
+        assert patched["saved"] is True
+        assert target.read_text(encoding="utf-8") == "extends Node\nvar value := 2\n"
+        assert old_temp_name.read_bytes() == b"unrelated user data"
+    finally:
+        target.unlink(missing_ok=True)
+        old_temp_name.unlink(missing_ok=True)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="read-only replacement semantics are Windows-specific")
 @pytest.mark.parametrize("route,data", [
     ("script/create", {"path": "res://scripts/read_only_create.gd", "content": "extends Node\nvar replacement := true\n"}),
