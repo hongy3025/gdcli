@@ -8,22 +8,22 @@ var failed := 0
 
 
 class FakeServer:
-	extends RefCounted
 	var accept_response := false
 	var sent_count := 0
+	var last_body := PackedByteArray()
 
-	func send_response(
-		_id: int, _status: int, _headers: Dictionary, _body: PackedByteArray
-	) -> bool:
+	func send_response(_id: int, _status: int, _headers: Dictionary, body: PackedByteArray) -> bool:
 		sent_count += 1
+		last_body = body
 		return accept_response
 
 
 class FakeCancelledRequestControl:
 	extends RefCounted
+	var reason := "disconnected"
 
 	func cancellation_reason() -> String:
-		return "disconnected"
+		return reason
 
 
 class FakePlugin:
@@ -39,6 +39,8 @@ func _init() -> void:
 	test_accepted_send_completes_audit()
 	test_disconnected_failure_completes_audit()
 	test_committed_operation_remains_successful_after_cancellation()
+	test_json_controls_are_valid_for_success_and_error_responses()
+	test_json_controls_are_valid_for_cancellation_response()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -60,6 +62,55 @@ func test_accepted_send_completes_audit() -> void:
 	response.json({"ok": true, "changed": true})
 	assert_eq(server.sent_count, 1, "attempted one accepted response")
 	assert_eq(response.audit_context.completed, true, "accepted send completes audit")
+
+
+func test_json_controls_are_valid_for_success_and_error_responses() -> void:
+	var controls := ""
+	for codepoint in range(0x20):
+		controls += String.chr(codepoint)
+	var server := FakeServer.new()
+	var response := GdApiResponse.new(server, 11, null)
+	response.json({"stdout": controls, "stderr": controls})
+	assert_json_body_preserves_controls(server.last_body, controls, "success response")
+
+	server = FakeServer.new()
+	response = GdApiResponse.new(server, 12, null)
+	response.error(controls, "error", 400, {"details": controls})
+	assert_json_body_preserves_controls(server.last_body, controls, "error response")
+
+
+func test_json_controls_are_valid_for_cancellation_response() -> void:
+	var controls := ""
+	for codepoint in range(0x20):
+		controls += String.chr(codepoint)
+	var server := FakeServer.new()
+	var control := FakeCancelledRequestControl.new()
+	control.reason = controls
+	var response := GdApiResponse.new(server, 13, control)
+	response.json({"stdout": "discarded"})
+	assert_json_body_preserves_controls(
+		server.last_body, "request cancelled: " + controls, "cancellation response"
+	)
+
+
+func assert_json_body_preserves_controls(
+	body: PackedByteArray, expected: String, context: String
+) -> void:
+	var serialized := body.get_string_from_utf8()
+	var contains_raw_control := false
+	for index in range(serialized.length()):
+		if serialized.unicode_at(index) < 0x20:
+			contains_raw_control = true
+			break
+	assert_eq(contains_raw_control, false, context + " has no raw C0 controls")
+	assert_eq(serialized.contains("\\v"), false, context + " does not emit nonstandard \\\\v")
+	var decoded: Variant = JSON.parse_string(serialized)
+	assert_eq(decoded != null, true, context + " parses as JSON")
+	if decoded.has("stdout"):
+		assert_eq(decoded.stdout, expected, context + " preserves stdout")
+		assert_eq(decoded.stderr, expected, context + " preserves stderr")
+	else:
+		assert_eq(decoded.error, expected, context + " preserves error text")
 
 
 func test_committed_operation_remains_successful_after_cancellation() -> void:

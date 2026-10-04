@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -28,6 +29,27 @@ def test_network_request_redirect_is_followed(m6_editor_network, local_http_serv
     assert result["redirects"] == 1
 
 
+def test_not_modified_is_successful_response(m6_editor_network, redirect_servers):
+    servers, _routes, _requests = redirect_servers
+    result = exec_ok(m6_editor_network, "network/http_request", {
+        "url": f"http://127.0.0.1:{servers[0].server_port}/not-modified",
+        "headers": {"If-None-Match": '"fixture-v1"'},
+    })
+    assert result["status"] == 304
+    assert result["redirects"] == 0
+    assert result["body_base64"] == ""
+    assert result["size"] == 0
+    assert result["sha256"] == hashlib.sha256(b"").hexdigest()
+
+
+def test_redirect_without_location_is_malformed(m6_editor_network, redirect_servers):
+    servers, _routes, _requests = redirect_servers
+    error = exec_error(m6_editor_network, "network/http_request", {
+        "url": f"http://127.0.0.1:{servers[0].server_port}/redirect-no-location",
+    })
+    assert error["code"] == "conflict"
+
+
 def test_redirect_loop_is_rejected(m6_editor_network, local_http_server):
     error = exec_error(m6_editor_network, "network/http_request", {
         "url": local_http_server.url("/redirect-loop"),
@@ -45,10 +67,19 @@ def redirect_servers():
             requests.append((self.server.server_port, self.path, {
                 name.lower(): value for name, value in self.headers.items()
             }))
-            location = routes.get((self.server.server_port, self.path))
-            self.send_response(302 if location else 200)
-            if location:
-                self.send_header("Location", location)
+            if (
+                self.path == "/not-modified"
+                and self.headers.get("If-None-Match") == '"fixture-v1"'
+            ):
+                self.send_response(304)
+                self.send_header("ETag", '"fixture-v1"')
+            elif self.path == "/redirect-no-location":
+                self.send_response(302)
+            else:
+                location = routes.get((self.server.server_port, self.path))
+                self.send_response(302 if location else 200)
+                if location:
+                    self.send_header("Location", location)
             self.send_header("Content-Length", "0")
             self.send_header("Connection", "close")
             self.end_headers()

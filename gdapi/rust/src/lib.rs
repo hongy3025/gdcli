@@ -163,6 +163,16 @@ impl GdApiServer {
         }
     }
 
+    /// Returns whether an existing path resolves inside the canonical root.
+    #[func]
+    fn path_is_within_root(path: GString, allowed_root: GString) -> bool {
+        atomic_file::ensure_path_within_root(
+            &PathBuf::from(path.to_string()),
+            &PathBuf::from(allowed_root.to_string()),
+        )
+        .is_ok()
+    }
+
     /// Creates a collision-safe temporary file next to a validated target.
     #[func]
     fn create_temp_file_for_path(

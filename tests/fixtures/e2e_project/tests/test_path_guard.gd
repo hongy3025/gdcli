@@ -9,6 +9,12 @@ var failed := 0
 
 
 func _init() -> void:
+	assert_true(PathGuard.validate("res://", "read").ok, "project root can be read")
+	assert_eq(
+		PathGuard.validate("res://", "write").code,
+		ErrorCodes.INVALID_PATH,
+		"project root is not a write target"
+	)
 	assert_eq(
 		PathGuard.validate("scenes/a.tscn", "read").path, "res://scenes/a.tscn", "relative path"
 	)
@@ -30,6 +36,16 @@ func _init() -> void:
 		ErrorCodes.PERMISSION_DENIED,
 		"addon protected"
 	)
+	for protected_path in [
+		"res://addons/gdapi/plugin.gd",
+		"res://./addons/gdapi/plugin.gd",
+	]:
+		for mode in ["write", "delete"]:
+			assert_eq(
+				PathGuard.validate(protected_path, mode).code,
+				ErrorCodes.PERMISSION_DENIED,
+				"normalized protected path: " + mode + " " + protected_path
+			)
 	var windows_case_insensitive := OS.get_name() == "Windows"
 	for protected_path in [
 		"res://addons/gdapi",

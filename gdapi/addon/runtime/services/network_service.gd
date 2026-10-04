@@ -76,7 +76,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 			)
 			if forced_truncated:
 				result = HTTPRequest.RESULT_SUCCESS
-			var is_redirect = response_code >= 300 and response_code < 400
+			var is_redirect = response_code >= 300 and response_code < 400 and response_code != 304
 			if is_redirect:
 				result = HTTPRequest.RESULT_SUCCESS
 			elif result != HTTPRequest.RESULT_SUCCESS:

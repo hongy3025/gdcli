@@ -129,6 +129,9 @@ static func replace(body: Dictionary) -> Dictionary:
 	var changed := 0
 	for index in range(matches.size()):
 		var operation: Dictionary = matches[index]
+		if not _path_within_project(operation.path):
+			_cleanup_replace_stage(stage_root)
+			return _error(ErrorCodes.PERMISSION_DENIED, "replacement target escapes project root")
 		var file := FileAccess.open(ProjectSettings.globalize_path(operation.path), FileAccess.READ)
 		if file == null:
 			_cleanup_replace_stage(stage_root)
@@ -165,6 +168,14 @@ static func replace(body: Dictionary) -> Dictionary:
 				{"rollback_failures": injected_failures}
 			)
 		var operation: Dictionary = matches[index]
+		if not _path_within_project(operation.path):
+			var boundary_failures := _rollback_replace(matches, applied)
+			_cleanup_replace_stage(stage_root)
+			return _error_with_details(
+				ErrorCodes.PERMISSION_DENIED,
+				"replacement target escapes project root",
+				{"rollback_failures": boundary_failures}
+			)
 		if (
 			DirAccess.rename_absolute(
 				ProjectSettings.globalize_path(operation.path),
@@ -178,6 +189,14 @@ static func replace(body: Dictionary) -> Dictionary:
 				ErrorCodes.GODOT_ERROR,
 				"batch replace rolled back",
 				{"rollback_failures": backup_failures}
+			)
+		if not _path_within_project(operation.path.get_base_dir()):
+			var boundary_failures := _rollback_replace(matches, applied + [index])
+			_cleanup_replace_stage(stage_root)
+			return _error_with_details(
+				ErrorCodes.PERMISSION_DENIED,
+				"replacement target escapes project root",
+				{"rollback_failures": boundary_failures}
 			)
 		if (
 			DirAccess.rename_absolute(
@@ -364,7 +383,10 @@ static func _delete_plan(paths: Array) -> Dictionary:
 static func _scan_files(
 	root: String, find_text: String, replacement: String, matches: Array
 ) -> Dictionary:
-	var dir := DirAccess.open(root)
+	var root_abs := ProjectSettings.globalize_path(root)
+	if not _path_within_project(root):
+		return _error(ErrorCodes.PERMISSION_DENIED, "scan root escapes project root")
+	var dir := DirAccess.open(root_abs)
 	if dir == null:
 		return _error(ErrorCodes.NOT_FOUND, "root not found")
 	dir.list_dir_begin()
@@ -372,9 +394,13 @@ static func _scan_files(
 	while not name.is_empty():
 		if name != ".godot" and not name.begins_with("."):
 			var path := root.path_join(name)
+			if not _path_within_project(path):
+				dir.list_dir_end()
+				return _error(ErrorCodes.PERMISSION_DENIED, "scan path escapes project root")
 			if dir.current_is_dir():
 				var nested := _scan_files(path, find_text, replacement, matches)
 				if not nested.ok:
+					dir.list_dir_end()
 					return nested
 			else:
 				var file := FileAccess.open(ProjectSettings.globalize_path(path), FileAccess.READ)
@@ -385,6 +411,7 @@ static func _scan_files(
 					if count > 0:
 						var writable := PathGuard.validate(path, "write")
 						if not writable.ok:
+							dir.list_dir_end()
 							return writable
 						matches.append(
 							{
@@ -398,6 +425,7 @@ static func _scan_files(
 							matches.size() > MAX_FILES
 							or _replacement_count(matches) > MAX_REPLACEMENTS
 						):
+							dir.list_dir_end()
 							return _error(ErrorCodes.INVALID_PARAM, "bulk replace exceeds limits")
 		name = dir.get_next()
 	dir.list_dir_end()
@@ -416,6 +444,12 @@ static func _hash_plan(value: Variant) -> String:
 	context.start(HashingContext.HASH_SHA256)
 	context.update(JSON.stringify(value).to_utf8_buffer())
 	return context.finish().hex_encode()
+
+
+static func _path_within_project(path: String) -> bool:
+	return GdApiServer.path_is_within_root(
+		ProjectSettings.globalize_path(path), ProjectSettings.globalize_path("res://")
+	)
 
 
 static func _rollback_manifest(manifest: Array) -> Array:

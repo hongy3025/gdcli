@@ -47,6 +47,9 @@
 - `scene3d` 修复 `MeshLibrary` item-ID 检查对不存在 `has_item()` 的调用；真实渲染器 gate 验证 GridMap/MultiMesh 状态读回，headless 下非空 MultiMesh 返回 `not_supported` 而不伪报 RenderingServer dummy values。
 - `filesystem/write`、脚本 create/patch 与场景保存可写探测改用同目录唯一且独占创建的临时文件；规范化路径必须留在允许根且不落入受保护目录，旧临时文件/符号链接不再被截断或跟随。
 - `scene/open` 提交打开请求后等待编辑器实际切换；切换完成后的客户端取消不再把成功操作误报为失败，断开连接时仍按成功审计。
+- `PathGuard` 先规范化点段再检查受保护目录；`filesystem/batch/replace` 对扫描根、文件及应用目标解析规范路径，拒绝越出项目根目录的 Windows junction。
+- `process/run` 由独立 deadline supervisor 按绝对期限终止并回收进程树，不再依赖编辑器主线程轮询。
+- JSON 字符串中的 C0 控制字符现在按 RFC 8259 兼容形式转义；`network/http_request` 将 HTTP 304 视为正常响应，而非重定向。
 
 ### Maintenance
 - CLI 的同步 HTTP/install 路径不再创建 Tokio 多线程池，LSP 按需创建单线程运行时；E2E 文件隔离在遍历前剪枝 `.godot` 和安装目录，保留相同文件基线与实际字节核验。

@@ -155,6 +155,19 @@ fn path_starts_with(path: &Path, root: &Path) -> bool {
         path.starts_with(root)
     }
 }
+
+/// Verifies that an existing path resolves inside the canonical project root.
+/// Canonicalization resolves Windows junctions and other filesystem aliases.
+pub fn ensure_path_within_root(path: &Path, allowed_root: &Path) -> io::Result<()> {
+    if !path.is_absolute() || !allowed_root.is_absolute() {
+        return Err(invalid_path_error(
+            "path and allowed root must be absolute paths",
+        ));
+    }
+    let canonical_root = allowed_root.canonicalize()?;
+    let canonical_path = path.canonicalize()?;
+    ensure_within_root(&canonical_path, &canonical_root)
+}
 #[cfg(windows)]
 fn godot_compatible_path(path: &Path) -> PathBuf {
     let value = path.to_string_lossy();

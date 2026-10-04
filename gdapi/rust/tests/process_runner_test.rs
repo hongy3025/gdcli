@@ -255,6 +255,58 @@ fn process_tree_timeout_cleans_descendants_holding_both_pipes() {
 }
 
 #[test]
+fn process_timeout_is_enforced_without_polling() {
+    let fixture = TreeFixture::new();
+    let runner = ProcessRunnerCore::new();
+    let started = Instant::now();
+    let request = gdapi::queue::RequestControl::new(Instant::now() + Duration::from_secs(10));
+    let id = runner
+        .start_for_request(
+            &python_executable(),
+            &[
+                fixture_tool("process_tree.py").display().to_string(),
+                "wait".to_string(),
+                fixture.ready.display().to_string(),
+                fixture.marker.display().to_string(),
+            ],
+            &repo_root(),
+            2000,
+            8192,
+            request,
+        )
+        .expect("tree process should start");
+    fixture.wait_ready();
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "descendant was not ready before the process deadline"
+    );
+
+    // Do not poll while the descendant's delayed marker write becomes due.
+    thread::sleep(Duration::from_millis(3400));
+    assert!(
+        !fixture.marker.exists(),
+        "descendant performed a side effect after the process deadline"
+    );
+
+    let polled_at = Instant::now();
+    let result = match runner.poll(id) {
+        PollOutcome::Done(result) => result,
+        PollOutcome::Running => panic!("deadline supervisor left the process running"),
+        PollOutcome::Missing => panic!("process result disappeared before polling"),
+    };
+    assert!(
+        polled_at.elapsed() < Duration::from_secs(1),
+        "poll hung after timeout"
+    );
+    assert!(result.timed_out && !result.cancelled);
+    assert_eq!(
+        runner.poll(id),
+        PollOutcome::Missing,
+        "terminal result was delivered twice"
+    );
+}
+
+#[test]
 fn process_tree_cancel_cleans_descendants_holding_both_pipes() {
     let fixture = TreeFixture::new();
     let mut runner = ProcessRunnerCore::new();

@@ -88,7 +88,33 @@ func json(data: Dictionary) -> void:
 	if _sent:
 		return
 	payload = data
-	_send(JSON.stringify(data).to_utf8_buffer())
+	_send(_json_bytes(data))
+
+
+## Godot 4.7's JSON.stringify can emit non-RFC `\v` and raw C0 bytes.
+## Normalize only JSON string contents; decoded values remain unchanged.
+func _json_bytes(data: Dictionary) -> PackedByteArray:
+	var serialized := JSON.stringify(data)
+	var safe := ""
+	var in_string := false
+	var escaped := false
+	for index in range(serialized.length()):
+		var character := serialized.substr(index, 1)
+		var codepoint := character.unicode_at(0)
+		if in_string and escaped:
+			safe += "u000b" if character == "v" else character
+			escaped = false
+		elif in_string and character == "\\":
+			safe += character
+			escaped = true
+		elif character == '"':
+			safe += character
+			in_string = not in_string
+		elif in_string and codepoint < 0x20:
+			safe += "\\u%04x" % codepoint
+		else:
+			safe += character
+	return safe.to_utf8_buffer()
 
 
 ## 发送纯文本响应
@@ -185,7 +211,7 @@ func _send(body: PackedByteArray) -> void:
 			"error": "handler timeout" if reason == "timeout" else "request cancelled: " + reason,
 			"code": "timeout" if reason == "timeout" else "conflict"
 		}
-		body = JSON.stringify(payload).to_utf8_buffer()
+		body = _json_bytes(payload)
 	_sent = true
 
 	var headers_dict: Dictionary[String, Variant] = {}

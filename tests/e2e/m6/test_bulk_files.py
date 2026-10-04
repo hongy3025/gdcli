@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+
 from .conftest import (
     _exec_raw,
     apply_delete,
@@ -79,6 +82,67 @@ def test_replace_rejects_protected_paths(m6_editor_bulk):
         "dry_run": True,
     })
     assert error["code"] == "permission_denied", error
+    for protected in ("res://addons/gdapi/plugin.gd", "res://./addons/gdapi/plugin.gd"):
+        error = exec_error(
+            m6_editor_bulk,
+            "filesystem/batch/delete",
+            {"paths": [protected], "dry_run": True},
+        )
+        assert error["code"] == "permission_denied", error
+
+
+def test_replace_rejects_windows_junction_outside_project(m6_editor_bulk, tmp_path):
+    if os.name != "nt":
+        import pytest
+
+        pytest.skip("Windows junctions are only supported on Windows")
+
+    project = project_file(m6_editor_bulk, "bulk")
+    folder = f"junction-boundary-{tmp_path.name}"
+    junction = project / folder
+    original = project / f"{folder}-original"
+    external = tmp_path / "external"
+    external.mkdir()
+    external_file = external / "outside.txt"
+    external_file.write_text("old")
+    junction.mkdir()
+    (junction / "inside.txt").write_text("old")
+    planned = replace_plan(
+        m6_editor_bulk,
+        root=f"res://bulk/{folder}",
+        find="old",
+        replace="new",
+    )
+    junction.rename(original)
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(external)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if created.returncode != 0:
+        original.rename(junction)
+        import pytest
+
+        pytest.skip(f"junction creation is unsupported: {created.stderr}")
+    try:
+        for dry_run in (True, False):
+            error = exec_error(
+                m6_editor_bulk,
+                "filesystem/batch/replace",
+                {
+                    "root": f"res://bulk/{folder}",
+                    "find": "old",
+                    "replace": "new",
+                    "dry_run": dry_run,
+                    "plan_hash": planned["plan_hash"],
+                },
+            )
+            assert error["code"] == "permission_denied", error
+            assert external_file.read_text() == "old"
+    finally:
+        os.rmdir(junction)
+        original.rename(junction)
 
 
 def test_recover_failure_leaves_no_partial_state(m6_editor_bulk):

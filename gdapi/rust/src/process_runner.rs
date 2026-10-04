@@ -4,7 +4,7 @@ use std::io::{ErrorKind, Read};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -27,7 +27,7 @@ pub enum PollOutcome {
 
 pub struct ProcessRunnerCore {
     next_id: AtomicI64,
-    jobs: Arc<Mutex<HashMap<i64, Job>>>,
+    jobs: Arc<Mutex<HashMap<i64, Arc<Mutex<Job>>>>>,
 }
 
 struct Job {
@@ -38,7 +38,14 @@ struct Job {
     output: Arc<Mutex<SharedOutput>>,
     stop_readers: Arc<AtomicBool>,
     deadline: Instant,
+    deadline_signal: Arc<DeadlineSignal>,
     finished: Option<TerminalProcessResult>,
+    delivered: bool,
+}
+
+struct DeadlineSignal {
+    finished: Mutex<bool>,
+    wake: Condvar,
 }
 
 struct SharedOutput {
@@ -258,9 +265,16 @@ impl ProcessRunnerCore {
                 id,
                 Box::new(move |reason| {
                     if let Some(jobs) = jobs.upgrade() {
-                        let mut jobs = jobs.lock().expect("process runner job lock poisoned");
-                        if let Some(job) = jobs.get_mut(&id) {
-                            cancel_job(job, reason == CancelReason::Timeout);
+                        let job = jobs
+                            .lock()
+                            .expect("process runner job lock poisoned")
+                            .get(&id)
+                            .cloned();
+                        if let Some(job) = job {
+                            cancel_job(
+                                &mut job.lock().expect("process job lock poisoned"),
+                                reason == CancelReason::Timeout,
+                            );
                         }
                     }
                 }),
@@ -352,9 +366,13 @@ impl ProcessRunnerCore {
             return Err(format!("failed to configure process output: {error}"));
         }
         let stop_readers = Arc::new(AtomicBool::new(false));
+        let deadline_signal = Arc::new(DeadlineSignal {
+            finished: Mutex::new(false),
+            wake: Condvar::new(),
+        });
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let job = Job {
+        let job = Arc::new(Mutex::new(Job {
             child,
             process_tree: Some(process_tree),
             stdout_thread: Some(spawn_output_reader(
@@ -372,67 +390,102 @@ impl ProcessRunnerCore {
             output,
             stop_readers,
             deadline,
+            deadline_signal: Arc::clone(&deadline_signal),
             finished: None,
-        };
+            delivered: false,
+        }));
 
         self.jobs
             .lock()
             .expect("process runner job lock poisoned")
-            .insert(id, job);
+            .insert(id, Arc::clone(&job));
+
+        let jobs = Arc::downgrade(&self.jobs);
+        let supervisor = thread::Builder::new()
+            .name(format!("process-deadline-{id}"))
+            .spawn(move || supervise_deadline(jobs, id, deadline, deadline_signal));
+        if let Err(error) = supervisor {
+            self.jobs
+                .lock()
+                .expect("process runner job lock poisoned")
+                .remove(&id);
+            cancel_job(&mut job.lock().expect("process job lock poisoned"), false);
+            return Err(format!(
+                "failed to start process deadline supervisor: {error}"
+            ));
+        }
         Ok(id)
     }
 
     pub fn poll(&self, id: i64) -> PollOutcome {
-        let mut jobs = self.jobs.lock().expect("process runner job lock poisoned");
-        let Some(job) = jobs.get_mut(&id) else {
+        let Some(job) = self
+            .jobs
+            .lock()
+            .expect("process runner job lock poisoned")
+            .get(&id)
+            .cloned()
+        else {
             return PollOutcome::Missing;
         };
-        if job.finished.is_none() {
-            if Instant::now() >= job.deadline {
-                let process_tree = job.process_tree.take();
-                let status = kill_and_wait(&mut job.child, process_tree);
-                finish_job(job, status, true, false);
-            } else if let Ok(Some(status)) = job.child.try_wait() {
-                finish_job(job, Some(status), false, false);
-            }
+        let mut job = job.lock().expect("process job lock poisoned");
+        if job.delivered {
+            return PollOutcome::Missing;
         }
-        if job.finished.is_none() {
+        if job.finished.is_none() && !try_finish_natural(&mut job) && Instant::now() >= job.deadline
+        {
+            let process_tree = job.process_tree.take();
+            let status = kill_and_wait(&mut job.child, process_tree);
+            finish_job(&mut job, status, true, false);
+        }
+        let Some(result) = job.finished.take() else {
             return PollOutcome::Running;
-        }
-        // Deliver exactly once by moving the result, without copying capped output.
-        let mut job = jobs.remove(&id).expect("terminal process job missing");
-        PollOutcome::Done(
-            job.finished
-                .take()
-                .expect("terminal process result missing"),
-        )
+        };
+        job.delivered = true;
+        drop(job);
+        self.jobs
+            .lock()
+            .expect("process runner job lock poisoned")
+            .remove(&id);
+        PollOutcome::Done(result)
     }
 
     pub fn cancel(&self, id: i64) -> bool {
-        let mut jobs = self.jobs.lock().expect("process runner job lock poisoned");
-        let Some(job) = jobs.get_mut(&id) else {
+        let Some(job) = self
+            .jobs
+            .lock()
+            .expect("process runner job lock poisoned")
+            .get(&id)
+            .cloned()
+        else {
             return false;
         };
-        if job.finished.is_some() {
+        let mut job = job.lock().expect("process job lock poisoned");
+        if job.finished.is_some() || job.delivered {
             return false;
         }
 
-        cancel_job(job, false);
+        cancel_job(&mut job, false);
         true
     }
 }
 
 impl Drop for ProcessRunnerCore {
     fn drop(&mut self) {
-        let mut jobs = self.jobs.lock().expect("process runner job lock poisoned");
-        for (_, mut job) in jobs.drain() {
-            cancel_job(&mut job, false);
+        let jobs = self
+            .jobs
+            .lock()
+            .expect("process runner job lock poisoned")
+            .drain()
+            .map(|(_, job)| job)
+            .collect::<Vec<_>>();
+        for job in jobs {
+            cancel_job(&mut job.lock().expect("process job lock poisoned"), false);
         }
     }
 }
 
 fn cancel_job(job: &mut Job, timed_out: bool) {
-    if job.finished.is_some() {
+    if job.finished.is_some() || job.delivered {
         return;
     }
     let process_tree = job.process_tree.take();
@@ -566,29 +619,6 @@ fn kill_and_wait(child: &mut Child, process_tree: Option<ProcessTreeGuard>) -> O
     child.wait().ok()
 }
 
-fn finish_job(job: &mut Job, status: Option<ExitStatus>, timed_out: bool, cancelled: bool) {
-    if let Some(process_tree) = job.process_tree.take() {
-        process_tree.terminate();
-    }
-    job.stop_readers.store(true, Ordering::Release);
-    if let Some(handle) = job.stdout_thread.take() {
-        let _ = handle.join();
-    }
-    if let Some(handle) = job.stderr_thread.take() {
-        let _ = handle.join();
-    }
-
-    let mut shared = job.output.lock().expect("process output lock poisoned");
-    job.finished = Some(TerminalProcessResult {
-        exit_code: status.and_then(|exit| exit.code()),
-        timed_out,
-        cancelled,
-        stdout: decode_output(std::mem::take(&mut shared.stdout)),
-        stderr: decode_output(std::mem::take(&mut shared.stderr)),
-        truncated: shared.truncated,
-    });
-}
-
 fn decode_output(bytes: Vec<u8>) -> String {
     match String::from_utf8(bytes) {
         Ok(output) => output,
@@ -611,6 +641,134 @@ fn resolve_executable(cwd: &Path, executable: &str) -> String {
     executable.to_string()
 }
 
+fn supervise_deadline(
+    jobs: std::sync::Weak<Mutex<HashMap<i64, Arc<Mutex<Job>>>>>,
+    id: i64,
+    deadline: Instant,
+    signal: Arc<DeadlineSignal>,
+) {
+    let mut finished = signal
+        .finished
+        .lock()
+        .expect("process deadline signal lock poisoned");
+    while !*finished {
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let (next, _) = signal
+            .wake
+            .wait_timeout(finished, deadline.saturating_duration_since(now))
+            .expect("process deadline signal lock poisoned");
+        finished = next;
+    }
+    if *finished {
+        return;
+    }
+    drop(finished);
+
+    let Some(jobs) = jobs.upgrade() else {
+        return;
+    };
+    let job = jobs
+        .lock()
+        .expect("process runner job lock poisoned")
+        .get(&id)
+        .cloned();
+    let Some(job) = job else {
+        return;
+    };
+    let mut job = job.lock().expect("process job lock poisoned");
+    if job.delivered || job.finished.is_some() || try_finish_natural(&mut job) {
+        return;
+    }
+    let process_tree = job.process_tree.take();
+    let status = kill_and_wait(&mut job.child, process_tree);
+    finish_job(&mut job, status, true, false);
+}
+
+fn try_finish_natural(job: &mut Job) -> bool {
+    #[cfg(unix)]
+    {
+        match child_has_exited_without_reaping(&job.child) {
+            Ok(true) => {
+                terminate_process_tree(job);
+                let status = job.child.wait().ok();
+                finish_job(job, status, false, false);
+                true
+            }
+            Ok(false) | Err(_) => false,
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Ok(Some(status)) = job.child.try_wait() {
+            finish_job(job, Some(status), false, false);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(unix)]
+fn child_has_exited_without_reaping(child: &Child) -> std::io::Result<bool> {
+    loop {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id() as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result == 0 {
+            return Ok(info.si_signo != 0);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+fn terminate_process_tree(job: &mut Job) {
+    if let Some(process_tree) = job.process_tree.take() {
+        process_tree.terminate();
+    }
+}
+
+fn finish_job(job: &mut Job, status: Option<ExitStatus>, timed_out: bool, cancelled: bool) {
+    terminate_process_tree(job);
+    {
+        let mut finished = job
+            .deadline_signal
+            .finished
+            .lock()
+            .expect("process deadline signal lock poisoned");
+        *finished = true;
+        job.deadline_signal.wake.notify_one();
+    }
+    job.stop_readers.store(true, Ordering::Release);
+    if let Some(handle) = job.stdout_thread.take() {
+        let _ = handle.join();
+    }
+    if let Some(handle) = job.stderr_thread.take() {
+        let _ = handle.join();
+    }
+
+    let mut shared = job.output.lock().expect("process output lock poisoned");
+    job.finished = Some(TerminalProcessResult {
+        exit_code: status.and_then(|exit| exit.code()),
+        timed_out,
+        cancelled,
+        stdout: decode_output(std::mem::take(&mut shared.stdout)),
+        stderr: decode_output(std::mem::take(&mut shared.stderr)),
+        truncated: shared.truncated,
+    });
+}
 #[cfg(test)]
 mod tests {
     use super::*;

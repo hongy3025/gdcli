@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import socket
@@ -22,6 +23,20 @@ def test_process_run_no_shell_preserves_argv(m6_editor_process: dict[str, Any]) 
     assert '"$(whoami)"' in result["stdout"]
 
 
+def test_process_run_json_preserves_non_nul_c0_controls(
+    m6_editor_process: dict[str, Any],
+) -> None:
+    intended = "".join(chr(codepoint) for codepoint in range(1, 0x20))
+    script = "import sys; sys.stdout.buffer.write(bytes(range(1, 32)))"
+    result = exec_ok(m6_editor_process, "process/run", {
+        "executable": sys.executable,
+        "args": ["-c", script],
+    })
+    assert [ord(character) for character in result["stdout"]] == [
+        ord(character) for character in intended
+    ]
+
+
 def test_process_run_timeout_has_one_failed_terminal_audit(
     m6_editor_process: dict[str, Any],
 ) -> None:
@@ -35,6 +50,65 @@ def test_process_run_timeout_has_one_failed_terminal_audit(
     events = audit_for_route(m6_editor_process, "process/run")
     timeout_events = [e for e in events if e.get("code") == "timeout"]
     assert len(timeout_events) == 1
+
+
+def test_process_timeout_is_enforced_during_editor_main_thread_stall(
+    m6_editor_process: dict[str, Any],
+) -> None:
+    project = Path(m6_editor_process["project"])
+    scene_path = "res://scenes/process_deadline_blocker.tscn"
+    scene = project / "scenes" / "process_deadline_blocker.tscn"
+    script = project / "tools" / "process_deadline_blocker.gd"
+    started = project / "tools" / "deadline_started.txt"
+    late = project / "tools" / "deadline_late.txt"
+    original_scene = exec_ok(m6_editor_process, "scene/current")["path"]
+    script.write_text(
+        "@tool\nextends Node\n\nfunc _ready() -> void:\n\tOS.delay_msec(2500)\n",
+        encoding="utf-8",
+    )
+    scene.write_text(
+        '[gd_scene load_steps=2 format=3]\n\n'
+        '[ext_resource type="Script" path="res://tools/process_deadline_blocker.gd" id="1"]\n\n'
+        '[node name="ProcessDeadlineBlocker" type="Node"]\n'
+        'script = ExtResource("1")\n',
+        encoding="utf-8",
+    )
+    process_script = (
+        "import pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text('started'); "
+        "time.sleep(1.5); pathlib.Path(sys.argv[2]).write_text('late')"
+    )
+    before = audit_for_route(m6_editor_process, "process/run")
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            process = executor.submit(
+                exec_error,
+                m6_editor_process,
+                "process/run",
+                {
+                    "executable": sys.executable,
+                    "args": ["-c", process_script, str(started), str(late)],
+                    "cwd": "res://tools",
+                    "timeout_ms": 500,
+                },
+            )
+            deadline = time.monotonic() + 5
+            while not started.exists():
+                assert time.monotonic() < deadline, "timed process did not start"
+                time.sleep(0.01)
+            opened = exec_ok(m6_editor_process, "scene/open", {"path": scene_path})
+            assert opened["path"] == scene_path
+            error = process.result(timeout=10)
+        assert error["code"] == "timeout", error
+        assert not late.exists(), "process made a side effect after timeout while editor was stalled"
+        events = audit_for_route(m6_editor_process, "process/run")[len(before):]
+        assert len(events) == 1, events
+        assert events[0].get("ok") is False and events[0].get("code") == "timeout", events
+    finally:
+        current = exec_ok(m6_editor_process, "scene/current").get("path")
+        if current != original_scene:
+            exec_ok(m6_editor_process, "scene/open", {"path": original_scene})
+        for path in (scene, scene.with_suffix(".tscn.uid"), script, script.with_suffix(".gd.uid"), started, late):
+            path.unlink(missing_ok=True)
 
 
 def test_process_run_default_handler_deadline_prevents_late_side_effect_and_success_audit(
