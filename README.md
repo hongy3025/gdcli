@@ -93,6 +93,8 @@ uv run python scripts/check.py
 
 可重复传入 `--gate format|clippy|unit|file|engine|render|budget` 选择门禁。file、engine、render 是顺序运行的独立单编辑器 pytest 会话；render 在非 headless `gl_compatibility` 编辑器中验证 GridMap 与 MultiMesh 的实际状态/持久化（CI 使用 Mesa llvmpipe）。headless file/预算套件排除这两个需要 RenderingServer 的验收。`GDAPI_E2E_BUDGET_SECONDS` 显式配置完整 headless wall-clock 阈值（默认 360 秒）；成功等待只报告 P50/P95/P99/max 和 P99×3 建议，不会静默提高门限。每次运行的原始等待样本和 session 证据写入 `.pytest-artifacts/`。
 
+同一次 `scripts/check.py` 调用选择 `file` 和 `budget` 时，只执行一次完整 file 套件：budget 使用该次子进程从启动到退出的父进程 monotonic wall-clock，不复用旧产物、不缩减测试。单独 `--gate budget` 仍重新运行完整套件。E2E 编辑器不再强行设置 180 秒 handler 超时，默认与生产一样为 30 秒。GDScript 格式/lint 在遍历前排除生成目录，junction 别名按物理目录去重，并按 Windows 命令行长度限制合并批次。
+
 通过 `GODOT_BIN` 环境变量可覆盖 Godot 路径；共享 E2E fixture 在 Windows 上默认使用 `D:\app\devel\Godot\v4.7.2\godot_console.exe`，其他平台默认使用 PATH 中的 `godot`。直接调用 `build_environment(godot_bin=...)` 时，显式参数优先于环境变量。
 
 E2E fixture 默认强制 file transport（保证确定性）；需要验收 EngineDebugger 数据面时：
@@ -266,7 +268,7 @@ Return Fields:
   uids_generated       int, 新生成的 UID 数
 ```
 
-加 `--json` 切回原始的 minified JSON（脚本场景推荐）：
+加 `--json` 切回原始的 minified JSON（脚本场景推荐）。`--json` 只把 `ok` 前置，保留响应原始结构（空数组仍是 `[]`，不会被 TOON 的有损压缩改写成 `""`）：
 
 ```bash
 # 默认 TOON 输出
@@ -431,6 +433,10 @@ M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项�
 
 所有 mutation 响应包含 `ok`、`changed`、`undoable` 字段。Router 根据 `RouteDoc.mutates()` 记录 mutation 成功与失败（含 body 校验错误），handler 已自审计时不会重复；纯只读请求的失败不会误记为 mutation。
 
+`scene/current/save` 在保存前检查目标可写性，保存后从磁盘重新加载并核对实际场景内容；失败不报告 `saved:true`，保留原场景路径和未保存状态。`scene/current.edited` 来自编辑器真实的未保存场景列表（按场景索引对齐，`save-as` 之后同样准确）。`scene/delete` 的依赖检查包括 GDScript 中的 `preload`/`load`（资源路径、相对路径和 UID），不会为扫描而执行脚本。
+
+`uid/repair` 复用所有文件写入入口的保护路径策略，逐一预检计划目标后才执行写入；广根目录扫描跳过受保护目录。InputMap 保存失败恢复操作前完整事件、deadzone 和 ProjectSettings 状态。`resource/assign` 验证具体资源子类（含自定义脚本继承），并确认赋值生效后才提交 UndoRedo。
+
 审计 `list` 支持 `safety` 过滤（`mutation`/`runtime`/`file`/`dangerous`）及 `since` 游标分页。容量上限为 1000，普通 mutation 优先淘汰；危险/文件类记录在保护记录队列填满前不会被普通流量驱逐。
 
 ### M3 运行时验证
@@ -463,6 +469,10 @@ M6 高风险能力（`editor/eval`、`runtime/eval`、`process/run`、`network/h
 内置硬上限约束：eval 源码 ≤16 KiB、
 process 超时 ≤60s/输出 ≤1 MiB、network 仅 http(s)/超时 ≤60s/响应 ≤4 MiB/
 重定向 ≤5、export 超时 ≤600s。所有危险操作保留审计日志（不含 secret）。
+
+HTTP handler 的默认期限为 30 秒，可用 `GDAPI_HANDLER_TIMEOUT_MS` 显式设置。`process/run` 的业务期限还受当前 HTTP 请求剩余期限限制：HTTP 超时、客户端断连或服务器停止会取消并回收实际进程，终态与失败审计保持一致，不允许超时响应之后继续产生延迟副作用。Windows 使用 Job Object，Unix 使用独立进程组；进程自然完成、超时、取消及 runner 销毁都会清理后代，输出管道采用可停止的有界排空，不会无界等待继承管道的后代。
+
+受限 eval 在解码输入前递归拒绝可加载或执行的 Object/Resource 等值。HTTP 重定向按 scheme、host、有效 port 区分 origin；跨源会剥离认证/Cookie 等敏感请求头，后续跳回原源也不会恢复凭据。审计摘要对 URL 中的 userinfo 脱敏，包括被拒绝请求与嵌套错误文本。
 
 ---
 

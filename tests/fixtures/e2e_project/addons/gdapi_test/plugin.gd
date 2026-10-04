@@ -5,16 +5,27 @@ const COMMAND := "res://.godot/gdapi-test-command.json"
 const RESULT := "res://.godot/gdapi-test-result.json"
 const RESULT_TEMP := "res://.godot/gdapi-test-result.tmp"
 
+## 最近一次已执行的请求：harness 重投同一 request_id 时只重发结果，不重复执行 undo/redo。
+var _last_request_id := ""
+var _last_result := ""
+
 
 func _process(_delta: float) -> void:
 	if not FileAccess.file_exists(COMMAND):
 		return
 	var body = JSON.parse_string(FileAccess.get_file_as_string(COMMAND))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(COMMAND))
+	if typeof(body) != TYPE_DICTIONARY:
+		return
+	var request_id := String(body.get("request_id", ""))
+	if not request_id.is_empty() and request_id == _last_request_id and not _last_result.is_empty():
+		# 命令可能在编辑器读取前被删除（上一帧的 remove 竞态），harness 会重投同一 id。
+		_publish(_last_result)
+		return
 	var root := EditorInterface.get_edited_scene_root()
 	var ok := false
 	var diagnostics := {}
-	if root != null and typeof(body) == TYPE_DICTIONARY:
+	if root != null:
 		var manager := get_undo_redo()
 		var history := manager.get_history_undo_redo(manager.get_object_history_id(root))
 		ok = history.undo() if body.get("action") == "undo" else history.redo()
@@ -29,8 +40,14 @@ func _process(_delta: float) -> void:
 			}
 	else:
 		diagnostics = {"scene_path": "", "scene_name": "", "action": body.get("action")}
+	_last_request_id = request_id
+	_last_result = JSON.stringify({"ok": ok, "diagnostics": diagnostics, "request_id": request_id})
+	_publish(_last_result)
+
+
+func _publish(payload: String) -> void:
 	var file := FileAccess.open(RESULT_TEMP, FileAccess.WRITE)
-	file.store_string(JSON.stringify({"ok": ok, "diagnostics": diagnostics}))
+	file.store_string(payload)
 	file.close()
 	if FileAccess.file_exists(RESULT):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(RESULT))

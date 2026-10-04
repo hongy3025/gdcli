@@ -15,6 +15,9 @@ ALLOWED_EDITOR: list[tuple[str, dict[str, Any], Any]] = [
         {"a": 1, "b": 2},
         {"type": "Vector2", "value": [2.0, 3.0]},
     ),
+    ("a", {"a": {"type": "Vector2", "value": [2, 3]}},
+     {"type": "Vector2", "value": [2.0, 3.0]}),
+    ("a", {"a": [1, {"safe": True}, None]}, [1, {"safe": True}, None]),
 ]
 
 DENIED_EDITOR: list[tuple[str, dict[str, Any]]] = [
@@ -49,3 +52,16 @@ def test_eval_source_never_appears_in_audit(m6_editor_eval: dict[str, Any]) -> N
     event = latest_audit(m6_editor_eval, "editor/eval")
     assert secret not in json.dumps(event)
     assert event["ok"] is True
+
+
+@pytest.mark.parametrize("type_name", [
+    "Object", "Resource", "RID", "Callable", "Signal", "GDScript", "PackedScene",
+])
+@pytest.mark.parametrize("nested", [False, True])
+def test_eval_rejects_object_encodings(m6_editor_eval, type_name, nested):
+    encoded = {"type": type_name, "value": "user://not-loaded.gd"}
+    value = {"nested": [encoded]} if nested else encoded
+    error = exec_error(m6_editor_eval, "editor/eval", {
+        "source": "1", "inputs": {"a": value},
+    })
+    assert error["code"] == "invalid_param"

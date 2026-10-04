@@ -689,6 +689,10 @@ fn exec_commands_json_flag_preserves_raw() {
         "should contain raw JSON, got: {stdout}"
     );
     assert!(
+        stdout.contains(r#""params":[]"#),
+        "JSON 模式必须保留原始数组结构, got: {stdout}"
+    );
+    assert!(
         !stdout.contains("Commands:"),
         "should not contain clap header, got: {stdout}"
     );

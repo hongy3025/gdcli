@@ -60,16 +60,16 @@ func scan(root_dir: String, force: bool = false) -> void:
 	_scan_dir(root_dir, "", seen_files)
 
 	# 移除已从文件系统删除的路由
-	for file_path in _file_routes.keys().duplicate():
+	for file_path in _file_routes.keys():
 		if not seen_files.has(file_path):
 			_routes.erase(_file_routes[file_path])
 			_file_routes.erase(file_path)
 			_file_signatures.erase(file_path)
 			_needs_update = true
 
-	# 始终刷新内置 handler，确保 command/list 和 command/doc
-	# 持有最新的路由表（包括通过 _on_filesystem_changed 触发的增量扫描）
-	_refresh_builtin_handlers()
+	# 保持热重载后的最新路由表；无关项目文件变化不重建内置 handler。
+	if _needs_update or _builtin_routes_handler == null:
+		_refresh_builtin_handlers()
 
 
 ## 获取已注册命令总数
@@ -167,12 +167,15 @@ func dispatch(req_dict: Dictionary, server) -> void:
 		_:
 			if _routes.has(key):
 				handler = (_routes[key] as Script).new()
-	var res := GdApiResponse.new(server, id)
+	var res := GdApiResponse.new(server, id, req_dict.get("control"))
 	var mutation := false
 	if handler != null:
 		var route_doc: GdApiRouteDoc = handler.doc()
 		mutation = route_doc != null and route_doc.mutation
 	res.bind_audit(key, mutation)
+	if not res.cancellation_reason().is_empty():
+		res.error("request cancelled before dispatch", ErrorCodes.TIMEOUT, 504)
+		return
 	if method != "POST":
 		res.error("only POST is supported", ErrorCodes.METHOD_NOT_ALLOWED, 405)
 		return

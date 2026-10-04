@@ -13,6 +13,7 @@ const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 ## 已完成的 JSON 响应体与独立请求审计所有者。
 var payload: Dictionary = {}
 var audit_context: Dictionary = {}
+var request_control
 
 ## HTTP 响应状态码
 var _status: int = 200
@@ -31,9 +32,11 @@ var _sent: bool = false
 ## 设置服务器引用和请求 ID，并配置默认的 JSON 响应头。
 ## @param server HTTP 服务器实例
 ## @param request_id 关联的请求标识符
-func _init(server, request_id: int) -> void:
+## @param control HTTP 层提供的统一取消所有者（非 HTTP 调用须显式传 null）
+func _init(server, request_id: int, control) -> void:
 	_server = server
 	_request_id = request_id
+	request_control = control
 	_headers["Content-Type"] = "application/json; charset=utf-8"
 
 
@@ -145,6 +148,16 @@ func is_sent() -> bool:
 	return _sent
 
 
+func remaining_ms() -> int:
+	return 0 if request_control == null else int(request_control.remaining_ms())
+
+
+func cancellation_reason() -> String:
+	if request_control == null:
+		return ""
+	return String(request_control.cancellation_reason())
+
+
 ## 内部发送方法
 ##
 ## 实际发送响应到客户端，确保每个请求只发送一次响应。
@@ -153,6 +166,14 @@ func _send(body: PackedByteArray) -> void:
 	if _sent:
 		push_warning("GdApiResponse: already sent")
 		return
+	var reason := cancellation_reason()
+	if not reason.is_empty():
+		_status = 504 if reason == "timeout" else 409
+		payload = {
+			"error": "handler timeout" if reason == "timeout" else "request cancelled: " + reason,
+			"code": "timeout" if reason == "timeout" else "conflict"
+		}
+		body = JSON.stringify(payload).to_utf8_buffer()
 	_sent = true
 	AuditLog.complete_request(audit_context, payload, _status)
 

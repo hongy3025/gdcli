@@ -109,3 +109,19 @@ def write_report(path: Path, *, exitstatus: int, editor_starts: int) -> None:
         "groups": TIMINGS.summary(),
     }
     path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def write_budget_report(path: Path, *, elapsed: float, child_report: Path) -> None:
+    """Enforce a fresh parent measurement, then publish its budget evidence."""
+    budget = positive_seconds("GDAPI_E2E_BUDGET_SECONDS")
+    if elapsed > budget:
+        raise AssertionError(
+            f"full file session parent wall-clock {elapsed:.3f}s exceeds "
+            f"GDAPI_E2E_BUDGET_SECONDS={budget:g}s"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "parent_wall_clock_seconds": elapsed,
+        "budget_seconds": budget,
+        "child_timing_json": str(child_report),
+    }, indent=2) + "\n", encoding="utf-8")

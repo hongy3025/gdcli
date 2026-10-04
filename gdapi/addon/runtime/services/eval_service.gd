@@ -30,8 +30,10 @@ static func execute(source: String, inputs: Dictionary) -> Dictionary:
 	for key in inputs:
 		if typeof(key) != TYPE_STRING:
 			return _error(ErrorCodes.INVALID_PARAM, "input names must be strings")
+		if _contains_forbidden_value(inputs[key], true):
+			return _error(ErrorCodes.INVALID_PARAM, "input value is not a permitted Variant")
 		var decoded := VariantCodec.decode(inputs[key])
-		if not decoded.ok or _contains_object(decoded.value):
+		if not decoded.ok or _contains_forbidden_value(decoded.value):
 			return _error(ErrorCodes.INVALID_PARAM, "input value is not a permitted Variant")
 		names.append(String(key))
 		values.append(decoded.value)
@@ -105,12 +107,12 @@ static func _tokenize_identifiers(source: String) -> Dictionary:
 
 
 static func _validate_result(value: Variant) -> Dictionary:
-	if _contains_object(value):
+	if _contains_forbidden_value(value):
 		return _error(ErrorCodes.PERMISSION_DENIED, "expression result is not a permitted Variant")
 	return {"ok": true}
 
 
-static func _contains_object(value: Variant) -> bool:
+static func _contains_forbidden_value(value: Variant, inspect_encoding: bool = false) -> bool:
 	if (
 		typeof(value) == TYPE_OBJECT
 		or typeof(value) == TYPE_RID
@@ -120,11 +122,23 @@ static func _contains_object(value: Variant) -> bool:
 		return true
 	if typeof(value) == TYPE_ARRAY:
 		for item in value:
-			if _contains_object(item):
+			if _contains_forbidden_value(item, inspect_encoding):
 				return true
 	if typeof(value) == TYPE_DICTIONARY:
+		if inspect_encoding and typeof(value.get("type")) == TYPE_STRING:
+			var encoded_type: String = value.type
+			if encoded_type in ["Resource", "Object", "RID", "Callable", "Signal"]:
+				return true
+			if (
+				ClassDB.class_exists(encoded_type)
+				and ClassDB.is_parent_class(encoded_type, "Object")
+			):
+				return true
 		for key in value:
-			if _contains_object(key) or _contains_object(value[key]):
+			if (
+				_contains_forbidden_value(key, inspect_encoding)
+				or _contains_forbidden_value(value[key], inspect_encoding)
+			):
 				return true
 	return false
 

@@ -26,7 +26,7 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		or not plugin.register_deferred_task(
 			{
 				"response": res,
-				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
+				"deadline_ms": Time.get_ticks_msec() + mini(checked.timeout_ms, res.remaining_ms()),
 				"tick": func(now): return Service.tick(started.state, now),
 				"cancel": func(reason): Service.cancel(started.state, reason),
 				"state": started.state,
@@ -46,7 +46,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("执行无 shell 的受限外部进程")
 		. mutates()
-		. desc("executable 与 argv 原样传递，不经过 shell；timeout 上限 60s、输出上限 1 MiB")
+		. desc("executable 与 argv 原样传递，不经过 shell；执行期限不超过 HTTP 剩余期限与 60s，输出上限 1 MiB")
 		. param("executable", "String", true, "可执行文件路径")
 		. param("args", "Array[String]", false, "原样 argv")
 		. param("cwd", "String", false, "项目目录")

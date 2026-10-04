@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from e2e.timing import positive_seconds
+from e2e.timing import positive_seconds, write_budget_report
 
 pytestmark = pytest.mark.budget
 
@@ -49,10 +49,5 @@ def test_full_suite_under_budget():
     budget_path = Path(os.environ.get(
         "GDAPI_E2E_BUDGET_JSON", str(root / ".pytest-artifacts/budget.json")
     )).resolve()
-    budget_path.parent.mkdir(parents=True, exist_ok=True)
-    budget_path.write_text(json.dumps({
-        "parent_wall_clock_seconds": elapsed,
-        "budget_seconds": positive_seconds("GDAPI_E2E_BUDGET_SECONDS"),
-        "child_timing_json": str(report_path),
-    }, indent=2) + "\n", encoding="utf-8")
+    write_budget_report(budget_path, elapsed=elapsed, child_report=report_path)
     print(f"FULL_SUITE_PARENT_WALL_SECONDS={elapsed:.3f}")

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from .conftest import exec_error, exec_ok
 
 
@@ -11,13 +13,8 @@ def _uid_sidecar_digests(project_dir):
     }
 
 
-def test_uid_repair_rolls_back_when_a_write_fails(m5_editor):
-    """目标资源不可写时必须报错，并把已写入的 UID 回滚（无部分状态）。
-
-    构造方式：先用 uid/repair 给两个副本各自写入 UID（missing → 写入），
-    再把其中一个的 UID 复制成第三个文件（冲突，且 old_uid 非空可还原），
-    最后把它设为只读，使 apply 在写入第二个目标时失败。
-    """
+def test_uid_repair_preflights_all_targets_before_writing(m5_editor):
+    """A late read-only collision must reject the whole batch before any UID writes."""
     import os
     from pathlib import Path
 
@@ -53,15 +50,18 @@ def test_uid_repair_rolls_back_when_a_write_fails(m5_editor):
     mode = blocked.stat().st_mode
     blocked.chmod(mode & ~0o222)
     assert not os.access(blocked, os.W_OK), "前置条件：d.tres 必须不可写"
+    before_bytes = {path.name: path.read_bytes() for path in work.iterdir() if path.is_file()}
     try:
         error = exec_error(m5_editor, "uid/repair", {
             "roots": ["res://fixtures/uid_collision"], "dry_run": False,
         })
-        assert error["code"] == "godot_error", error
+        assert error["code"] == "permission_denied", error
         details = error["details"]
         assert details["failed_path"].endswith("d.tres"), details
-        assert details["applied"] == 1, details
-        assert details["rollback_failures"] == [], details
+        assert details["applied"] == 0, details
+        assert {
+            path.name: path.read_bytes() for path in work.iterdir() if path.is_file()
+        } == before_bytes
 
         after = exec_ok(m5_editor, "uid/repair", {
             "roots": ["res://fixtures/uid_collision"], "dry_run": True,
@@ -102,3 +102,72 @@ def test_uid_repair_dry_run_apply_is_idempotent(m5_editor):
     second = exec_ok(m5_editor, "uid/repair", body)
     assert second["changes"] == []
     assert second["changed"] is False
+
+
+@pytest.mark.parametrize("root", [
+    "res://addons/gdapi", "res://addons/gdapi/",
+    "res://addons/gdapi/runtime", "res://addons/gdapi/runtime/protected.tres",
+    "res://.godot", "res://.godot/",
+])
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_uid_repair_rejects_protected_roots_atomically(m5_editor, root, dry_run):
+    project = Path(m5_editor["project"])
+    work = project / "fixtures" / "uid_protected_batch"
+    work.mkdir(parents=True, exist_ok=True)
+    target = work / "missing.tres"
+    target.write_text('[gd_resource type="Resource" format=3]\n\n[resource]\n', encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in work.iterdir()}
+    error = exec_error(m5_editor, "uid/repair", {
+        "roots": ["res://fixtures/uid_protected_batch", root], "dry_run": dry_run,
+    })
+    assert error["code"] == "permission_denied", error
+    assert {path.name: path.read_bytes() for path in work.iterdir()} == before
+
+
+def test_uid_repair_broad_scan_skips_protected_files_and_deduplicates_roots(m5_editor):
+    project = Path(m5_editor["project"])
+    protected = project / "addons" / "gdapi" / "uid_protected.tres"
+    protected.write_text('[gd_resource type="Resource" format=3]\n\n[resource]\n', encoding="utf-8")
+    protected_before = protected.read_bytes()
+    try:
+        single = exec_ok(m5_editor, "uid/repair", {"roots": ["res://"], "dry_run": True})
+        repeated = exec_ok(m5_editor, "uid/repair", {
+            "roots": ["res://fixtures", "res://", "res://fixtures/", "res://"],
+            "dry_run": True,
+        })
+        assert repeated["scanned"] == single["scanned"]
+        fields = lambda plan: [
+            (item["path"], item["old_uid"], item["status"]) for item in plan["changes"]
+        ]
+        assert fields(repeated) == fields(single)
+        assert all(
+            not item["path"].startswith(("res://addons/gdapi/", "res://.godot/"))
+            for item in repeated["changes"]
+        )
+        exec_ok(m5_editor, "uid/repair", {"roots": ["res://"], "dry_run": False})
+        assert protected.read_bytes() == protected_before
+        assert not protected.with_suffix(".tres.uid").exists()
+    finally:
+        protected.unlink(missing_ok=True)
+        protected.with_suffix(".tres.uid").unlink(missing_ok=True)
+
+
+def test_uid_repair_read_only_missing_uid_does_not_partially_create_uids(m5_editor):
+    work = Path(m5_editor["project"]) / "fixtures" / "uid_missing_preflight"
+    work.mkdir(parents=True, exist_ok=True)
+    for name in ("a.tres", "z.tres"):
+        (work / name).write_text(
+            '[gd_resource type="Resource" format=3]\n\n[resource]\n', encoding="utf-8"
+        )
+    blocked = work / "z.tres"
+    mode = blocked.stat().st_mode
+    blocked.chmod(mode & ~0o222)
+    before = {path.name: path.read_bytes() for path in work.iterdir()}
+    try:
+        error = exec_error(m5_editor, "uid/repair", {
+            "roots": ["res://fixtures/uid_missing_preflight"], "dry_run": False,
+        })
+        assert error["code"] == "permission_denied", error
+        assert {path.name: path.read_bytes() for path in work.iterdir()} == before
+    finally:
+        blocked.chmod(mode)

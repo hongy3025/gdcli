@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from .conftest import (
     assert_snapshot_restored,
     exec_error,
@@ -116,3 +118,95 @@ def test_unwritable_project_file_fails_and_rolls_back(m5_editor, read_only_proje
 
     assert project_godot.read_bytes() == before_bytes
     assert_snapshot_restored(m5_editor, before)
+
+
+@pytest.fixture()
+def input_action(m5_editor):
+    """创建 InputMap 动作，并在用例结束后从共享编辑器移除。
+
+    `m5_editor` 只恢复项目文件基线，共享编辑器的运行时 InputMap 不会随之回滚，
+    因此每个用例必须清理自己创建的动作，否则下一个用例会命中 "action already exists"。
+    """
+    created: list[str] = []
+
+    def _create(name: str, **body) -> None:
+        exec_ok(m5_editor, "project/input_map/action/add", {"action": name, **body})
+        created.append(name)
+
+    yield _create
+    for name in reversed(created):
+        exec_ok(m5_editor, "project/input_map/action/remove", {"action": name})
+
+
+@pytest.mark.parametrize(("route", "keycode", "keys"), [
+    ("project/input_map/unbind", 90, []),
+    ("project/input_map/unbind", 90, [65, 66, 67]),
+    ("project/input_map/unbind", 66, [65, 66, 67]),
+    ("project/input_map/bind", 66, [65, 66, 67]),
+    ("project/input_map/bind", 90, [65, 66, 67]),
+    ("project/input_map/action/remove", None, [65, 66, 67]),
+])
+def test_input_map_save_failure_restores_exact_action_and_setting(
+    m5_editor, input_action, route, keycode, keys,
+):
+    action = "m5_exact_input_rollback"
+    input_action(action, deadzone=0.37)
+    for key in keys:
+        exec_ok(m5_editor, "project/input_map/bind", {
+            "action": action, "event": {"type": "InputEventKey", "keycode": key},
+        })
+    # A persisted setting is independent of the current InputMap. Rollback must
+    # not synthesize it from the runtime action (or drop extra setting fields).
+    exec_ok(m5_editor, "project/settings/set", {
+        "name": "input/" + action,
+        "value": {"deadzone": 0.91, "events": [], "integrity_marker": "preserve"},
+    })
+    before_action = exec_ok(m5_editor, "project/input_map/list", {"filter": action})["items"]
+    before_setting = exec_ok(m5_editor, "project/settings/get", {"name": "input/" + action})
+    assert before_action[0]["deadzone"] == pytest.approx(0.37)
+    assert [event["keycode"] for event in before_action[0]["events"]] == keys
+    project_file = Path(m5_editor["project"]) / "project.godot"
+    before_bytes = project_file.read_bytes()
+    mode = project_file.stat().st_mode
+    project_file.chmod(mode & ~0o222)
+    try:
+        body = {"action": action}
+        if keycode is not None:
+            body["event"] = {"type": "InputEventKey", "keycode": keycode}
+        error = exec_error(m5_editor, route, body)
+        assert error["code"] == "godot_error", error
+        assert exec_ok(
+            m5_editor, "project/input_map/list", {"filter": action}
+        )["items"] == before_action
+        assert exec_ok(
+            m5_editor, "project/settings/get", {"name": "input/" + action}
+        ) == before_setting
+        assert project_file.read_bytes() == before_bytes
+    finally:
+        project_file.chmod(mode)
+
+
+def test_input_map_bind_failure_restores_absent_project_setting(m5_editor, input_action):
+    action = "m5_runtime_only_rollback"
+    input_action(action, deadzone=0.42)
+    exec_ok(m5_editor, "project/settings/reset", {"name": "input/" + action})
+    before_action = exec_ok(m5_editor, "project/input_map/list", {"filter": action})["items"]
+    assert before_action[0]["events"] == []
+    project_file = Path(m5_editor["project"]) / "project.godot"
+    before_bytes = project_file.read_bytes()
+    mode = project_file.stat().st_mode
+    project_file.chmod(mode & ~0o222)
+    try:
+        error = exec_error(m5_editor, "project/input_map/bind", {
+            "action": action, "event": {"type": "InputEventKey", "keycode": 65},
+        })
+        assert error["code"] == "godot_error", error
+        assert exec_ok(
+            m5_editor, "project/input_map/list", {"filter": action}
+        )["items"] == before_action
+        assert exec_error(
+            m5_editor, "project/settings/get", {"name": "input/" + action}
+        )["code"] == "not_found"
+        assert project_file.read_bytes() == before_bytes
+    finally:
+        project_file.chmod(mode)

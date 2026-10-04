@@ -2,7 +2,7 @@
 
 import pytest
 
-from .helpers import exec_error, exec_ok, tree_digest
+from .helpers import editor_redo, editor_undo, exec_error, exec_ok, tree_digest
 
 MAIN_SCENE = "res://scenes/main.tscn"
 PLAYER = "/root/Main/Player"
@@ -66,7 +66,7 @@ def test_typed_properties_round_trip_and_survive_reopen(m2_editor):
 
     material = exec_ok(m2_editor, "resource/create", {
         "path": material_path,
-        "type": "StandardMaterial3D",
+        "type": "CanvasItemMaterial",
         "properties": {"resource_name": "TypedMaterial"},
     })
     assert material["saved"] is True
@@ -96,7 +96,7 @@ def test_resource_assign_persists_across_save_and_reopen(m2_editor):
     material_path = "res://resources/assigned_material.tres"
     created = exec_ok(m2_editor, "resource/create", {
         "path": material_path,
-        "type": "StandardMaterial3D",
+        "type": "CanvasItemMaterial",
         "properties": {"resource_name": "AssignedMaterial"},
     })
     assert created["saved"] is True
@@ -144,3 +144,134 @@ def test_resource_files_untouched_on_rejection(m2_editor):
     before = tree_digest(m2_editor["project"])
     exec_error(m2_editor, "resource/delete", {"path": "res://addons/gdapi/plugin.gd"})
     assert tree_digest(m2_editor["project"]) == before
+
+
+def test_resource_assign_checks_subclass_and_preserves_undo_redo_on_rejection(m2_editor):
+    material = "res://resources/assign_wrong_material.tres"
+    texture = "res://resources/assign_texture.tres"
+    exec_ok(m2_editor, "resource/create", {"path": material, "type": "StandardMaterial3D"})
+    exec_ok(m2_editor, "resource/create", {"path": texture, "type": "GradientTexture2D"})
+    target = exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Sprite2D", "name": "AssignmentSprite",
+    })["node_path"]
+    original_texture = _get_property(m2_editor, target, "texture")
+    marker = {"type": "Vector2", "value": [17, 23]}
+    exec_ok(m2_editor, "node/property/set", {
+        "node_path": target, "property": "position", "value": marker,
+    })
+    editor_undo(m2_editor)
+    error = exec_error(m2_editor, "resource/assign", {
+        "node_path": target, "property": "texture", "path": material,
+    })
+    assert error["code"] == "invalid_param", error
+    assert _get_property(m2_editor, target, "texture") == original_texture
+    editor_redo(m2_editor)
+    assert _get_property(m2_editor, target, "position") == marker
+
+    result = exec_ok(m2_editor, "resource/assign", {
+        "node_path": target, "property": "texture", "path": texture,
+    })
+    assert result["changed"] is True and result["undoable"] is True
+    expected = {"type": "Resource", "value": texture}
+    assert _get_property(m2_editor, target, "texture") == expected
+    error = exec_error(m2_editor, "resource/assign", {
+        "node_path": target, "property": "texture", "path": material,
+    })
+    assert error["code"] == "invalid_param", error
+    assert _get_property(m2_editor, target, "texture") == expected
+    editor_undo(m2_editor)
+    assert _get_property(m2_editor, target, "texture") == original_texture
+    editor_redo(m2_editor)
+    assert _get_property(m2_editor, target, "texture") == expected
+
+
+def test_resource_assign_custom_script_inheritance_multiple_hints_and_setter_rejection(m2_editor):
+    base_script = "res://scripts/assignment_data.gd"
+    child_script = "res://scripts/assignment_child.gd"
+    holder_script = "res://scripts/assignment_holder.gd"
+    sources = {
+        base_script: (
+            "@tool\nclass_name AssignmentIntegrityResource\nextends Resource\n"
+            "@export var score: int = 7\n"
+        ),
+        child_script: (
+            '@tool\nextends "res://scripts/assignment_data.gd"\n'
+            "@export var extra: int = 11\n"
+        ),
+        holder_script: (
+            "@tool\nextends Node2D\n"
+            'const Data = preload("res://scripts/assignment_data.gd")\n'
+            "@export var data: Data\n"
+            '@export_custom(PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,Material")\n'
+            "var flexible: Resource\n"
+            "@export var texture: Texture2D:\n"
+            "\tset(value):\n"
+            '\t\tif value != null and value.resource_name == "BlockedTexture":\n'
+            "\t\t\treturn\n"
+            "\t\ttexture = value\n"
+        ),
+    }
+    for path, source in sources.items():
+        exec_ok(m2_editor, "script/write", {"path": path, "content": source})
+    child = "res://resources/assignment_child.tres"
+    exec_ok(m2_editor, "filesystem/write", {
+        "path": child,
+        "content": (
+            '[gd_resource type="Resource" script_class="AssignmentIntegrityResource" '
+            'load_steps=2 format=3]\n'
+            f'[ext_resource type="Script" path="{child_script}" id="1"]\n'
+            '[resource]\nscript = ExtResource("1")\nscore = 19\nextra = 23\n'
+        ),
+    })
+    material = "res://resources/assignment_flexible_material.tres"
+    texture = "res://resources/assignment_flexible_texture.tres"
+    blocked = "res://resources/assignment_blocked_texture.tres"
+    for path, kind, properties in (
+        (material, "StandardMaterial3D", {}),
+        (texture, "GradientTexture2D", {}),
+        (blocked, "GradientTexture2D", {"resource_name": "BlockedTexture"}),
+    ):
+        exec_ok(m2_editor, "resource/create", {
+            "path": path, "type": kind, "properties": properties,
+        })
+    target = exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Node2D", "name": "AssignmentHolder",
+    })["node_path"]
+    exec_ok(m2_editor, "script/attach", {"node_path": target, "path": holder_script})
+
+    original_data = _get_property(m2_editor, target, "data")
+    error = exec_error(m2_editor, "resource/assign", {
+        "node_path": target, "property": "data", "path": material,
+    })
+    assert error["code"] == "invalid_param", error
+    assert _get_property(m2_editor, target, "data") == original_data
+    exec_ok(m2_editor, "resource/assign", {
+        "node_path": target, "property": "data", "path": child,
+    })
+    assert _get_property(m2_editor, target, "data") == {"type": "Resource", "value": child}
+    editor_undo(m2_editor)
+    assert _get_property(m2_editor, target, "data") == original_data
+    editor_redo(m2_editor)
+    for path in (texture, material):
+        exec_ok(m2_editor, "resource/assign", {
+            "node_path": target, "property": "flexible", "path": path,
+        })
+        assert _get_property(m2_editor, target, "flexible") == {"type": "Resource", "value": path}
+
+    original_texture = _get_property(m2_editor, target, "texture")
+    exec_ok(m2_editor, "resource/assign", {
+        "node_path": target, "property": "texture", "path": texture,
+    })
+    editor_undo(m2_editor)
+    error = exec_error(m2_editor, "resource/assign", {
+        "node_path": target, "property": "texture", "path": blocked,
+    })
+    assert error["code"] == "godot_error", error
+    assert _get_property(m2_editor, target, "texture") == original_texture
+    editor_redo(m2_editor)
+    assert _get_property(m2_editor, target, "texture") == {"type": "Resource", "value": texture}
+    exec_ok(m2_editor, "scene/current/save")
+    _reopen_main_scene(m2_editor)
+    assert _get_property(m2_editor, target, "data") == {"type": "Resource", "value": child}
+    assert _get_property(m2_editor, target, "flexible") == {"type": "Resource", "value": material}
+    assert _get_property(m2_editor, target, "texture") == {"type": "Resource", "value": texture}

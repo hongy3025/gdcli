@@ -11,6 +11,7 @@ const REDACTED := "[REDACTED]"
 
 ## 当前同步调用栈的请求上下文；异步完成必须显式传入 response 持有的上下文。
 static var _context: Dictionary = {}
+static var _url_userinfo_regex: RegEx
 
 
 static func enter_request(context: Dictionary) -> Dictionary:
@@ -171,8 +172,11 @@ static func summarize(value: Variant, depth: int = 0) -> Variant:
 		for key in dictionary:
 			var key_text := String(key)
 			var lowered := key_text.to_lower()
-			var safe_key := _bounded_key(key_text)
-			if _is_sensitive_key(lowered):
+			# 先去掉 URL 内嵌凭据再判断字段敏感性：脱敏后的 URL 键不是凭据字段名，
+			# 它的值仍然要保留（密钥在键里，不在值里）。
+			var redacted_key := _redact_url_userinfo(key_text)
+			var safe_key := redacted_key.left(MAX_DICTIONARY_KEY_LENGTH)
+			if _is_sensitive_key(redacted_key.to_lower()):
 				out[safe_key] = REDACTED
 				continue
 			var child: Variant = dictionary[key]
@@ -193,7 +197,7 @@ static func summarize(value: Variant, depth: int = 0) -> Variant:
 		var text := String(value)
 		if text.length() > MAX_STRING_LENGTH:
 			return {"type": "string", "size": text.length()}
-		return text
+		return _redact_url_userinfo(text)
 	if typeof(value) == TYPE_PACKED_BYTE_ARRAY:
 		return {"type": "bytes", "size": value.size()}
 	if typeof(value) == TYPE_BOOL or typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT:
@@ -227,7 +231,16 @@ static func _type_summary(value: Variant) -> Variant:
 
 
 static func _bounded_key(key: String) -> String:
-	return key.left(MAX_DICTIONARY_KEY_LENGTH)
+	return _redact_url_userinfo(key).left(MAX_DICTIONARY_KEY_LENGTH)
+
+
+static func _redact_url_userinfo(text: String) -> String:
+	if not text.contains("://") or not text.contains("@"):
+		return text
+	if _url_userinfo_regex == null:
+		_url_userinfo_regex = RegEx.new()
+		_url_userinfo_regex.compile("([A-Za-z][A-Za-z0-9+.-]*://)[^/?#]*@")
+	return _url_userinfo_regex.sub(text, "$1" + REDACTED + "@", true)
 
 
 static func _unclassified_summary(value: Variant) -> Dictionary:

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 from pathlib import Path
 from typing import Any
 
 from e2e.m3.conftest import command_doc, exec_error, exec_ok, wait_for_connected, wait_stopped
-from e2e.m2.helpers import wait_for_test_result
+from e2e.m2.helpers import history_action
 
 
 DOMAIN_SCENES = {
@@ -60,14 +59,8 @@ def editor_redo(env: dict[str, Any]) -> None:
 
 
 def _editor_history_action(env: dict[str, Any], action: str) -> None:
-    """Use the same timed history-result bridge as M2."""
-    project = Path(env["project"])
-    result_path = project / ".godot" / "gdapi-test-result.json"
-    result_path.unlink(missing_ok=True)
-    (project / ".godot" / "gdapi-test-command.json").write_text(
-        json.dumps({"action": action}), encoding="utf-8"
-    )
-    payload = wait_for_test_result(env)
+    """Use the same idempotent, retrying history bridge as M2."""
+    payload = history_action(env, action)
     assert payload.get("ok") is True, payload
 
 

@@ -118,15 +118,30 @@ static func decode_property(value: Variant, spec: Dictionary) -> Dictionary:
 	if expected == TYPE_OBJECT and decoded.value != null:
 		if not decoded.value is Resource:
 			return _failure(ErrorCodes.INVALID_PARAM, "object properties require a Resource")
-		var classes := String(spec.get("hint_string", "")).split(",", false)
-		if int(spec.get("hint", 0)) == PROPERTY_HINT_RESOURCE_TYPE and not classes.is_empty():
-			var matches := false
-			for class_type in classes:
-				if decoded.value.is_class(class_type.strip_edges()):
-					matches = true
-			if not matches:
-				return _failure(ErrorCodes.INVALID_PARAM, "resource class does not match property")
+		if not _resource_matches_spec(decoded.value, spec):
+			return _failure(ErrorCodes.INVALID_PARAM, "resource class does not match property")
 	return decoded
+
+
+static func _resource_matches_spec(resource: Resource, spec: Dictionary) -> bool:
+	var classes := String(spec.get("hint_string", "")).split(",", false)
+	if int(spec.get("hint", 0)) != PROPERTY_HINT_RESOURCE_TYPE:
+		classes = PackedStringArray()
+	var declared := String(spec.get("class_name", ""))
+	if classes.is_empty() and not declared.is_empty():
+		classes.append(declared)
+	for class_type in classes:
+		var expected := class_type.strip_edges()
+		if resource.is_class(expected):
+			return true
+		# Object.is_class only knows native classes; custom Resource types are
+		# declared by their scripts, including inherited global script classes.
+		var script: Script = resource.get_script()
+		while script != null:
+			if script.get_global_name() == expected or script.resource_path == expected:
+				return true
+			script = script.get_base_script()
+	return classes.is_empty()
 
 
 ## One save strategy for resource, material, shader-material and Theme mutations.
@@ -556,13 +571,26 @@ static func assign(node_path: String, property: String, path: String) -> Diction
 		return {
 			"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "node has no property: " + property
 		}
-	if not _is_resource_property(node, property):
-		return {
-			"ok": false,
-			"code": ErrorCodes.INVALID_PARAM,
-			"error": "property does not accept a Resource: " + property
-		}
+	var spec: Dictionary = {}
+	for entry in node.get_property_list():
+		if String(entry.name) == property:
+			spec = entry
+			break
+	if (
+		int(spec.get("type", TYPE_NIL)) != TYPE_OBJECT
+		or int(spec.get("hint", 0)) != PROPERTY_HINT_RESOURCE_TYPE
+		or bool(int(spec.get("usage", 0)) & PROPERTY_USAGE_READ_ONLY)
+	):
+		return _failure(
+			ErrorCodes.INVALID_PARAM, "property does not accept a Resource: " + property
+		)
 	var res: Resource = load(checked.path)
+	if res == null:
+		return _failure(ErrorCodes.GODOT_ERROR, "failed to load resource")
+	if not _resource_matches_spec(res, spec):
+		return _failure(
+			ErrorCodes.INVALID_PARAM, "resource class does not match property: " + property
+		)
 	var previous: Variant = node.get(property)
 	var manager := EditAction.undo_redo()
 	if manager == null:
@@ -571,30 +599,24 @@ static func assign(node_path: String, property: String, path: String) -> Diction
 			"code": ErrorCodes.NOT_SUPPORTED,
 			"error": "EditorUndoRedoManager unavailable"
 		}
-	manager.create_action("gdcli: assign resource")
-	manager.add_do_method(node, "set", property, res)
-	manager.add_undo_method(node, "set", property, previous)
-	manager.commit_action()
+	# A custom setter may reject even a type-compatible resource. Apply and read
+	# back before creating an action so a rejection cannot truncate redo history.
+	node.set(property, res)
+	if node.get(property) != res:
+		node.set(property, previous)
+		return _failure(ErrorCodes.GODOT_ERROR, "node rejected the resource value")
+	manager.create_action("gdcli: assign resource", UndoRedo.MERGE_DISABLE, node)
+	manager.add_do_property(node, property, res)
+	manager.add_undo_property(node, property, previous)
+	manager.commit_action(false)
 	return {
 		"ok": true,
-		"changed": true,
+		"changed": previous != res,
 		"undoable": true,
 		"node_path": lookup.node_path,
 		"property": property,
 		"path": checked.path,
 	}
-
-
-## 属性必须接受 Resource（`doc()` 承诺「仅支持属性类型为 Resource 或其子类的字段」）。
-static func _is_resource_property(node: Object, property: String) -> bool:
-	for entry in node.get_property_list():
-		if String(entry.get("name", "")) != property:
-			continue
-		return (
-			int(entry.get("type", TYPE_NIL)) == TYPE_OBJECT
-			and int(entry.get("hint", 0)) == PROPERTY_HINT_RESOURCE_TYPE
-		)
-	return false
 
 
 ## 在编辑器文件系统中移动资源文件

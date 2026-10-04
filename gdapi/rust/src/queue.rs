@@ -6,8 +6,97 @@
 //! - `PendingMap`: 待响应请求的映射表，用于异步等待响应
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::oneshot;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CancelReason {
+    Timeout = 1,
+    Disconnected = 2,
+    Shutdown = 3,
+}
+
+type CancelHook = Box<dyn FnOnce(CancelReason) + Send>;
+
+/// One deadline and cancellation owner, from HTTP enqueue through terminal work.
+pub struct RequestControl {
+    pub deadline: Instant,
+    reason: AtomicU8,
+    hook: Mutex<Option<CancelHook>>,
+}
+
+impl std::fmt::Debug for RequestControl {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RequestControl")
+            .field("deadline", &self.deadline)
+            .finish()
+    }
+}
+
+impl RequestControl {
+    pub fn new(deadline: Instant) -> Arc<Self> {
+        Arc::new(Self {
+            deadline,
+            reason: AtomicU8::new(0),
+            hook: Mutex::new(None),
+        })
+    }
+
+    pub fn reason(&self) -> Option<CancelReason> {
+        match self.reason.load(Ordering::Acquire) {
+            1 => Some(CancelReason::Timeout),
+            2 => Some(CancelReason::Disconnected),
+            3 => Some(CancelReason::Shutdown),
+            _ => None,
+        }
+    }
+
+    pub fn cancel(&self, reason: CancelReason) {
+        // Serialize cleanup as well as registration: a competing HTTP timeout
+        // must not return before an earlier cancellation has reaped its work.
+        let mut slot = self
+            .hook
+            .lock()
+            .expect("request cancellation lock poisoned");
+        if self
+            .reason
+            .compare_exchange(0, reason as u8, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            if let Some(hook) = slot.take() {
+                hook(reason);
+            }
+        }
+    }
+
+    pub fn run_if_active<T>(
+        &self,
+        start: impl FnOnce() -> Result<(T, CancelHook), String>,
+    ) -> Result<T, String> {
+        // Hold the cancellation lock across spawn and hook registration. Otherwise
+        // a timeout could finish HTTP while a not-yet-registered child starts.
+        let mut slot = self
+            .hook
+            .lock()
+            .expect("request cancellation lock poisoned");
+        if self.reason().is_some() || self.deadline <= Instant::now() {
+            return Err("request cancelled before process start".to_string());
+        }
+        let (value, hook) = start()?;
+        *slot = Some(hook);
+        Ok(value)
+    }
+
+    pub fn remaining_ms(&self) -> u64 {
+        self.deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64
+    }
+}
 
 /// 待处理的 HTTP 请求。
 ///
@@ -27,6 +116,7 @@ pub struct PendingRequest {
     pub body: Vec<u8>,
     /// 响应发送通道（处理完成后发送响应）
     pub resp_tx: oneshot::Sender<HttpResponse>,
+    pub control: Arc<RequestControl>,
 }
 
 /// HTTP 响应数据结构。
@@ -56,7 +146,7 @@ pub struct PendingMap {
 
 struct PendingEntry {
     tx: oneshot::Sender<HttpResponse>,
-    deadline: Instant,
+    control: Arc<RequestControl>,
 }
 
 impl PendingMap {
@@ -65,8 +155,13 @@ impl PendingMap {
     /// # Arguments
     /// * `id` - 请求 ID
     /// * `tx` - 响应发送通道
-    pub fn insert(&mut self, id: u64, tx: oneshot::Sender<HttpResponse>, deadline: Instant) {
-        self.inner.insert(id, PendingEntry { tx, deadline });
+    pub fn insert(
+        &mut self,
+        id: u64,
+        tx: oneshot::Sender<HttpResponse>,
+        control: Arc<RequestControl>,
+    ) {
+        self.inner.insert(id, PendingEntry { tx, control });
     }
 
     /// 取出指定 ID 的响应通道。
@@ -82,10 +177,21 @@ impl PendingMap {
         self.inner.remove(&id).map(|entry| entry.tx)
     }
 
+    pub fn control(&self, id: u64) -> Option<Arc<RequestControl>> {
+        self.inner.get(&id).map(|entry| Arc::clone(&entry.control))
+    }
+
     /// 清理已超过响应期限的请求，返回清理数量。
     pub fn remove_expired(&mut self, now: Instant) -> usize {
         let before = self.inner.len();
-        self.inner.retain(|_, entry| entry.deadline > now);
+        self.inner.retain(|_, entry| {
+            if entry.control.deadline <= now {
+                entry.control.cancel(CancelReason::Timeout);
+            } else if entry.tx.is_closed() {
+                entry.control.cancel(CancelReason::Disconnected);
+            }
+            entry.control.reason().is_none()
+        });
         before - self.inner.len()
     }
 
@@ -103,6 +209,7 @@ impl PendingMap {
     /// 在服务器关闭时调用，确保所有等待中的连接能收到错误响应。
     pub fn drain_503(&mut self) {
         for (_, entry) in self.inner.drain() {
+            entry.control.cancel(CancelReason::Shutdown);
             let _ = entry.tx.send(HttpResponse {
                 status: 503,
                 headers: vec![("content-type".into(), "application/json".into())],
@@ -124,8 +231,16 @@ mod tests {
         let (expired_tx, mut expired_rx) = oneshot::channel();
         let (active_tx, mut active_rx) = oneshot::channel();
 
-        pending.insert(1, expired_tx, now - Duration::from_millis(1));
-        pending.insert(2, active_tx, now + Duration::from_secs(60));
+        pending.insert(
+            1,
+            expired_tx,
+            RequestControl::new(now - Duration::from_millis(1)),
+        );
+        pending.insert(
+            2,
+            active_tx,
+            RequestControl::new(now + Duration::from_secs(60)),
+        );
 
         assert_eq!(pending.remove_expired(now), 1);
 
@@ -148,8 +263,16 @@ mod tests {
         let (live_tx, _live_rx) = oneshot::channel();
         let now = Instant::now();
 
-        map.insert(1, expired_tx, now - Duration::from_millis(1));
-        map.insert(2, live_tx, now + Duration::from_secs(1));
+        map.insert(
+            1,
+            expired_tx,
+            RequestControl::new(now - Duration::from_millis(1)),
+        );
+        map.insert(
+            2,
+            live_tx,
+            RequestControl::new(now + Duration::from_secs(1)),
+        );
 
         assert_eq!(map.remove_expired(now), 1);
         assert_eq!(map.len(), 1);

@@ -204,3 +204,33 @@ def test_start_editor_terminates_process_when_readiness_fails(
     process.terminate.assert_called_once_with()
     process.wait.assert_called_once_with(timeout=10)
     assert env["godot_log"].closed
+
+
+def test_file_baseline_restores_mutations_without_touching_excluded_state(tmp_path):
+    contents = {
+        "scenes/main.tscn": b"original scene",
+        "addons/gdapi_test/plugin.gd": b"fixture plugin",
+        ".godot/cache/generated.bin": b"editor cache",
+        "addons/gdapi/runtime/plugin.gd": b"installed addon",
+        "project.godot": b"engine configuration",
+    }
+    for relative, data in contents.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    env = {"project": tmp_path}
+    baseline = shared_fixture.snapshot_files(env)
+    assert baseline == {
+        "scenes/main.tscn": b"original scene",
+        "addons/gdapi_test/plugin.gd": b"fixture plugin",
+    }
+    (tmp_path / "scenes/main.tscn").write_bytes(b"mutated")
+    (tmp_path / "addons/gdapi_test/plugin.gd").unlink()
+    (tmp_path / "scenes/temporary.tscn").write_bytes(b"created")
+    (tmp_path / ".godot/cache/generated.bin").write_bytes(b"new cache")
+    shared_fixture.restore_file_state(env, baseline)
+    assert shared_fixture.snapshot_files(env) == baseline
+    assert not (tmp_path / "scenes/temporary.tscn").exists()
+    assert (tmp_path / ".godot/cache/generated.bin").read_bytes() == b"new cache"
+    assert (tmp_path / "addons/gdapi/runtime/plugin.gd").read_bytes() == b"installed addon"
+    assert (tmp_path / "project.godot").read_bytes() == b"engine configuration"

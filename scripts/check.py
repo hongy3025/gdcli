@@ -2,7 +2,8 @@
 """Sequential gates. Full rerun: uv run python scripts/check.py
 
 Select gates in fixed order (file, engine and render use independent editor sessions).
-Each pytest subprocess owns one session/editor; no concurrent pytest or hidden editor.
+Budget reuses the file session's fresh parent measurement within this invocation;
+on its own it runs the full suite. No concurrent pytest or hidden editor.
 """
 from __future__ import annotations
 
@@ -11,11 +12,12 @@ import os
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
-from e2e.timing import validate_configuration  # noqa: E402
+from e2e.timing import validate_configuration, write_budget_report  # noqa: E402
 
 GATES = ("format", "clippy", "unit", "file", "engine", "render", "budget")
 
@@ -79,14 +81,28 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
     artifact_dir = args.artifact_dir.resolve()
     selected = set(args.gate or GATES)
+    file_wall_seconds: float | None = None
     for gate in GATES:
         if gate not in selected:
+            continue
+        if gate == "budget" and file_wall_seconds is not None:
+            try:
+                write_budget_report(
+                    artifact_dir / "budget.json",
+                    elapsed=file_wall_seconds,
+                    child_report=artifact_dir / "file-waits.json",
+                )
+            except (AssertionError, OSError) as exc:
+                print(f"[budget] {exc}", file=sys.stderr)
+                return 1
+            print(f"FULL_SUITE_PARENT_WALL_SECONDS={file_wall_seconds:.3f}", flush=True)
             continue
         for command, environment in gate_commands(gate, artifact_dir):
             report_path = Path(environment["GDAPI_E2E_TIMING_JSON"])
             if gate in ("file", "engine", "render"):
                 report_path.unlink(missing_ok=True)
             print(f"[{gate}] {subprocess.list2cmdline(command)}", flush=True)
+            started = time.monotonic()
             try:
                 result = subprocess.run(command, cwd=ROOT, env=environment)
             except OSError as exc:
@@ -107,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
                 except (OSError, ValueError) as exc:
                     print(f"[{gate}] invalid session evidence {report_path}: {exc}", file=sys.stderr)
                     return 1
+                if gate == "file":
+                    file_wall_seconds = time.monotonic() - started
     return 0
 
 

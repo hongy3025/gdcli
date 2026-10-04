@@ -22,6 +22,13 @@ func register(task: Dictionary) -> bool:
 func tick(now_ms: int) -> void:
 	for index in range(_tasks.size() - 1, -1, -1):
 		var task: Dictionary = _tasks[index]
+		var response = task["response"]
+		if response.has_method("cancellation_reason"):
+			var reason := String(response.cancellation_reason())
+			if not reason.is_empty():
+				var code := ErrorCodes.TIMEOUT if reason == "timeout" else ErrorCodes.CONFLICT
+				_fail_and_remove(index, reason, code, "request cancelled: " + reason)
+				continue
 		if _has_timed_out(task, now_ms):
 			_fail_and_remove(index, "timeout", ErrorCodes.TIMEOUT, "deferred task timed out")
 			continue

@@ -10,14 +10,30 @@ const EXTENSIONS := ["tscn", "tres", "res", "scn", "material", "mesh", "shader",
 
 static func repair(body: Dictionary) -> Dictionary:
 	var dry_run := bool(body.get("dry_run", true))
-	var paths: Array = []
+	var roots: Array[String] = []
 	for root in body.get("roots", ["res://"]):
-		var checked := PathGuard.validate(String(root), "read")
+		var checked := PathGuard.validate(String(root), "write")
 		if not checked.ok:
 			return checked
-		if checked.path.begins_with("res://addons/gdapi/"):
-			return {"ok": false, "code": ErrorCodes.PERMISSION_DENIED, "error": "protected root"}
-		_collect(checked.path, paths)
+		var path := String(checked.path)
+		if path not in ["res://", "user://"]:
+			path = path.trim_suffix("/")
+		if path not in roots:
+			roots.append(path)
+	roots.sort()
+	var scan_roots: Array[String] = []
+	for root in roots:
+		var covered := false
+		for parent in scan_roots:
+			var prefix := parent if parent.ends_with("://") else parent + "/"
+			if root.begins_with(prefix):
+				covered = true
+				break
+		if not covered:
+			scan_roots.append(root)
+	var paths: Array = []
+	for root in scan_roots:
+		_collect(root, paths)
 	paths.sort()
 	var changes: Array = []
 	var seen: Dictionary = {}
@@ -39,6 +55,23 @@ static func repair(body: Dictionary) -> Dictionary:
 		change["new_uid"] = new_uid
 		planned.append(change)
 	if not dry_run:
+		# Check every planned target before touching any UID, including missing UIDs
+		# which cannot be rolled back after ResourceSaver has created them.
+		for change in planned:
+			var checked := PathGuard.validate(change.path, "write")
+			if not checked.ok:
+				return checked
+			var probe: FileAccess = null
+			if not FileAccess.get_read_only_attribute(change.path):
+				probe = FileAccess.open(change.path, FileAccess.READ_WRITE)
+			if probe == null:
+				return {
+					"ok": false,
+					"code": ErrorCodes.PERMISSION_DENIED,
+					"error": "UID target is not writable",
+					"details": {"failed_path": change.path, "applied": 0}
+				}
+			probe.close()
 		var applied: Array = []
 		for change in planned:
 			var error := ResourceSaver.set_uid(change.path, int(change.new_uid))
@@ -97,6 +130,9 @@ static func _rollback_applied(applied: Array) -> Array:
 
 
 static func _collect(path: String, result: Array) -> void:
+	# A broad project scan must not enter any directory protected by filesystem/write.
+	if not PathGuard.validate(path, "write").ok:
+		return
 	var absolute := ProjectSettings.globalize_path(path)
 	if FileAccess.file_exists(absolute):
 		if path.get_extension().to_lower() in EXTENSIONS:

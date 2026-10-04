@@ -52,7 +52,14 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 	var runner = GdApiProcessRunner.create()
 	var packed := PackedStringArray(spec.args)
 	var id := int(
-		runner.start(spec.executable, packed, spec.cwd, spec.timeout_ms, spec.max_output_bytes)
+		runner.start(
+			response.request_control,
+			spec.executable,
+			packed,
+			spec.cwd,
+			mini(spec.timeout_ms, response.remaining_ms()),
+			spec.max_output_bytes
+		)
 	)
 	if id < 0:
 		return {"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "process could not start"}
@@ -78,6 +85,11 @@ static func tick(state: Dictionary, _now_ms: int) -> bool:
 	if result.timed_out:
 		state["outcome"] = {"ok": false, "code": ErrorCodes.TIMEOUT, "summary": "process timed out"}
 		state.response.error("process timed out", ErrorCodes.TIMEOUT, 408)
+	elif result.cancelled:
+		state["outcome"] = {
+			"ok": false, "code": ErrorCodes.CONFLICT, "summary": "process cancelled"
+		}
+		state.response.error("process cancelled", ErrorCodes.CONFLICT, 409)
 	else:
 		state["outcome"] = {"ok": true, "code": "", "summary": "process completed"}
 		state.response.json(payload)

@@ -60,6 +60,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 		"redirects": 0,
 		"visited": {spec.url: true},
 		"current_url": spec.url,
+		"current_target": spec,
 		"headers": request_headers,
 		"method": HTTPClient.METHOD_GET if spec.method == "GET" else HTTPClient.METHOD_HEAD,
 		"body": spec.body,
@@ -108,6 +109,9 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 					)
 					node.queue_free()
 					return
+				if not _same_origin(state.current_target, target):
+					state.headers = _without_credentials(state.headers)
+				state.current_target = target
 				state.redirects += 1
 				state.visited[target.url] = true
 				state.current_url = target.url
@@ -179,6 +183,31 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 	return {"ok": true, "state": state}
 
 
+static func _same_origin(left: Dictionary, right: Dictionary) -> bool:
+	return (
+		left.scheme == right.scheme
+		and String(left.host).to_lower() == String(right.host).to_lower()
+		and left.port == right.port
+	)
+
+
+static func _without_credentials(headers: PackedStringArray) -> PackedStringArray:
+	var safe: PackedStringArray = []
+	for header in headers:
+		var name := header.get_slice(":", 0).strip_edges().to_lower().replace("_", "-")
+		if name in ["authorization", "proxy-authorization", "cookie", "cookie2", "host"]:
+			continue
+		var compact := name.replace("-", "")
+		var sensitive := false
+		for marker in ["auth", "token", "secret", "credential", "password", "passwd", "apikey"]:
+			if compact.contains(marker):
+				sensitive = true
+				break
+		if not sensitive:
+			safe.append(header)
+	return safe
+
+
 static func _header_value(headers: PackedStringArray, wanted: String) -> String:
 	for header in headers:
 		var separator := header.find(":")
@@ -193,6 +222,7 @@ static func _resolve_redirect_url(current_url: String, location: String) -> Stri
 		return ""
 	if target.contains("://"):
 		return target
+	current_url = current_url.get_slice("?", 0)
 	var scheme_end := current_url.find("://")
 	if scheme_end < 0:
 		return ""

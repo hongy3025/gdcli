@@ -112,7 +112,7 @@ func _request_raw(path: String, raw_body: String) -> Request:
 
 
 func _response(server: FakeServer) -> Response:
-	return Response.new(server, 17)
+	return Response.new(server, 17, null)
 
 
 func _dispatch(payload: Dictionary, broker: FakeBroker, mutation: bool = false) -> FakeServer:

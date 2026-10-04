@@ -23,18 +23,11 @@ func handle(_req: GdApiRequest, _res: GdApiResponse) -> void:
 				"path": path,
 				"name": root.name,
 				"type": root.get_class(),
-				"edited": root.scene_file_path == "" or _is_unsaved(),
+				"edited": SceneEditor.is_current_scene_unsaved(),
 				"undoable": false,
 			}
 		)
 	)
-
-
-func _is_unsaved() -> bool:
-	if not Engine.is_editor_hint():
-		return false
-	# EditorPlugin 上的场景加载/未保存检测超出 route handler 范围,这里返回 false.
-	return false
 
 
 func doc() -> GdApiRouteDoc:

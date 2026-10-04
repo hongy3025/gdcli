@@ -20,7 +20,14 @@ static func authorize(url: String) -> Dictionary:
 	var scheme := parts[0].to_lower()
 	if not ALLOWED_SCHEMES.has(scheme):
 		return _error(ErrorCodes.PERMISSION_DENIED, "URL scheme is not allowed")
-	var authority := parts[1].split("/", true, 1)[0]
+	var authority := parts[1].split("/", true, 1)[0].split("?", true, 1)[0]
+	# HTTPRequest 只接受带路径的 URL：authority-only 的 http://host?x=1 必须补成 /?x=1，
+	# 否则 request() 直接失败（"HTTP request could not start"）。
+	var remainder := parts[1].substr(authority.length())
+	var normalized := (
+		"%s://%s%s"
+		% [scheme, authority, remainder if remainder.begins_with("/") else "/" + remainder]
+	)
 	var host := authority
 	var port := 443 if scheme == "https" else 80
 	if authority.begins_with("["):
@@ -36,7 +43,7 @@ static func authorize(url: String) -> Dictionary:
 		port = int(fields[1])
 	if host.is_empty() or port < 1 or port > 65535:
 		return _error(ErrorCodes.INVALID_PARAM, "invalid host or port")
-	return {"ok": true, "url": url, "scheme": scheme, "host": host, "port": port}
+	return {"ok": true, "url": normalized, "scheme": scheme, "host": host, "port": port}
 
 
 static func _error(code: String, message: String) -> Dictionary:

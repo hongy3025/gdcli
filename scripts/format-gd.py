@@ -27,7 +27,8 @@ SKIP_FILES = {
     "tests/fixtures/e2e_project/fixtures/broken.gd",
     "tests/fixtures/e2e_project/scripts/broken.gd",
 }
-MAX_BATCH_FILES = 10
+MAX_BATCH_FILES = 128
+MAX_BATCH_ARGUMENT_CHARS = 24_000
 
 
 def repository_root() -> Path:
@@ -35,25 +36,45 @@ def repository_root() -> Path:
 
 
 def gdscript_files(root: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in root.rglob("*.gd")
-        if not any(
-            part in SKIP_DIRECTORIES or part.startswith(".")
-            for part in path.relative_to(root).parts
+    files: list[Path] = []
+    seen_directories: set[Path] = set()
+    for directory, subdirectories, names in os.walk(root):
+        base = Path(directory)
+        physical = base.resolve()
+        if physical in seen_directories:
+            subdirectories.clear()
+            continue
+        seen_directories.add(physical)
+        subdirectories[:] = sorted(
+            name for name in subdirectories
+            if name not in SKIP_DIRECTORIES and not name.startswith(".")
         )
-        and path.relative_to(root).as_posix() not in SKIP_FILES
-    )
+        for name in names:
+            if not name.endswith(".gd") or name.startswith("."):
+                continue
+            path = base / name
+            if path.relative_to(root).as_posix() not in SKIP_FILES:
+                files.append(path)
+    return sorted(files)
 
 
 def batches(files: list[Path], root: Path) -> list[list[Path]]:
     result: list[list[Path]] = []
     current: list[Path] = []
+    argument_chars = 0
     for path in files:
-        if len(current) == MAX_BATCH_FILES:
+        # Leave room for the executable/options below Windows' 32767-character
+        # command-line limit, including quoting and non-BMP UTF-16 characters.
+        cost = len(subprocess.list2cmdline([str(path.relative_to(root))]).encode("utf-16-le")) // 2 + 1
+        if current and (
+            len(current) >= MAX_BATCH_FILES
+            or argument_chars + cost > MAX_BATCH_ARGUMENT_CHARS
+        ):
             result.append(current)
             current = []
+            argument_chars = 0
         current.append(path)
+        argument_chars += cost
     if current:
         result.append(current)
     return result

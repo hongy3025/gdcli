@@ -23,9 +23,7 @@ def test_thresholds_reject_nonpositive_nonfinite_and_bad_numbers(monkeypatch, ra
         timing.positive_seconds(name)
 
 
-def test_threshold_override_and_existing_budget_default(monkeypatch):
-    monkeypatch.delenv("GDAPI_E2E_BUDGET_SECONDS", raising=False)
-    assert timing.positive_seconds("GDAPI_E2E_BUDGET_SECONDS") == 360
+def test_threshold_override(monkeypatch):
     monkeypatch.setenv("GDAPI_E2E_WAIT_TIMEOUT_SECONDS", "2.75")
     assert timing.positive_seconds("GDAPI_E2E_WAIT_TIMEOUT_SECONDS", 15) == 2.75
 
@@ -118,7 +116,7 @@ def test_scene_switch_wait_does_not_record_a_timeout(monkeypatch, wait_clock):
 
 
 def test_history_bridge_records_only_completed_success(monkeypatch, tmp_path, wait_clock):
-    clock, measurements = wait_clock
+    _, measurements = wait_clock
     result = tmp_path / ".godot" / "gdapi-test-result.json"
     result.parent.mkdir()
     result.write_text('{"ok": true}', encoding="utf-8")
@@ -130,7 +128,6 @@ def test_history_bridge_records_only_completed_success(monkeypatch, tmp_path, wa
     with pytest.raises(RuntimeError, match="never produced"):
         history_helpers.wait_for_test_result({"project": tmp_path})
     assert measurements.samples == {"undo_bridge": [0.0]}
-    assert clock.value == pytest.approx(.1)
 
 
 
@@ -230,3 +227,14 @@ def test_invalid_transport_has_actionable_configuration_error(monkeypatch):
     monkeypatch.setenv("GDAPI_E2E_TRANSPORT", "automatic")
     with pytest.raises(ValueError, match="GDAPI_E2E_TRANSPORT=.*file or engine_debugger"):
         timing.validate_configuration()
+
+
+def test_budget_boundary_preserves_only_successful_measurements(monkeypatch, tmp_path):
+    monkeypatch.setenv("GDAPI_E2E_BUDGET_SECONDS", "2")
+    path = tmp_path / "budget.json"
+    timing.write_budget_report(path, elapsed=2, child_report=tmp_path / "waits.json")
+    accepted = path.read_bytes()
+    assert json.loads(accepted)["parent_wall_clock_seconds"] == 2
+    with pytest.raises(AssertionError, match="parent wall-clock 2.001s exceeds.*=2s"):
+        timing.write_budget_report(path, elapsed=2.001, child_report=tmp_path / "waits.json")
+    assert path.read_bytes() == accepted

@@ -35,7 +35,7 @@ from e2e.m3.conftest import (  # noqa: E402
     project_stop,
 )
 from e2e.shared_fixture import (  # noqa: E402,F401
-    is_tracked_project_file,
+    tracked_project_files,
     m6_editor as session_m6_editor,
     m6_editor_bulk as session_m6_editor_bulk,
     m6_editor_eval as session_m6_editor_eval,
@@ -51,12 +51,7 @@ M6_HTTP_PORT: int = 18923
 
 def _m6_project_digests(project: Path) -> dict[str, str]:
     digests: dict[str, str] = {}
-    for path in sorted(project.rglob("*")):
-        if not path.is_file():
-            continue
-        rel = str(path.relative_to(project)).replace("\\", "/")
-        if not is_tracked_project_file(rel):
-            continue
+    for rel, path in sorted(tracked_project_files(project).items()):
         digests[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
     return digests
 

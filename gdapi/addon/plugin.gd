@@ -172,10 +172,10 @@ func _exit_tree() -> void:
 ##
 ## @param _dt 帧时间间隔（未使用）
 func _process(_dt: float) -> void:
-	if _server == null or not _server.is_running():
-		return
 	if _deferred_task_registry != null:
 		_deferred_task_registry.tick(Time.get_ticks_msec())
+	if _server == null or not _server.is_running():
+		return
 	if _runtime_broker != null:
 		_runtime_broker.tick(Time.get_ticks_msec())
 	# M3.1: 文件 transport manager 扫描 hello/outbox、处理 timeout

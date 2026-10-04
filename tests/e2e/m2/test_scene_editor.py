@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import stat
+from pathlib import Path
 import pytest
 
 from .helpers import exec_error, exec_ok
@@ -44,13 +47,103 @@ def test_scene_current_save_persists_file_changes(m2_editor):
     assert result["path"] == "res://scenes/main.tscn"
 
 
-def test_scene_current_save_overwrites_existing_without_force(m2_editor):
-    # Step 1: save current to a fresh path - should succeed
-    first = exec_ok(m2_editor, "scene/current/save", {"path": "res://scenes/main_backup.tscn"})
-    assert first["saved"] is True
-    # Step 2: save again to the same existing path - should succeed and overwrite
-    second = exec_ok(m2_editor, "scene/current/save", {"path": "res://scenes/main_backup.tscn"})
+@pytest.mark.parametrize("extension", ["tscn", "scn"])
+def test_scene_current_save_overwrites_existing_without_force(m2_editor, extension):
+    project = Path(m2_editor["project"])
+    original = (project / "scenes/main.tscn").read_bytes()
+    path = f"res://scenes/main_backup.{extension}"
+    target = project / f"scenes/main_backup.{extension}"
+    first = exec_ok(m2_editor, "scene/current/save", {"path": path})
+    assert first["saved"] is True and first["path"] == path
+    assert target.is_file()
+    initial = target.read_bytes()
+    request = {"node_path": "/root/Main/Player", "property": "position"}
+    value = {"type": "Vector2", "value": [37, 83]}
+    exec_ok(m2_editor, "node/property/set", {**request, "value": value})
+    assert exec_ok(m2_editor, "scene/current")["edited"] is True
+    second = exec_ok(m2_editor, "scene/current/save", {"path": path})
     assert second["saved"] is True
+    assert target.read_bytes() != initial
+    assert (project / "scenes/main.tscn").read_bytes() == original
+    assert exec_ok(m2_editor, "scene/current")["edited"] is False
+    exec_ok(m2_editor, "scene/close")
+    exec_ok(m2_editor, "scene/open", {"path": path})
+    assert exec_ok(m2_editor, "node/property/get", request)["value"] == value
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read-only scene target boundary")
+def test_save_as_read_only_failure_preserves_disk_path_and_unsaved_changes(m2_editor):
+    project = Path(m2_editor["project"])
+    original_path = "res://scenes/main.tscn"
+    target_path = "res://scenes/readonly_save_as.tscn"
+    original = project / "scenes/main.tscn"
+    target = project / "scenes/readonly_save_as.tscn"
+    target.write_bytes(b'[gd_scene format=3]\n\n[node name="Before" type="Node2D"]\n')
+    original_bytes, target_bytes = original.read_bytes(), target.read_bytes()
+    property_request = {"node_path": "/root/Main/Player", "property": "position"}
+    value = {"type": "Vector2", "value": [731, 419]}
+    exec_ok(m2_editor, "node/property/set", {**property_request, "value": value})
+    before = exec_ok(m2_editor, "scene/current")
+    assert before["path"] == original_path and before["edited"] is True
+    target.chmod(stat.S_IREAD)
+    try:
+        assert exec_error(m2_editor, "scene/current/save", {"path": target_path})["code"] == "permission_denied"
+        assert target.read_bytes() == target_bytes
+        assert original.read_bytes() == original_bytes
+        assert exec_ok(m2_editor, "scene/current") == before
+        assert exec_ok(m2_editor, "node/property/get", property_request)["value"] == value
+    finally:
+        target.chmod(stat.S_IREAD | stat.S_IWRITE)
+    result = exec_ok(m2_editor, "scene/current/save", {"path": target_path})
+    assert result["saved"] is True and result["path"] == target_path
+    current = exec_ok(m2_editor, "scene/current")
+    assert current["path"] == target_path and current["edited"] is False
+    assert original.read_bytes() == original_bytes
+    assert target.read_bytes() != target_bytes
+    exec_ok(m2_editor, "scene/close")
+    exec_ok(m2_editor, "scene/open", {"path": target_path})
+    assert exec_ok(m2_editor, "node/property/get", property_request)["value"] == value
+
+
+def test_save_as_invalid_extension_preserves_unsaved_scene_and_target(m2_editor):
+    target = Path(m2_editor["project"]) / "scenes/not_a_scene.txt"
+    target.write_bytes(b"existing document")
+    exec_ok(m2_editor, "node/meta/set", {
+        "node_path": "/root/Main", "key": "save_failure_marker", "value": 17,
+    })
+    before = exec_ok(m2_editor, "scene/current")
+    assert before["edited"] is True
+    assert exec_error(m2_editor, "scene/current/save", {"path": "res://scenes/not_a_scene.txt"})["code"] == "invalid_param"
+    assert target.read_bytes() == b"existing document"
+    assert exec_ok(m2_editor, "scene/current") == before
+    assert exec_ok(m2_editor, "node/meta/get", {
+        "node_path": "/root/Main", "key": "save_failure_marker",
+    })["value"] == 17
+
+
+def test_save_as_persists_editor_pre_save_notifications(m2_editor):
+    source = '''@tool
+extends Node
+func _notification(what: int) -> void:
+    if what == NOTIFICATION_EDITOR_PRE_SAVE:
+        set_meta("pre_save_count", int(get_meta("pre_save_count", 0)) + 1)
+'''
+    script = "res://scripts/save_notification_consumer.gd"
+    target = "res://scenes/save_notification.tscn"
+    node = "/root/Main/SaveObserver"
+    exec_ok(m2_editor, "script/write", {"path": script, "content": source})
+    exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Node", "name": "SaveObserver",
+    })
+    exec_ok(m2_editor, "script/attach", {"node_path": node, "path": script})
+    result = exec_ok(m2_editor, "scene/current/save", {"path": target})
+    assert result["saved"] is True
+    assert exec_ok(m2_editor, "scene/current")["edited"] is False
+    request = {"node_path": node, "key": "pre_save_count"}
+    assert exec_ok(m2_editor, "node/meta/get", request)["value"] == 1
+    exec_ok(m2_editor, "scene/close")
+    exec_ok(m2_editor, "scene/open", {"path": target})
+    assert exec_ok(m2_editor, "node/meta/get", request)["value"] == 1
 
 
 def test_scene_close_then_current_is_not_found(m2_editor):

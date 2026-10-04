@@ -1,6 +1,7 @@
 """T8 editor controls: real state, UndoRedo, persistence and guarded dispatch."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -100,6 +101,121 @@ def test_scene_delete_dry_run_protection_and_open_conflict(m2_editor):
     assert result["deleted"] is True and result["closed"] is True
     assert path not in exec_ok(m2_editor, "scene/list_open")["paths"]
     assert not (Path(m2_editor["project"]) / "scenes/controls_linked.tscn").exists()
+
+
+@pytest.mark.parametrize("reference_form", ["res", "relative", "uid"])
+def test_scene_delete_rejects_script_preload_without_executing_script(m2_editor, reference_form):
+    project = Path(m2_editor["project"])
+    target_path = write_scene(m2_editor, "res://scenes/delete_preload_target.tscn")
+    target = project / "scenes/delete_preload_target.tscn"
+    exec_ok(m2_editor, "scene/open", {"path": target_path})
+    exec_ok(m2_editor, "scene/current/save")
+    exec_ok(m2_editor, "scene/close")
+    before = target.read_bytes()
+    if reference_form == "uid":
+        match = re.search(r'uid="([^"]+)"', before.decode("utf-8"))
+        assert match is not None, "saved Godot scene must have a UID"
+        literal = match[1]
+    elif reference_form == "relative":
+        literal = "../scenes/delete_preload_target.tscn"
+    else:
+        literal = target_path
+    script_path = "res://scripts/delete_preload_consumer.gd"
+    script = project / "scripts/delete_preload_consumer.gd"
+    marker = project / "delete_preload_executed.txt"
+    # Do not import the script as fixture setup: the service must inspect a
+    # previously unloaded consumer, including its real static-init side effect.
+    script.write_text(f'''@tool
+extends RefCounted
+const TARGET = preload(
+    "{literal}"
+)
+static func _static_init() -> void:
+    var file := FileAccess.open("res://delete_preload_executed.txt", FileAccess.WRITE)
+    file.store_string("executed")
+    file.close()
+''', encoding="utf-8")
+    try:
+        preview = exec_ok(m2_editor, "scene/delete", {"path": target_path, "dry_run": True})
+        assert preview["can_delete"] is False and script_path in preview["references"]
+        assert target.read_bytes() == before and not marker.exists()
+        assert exec_error(m2_editor, "scene/delete", {"path": target_path})["code"] == "conflict"
+        assert target.read_bytes() == before and not marker.exists()
+    finally:
+        script.unlink(missing_ok=True)
+        marker.unlink(missing_ok=True)
+    preview = exec_ok(m2_editor, "scene/delete", {"path": target_path, "dry_run": True})
+    assert preview["can_delete"] is True
+    assert exec_ok(m2_editor, "scene/delete", {"path": target_path})["deleted"] is True
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("extension", ["tscn", "tres"])
+def test_scene_delete_retains_scene_and_resource_dependencies(m2_editor, extension):
+    project = Path(m2_editor["project"])
+    target_path = write_scene(m2_editor, "res://scenes/delete_resource_target.tscn")
+    target = project / "scenes/delete_resource_target.tscn"
+    consumer = project / f"scenes/delete_resource_consumer.{extension}"
+    if extension == "tscn":
+        content = f'''[gd_scene load_steps=2 format=3]
+[ext_resource type="PackedScene" path="{target_path}" id="1"]
+[node name="Consumer" instance=ExtResource("1")]
+'''
+    else:
+        content = f'''[gd_resource type="Resource" load_steps=2 format=3]
+[ext_resource type="PackedScene" path="{target_path}" id="1"]
+[resource]
+metadata/scene_dependency = ExtResource("1")
+'''
+    consumer.write_text(content, encoding="utf-8")
+    before = target.read_bytes()
+    try:
+        preview = exec_ok(m2_editor, "scene/delete", {"path": target_path, "dry_run": True})
+        assert preview["can_delete"] is False
+        assert f"res://scenes/{consumer.name}" in preview["references"]
+        assert exec_error(m2_editor, "scene/delete", {"path": target_path})["code"] == "conflict"
+        assert target.read_bytes() == before
+    finally:
+        consumer.unlink(missing_ok=True)
+
+
+def test_scene_delete_ignores_preload_text_in_comments_and_strings(m2_editor):
+    project = Path(m2_editor["project"])
+    target_path = write_scene(m2_editor, "res://scenes/delete_unreferenced.tscn")
+    script = project / "scripts/delete_not_a_reference.gd"
+    script.write_text(f'''extends RefCounted
+# preload("{target_path}")
+const DESCRIPTION = """preload("{target_path}")"""
+''', encoding="utf-8")
+    try:
+        preview = exec_ok(m2_editor, "scene/delete", {"path": target_path, "dry_run": True})
+        assert preview["can_delete"] is True and preview["references"] == []
+        assert exec_ok(m2_editor, "scene/delete", {"path": target_path})["deleted"] is True
+        assert not (project / "scenes/delete_unreferenced.tscn").exists()
+    finally:
+        script.unlink(missing_ok=True)
+
+
+def test_scene_delete_dry_run_and_real_delete_both_reject_unsaved_scene(m2_editor):
+    project = Path(m2_editor["project"])
+    path = write_scene(m2_editor, "res://scenes/delete_unsaved.tscn")
+    target = project / "scenes/delete_unsaved.tscn"
+    before = target.read_bytes()
+    exec_ok(m2_editor, "scene/open", {"path": path})
+    exec_ok(m2_editor, "node/meta/set", {
+        "node_path": "/root/Linked", "key": "unsaved_delete_guard", "value": 1,
+    })
+    assert exec_ok(m2_editor, "scene/current")["edited"] is True
+    request = {"path": path, "close_open": True}
+    preview = exec_ok(m2_editor, "scene/delete", {**request, "dry_run": True})
+    assert preview["open"] is True and preview["can_delete"] is False
+    assert exec_error(m2_editor, "scene/delete", request)["code"] == "conflict"
+    assert target.read_bytes() == before
+    assert exec_ok(m2_editor, "scene/current")["path"] == path
+    exec_ok(m2_editor, "scene/current/save")
+    assert exec_ok(m2_editor, "scene/delete", {**request, "dry_run": True})["can_delete"] is True
+    assert exec_ok(m2_editor, "scene/delete", request)["deleted"] is True
+    assert not target.exists()
 
 
 def test_node_call_executes_safe_native_and_validates_arguments(m2_editor):

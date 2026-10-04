@@ -98,33 +98,24 @@ static func add_action(name: String, deadzone: float) -> Dictionary:
 		return _err(ErrorCodes.MISSING_PARAM, "action is required")
 	if InputMap.has_action(name):
 		return _err(ErrorCodes.CONFLICT, "action already exists")
+	var previous := _snapshot_action(name)
 	InputMap.add_action(name, deadzone)
 	_persist_action(name)
-	return _save_input(
-		name,
-		true,
-		func():
-			InputMap.erase_action(name)
-			ProjectSettings.clear("input/" + name)
-	)
+	return _save_input(name, true, func(): _restore_action(name, previous))
 
 
 static func remove_action(name: String) -> Dictionary:
 	if not InputMap.has_action(name):
 		return _err(ErrorCodes.NOT_FOUND, "action not found")
-	var deadzone := InputMap.action_get_deadzone(name)
-	var events := InputMap.action_get_events(name)
+	var previous := _snapshot_action(name)
 	InputMap.erase_action(name)
 	ProjectSettings.clear("input/" + name)
-	return _save_input(
-		name,
-		true,
-		func():
-			ProjectSettings.set_setting("input/" + name, {"deadzone": deadzone, "events": events})
-			InputMap.add_action(name, deadzone)
-			for event in events:
-				InputMap.action_add_event(name, event)
-	)
+	if not previous.setting_exists:
+		# 文件里本来就没有该设置（例如刚被 settings/reset 删除，或动作只存在于内存）：
+		# 内存状态已经是目标状态，不能用「文件摘要必须变化」来验证保存。
+		AuditLog.record("project/input_map", "dangerous", {"action": name}, true)
+		return {"ok": true, "action": name, "changed": true, "undoable": false}
+	return _save_input(name, true, func(): _restore_action(name, previous))
 
 
 static func bind(name: String, event: Dictionary) -> Dictionary:
@@ -133,15 +124,10 @@ static func bind(name: String, event: Dictionary) -> Dictionary:
 	var parsed := _event(event)
 	if parsed == null:
 		return _err(ErrorCodes.INVALID_PARAM, "unsupported input event")
+	var previous := _snapshot_action(name)
 	InputMap.action_add_event(name, parsed)
 	_persist_action(name)
-	return _save_input(
-		name,
-		true,
-		func():
-			InputMap.action_erase_event(name, parsed)
-			_persist_action(name)
-	)
+	return _save_input(name, true, func(): _restore_action(name, previous))
 
 
 static func unbind(name: String, event: Dictionary) -> Dictionary:
@@ -150,15 +136,10 @@ static func unbind(name: String, event: Dictionary) -> Dictionary:
 	var parsed := _event(event)
 	if parsed == null:
 		return _err(ErrorCodes.INVALID_PARAM, "unsupported input event")
+	var previous := _snapshot_action(name)
 	InputMap.action_erase_event(name, parsed)
 	_persist_action(name)
-	return _save_input(
-		name,
-		true,
-		func():
-			InputMap.action_add_event(name, parsed)
-			_persist_action(name)
-	)
+	return _save_input(name, true, func(): _restore_action(name, previous))
 
 
 static func autoloads() -> Array:
@@ -233,6 +214,33 @@ static func _project_file_digest() -> String:
 	if not FileAccess.file_exists(PROJECT_FILE):
 		return ""
 	return FileAccess.get_sha256(PROJECT_FILE)
+
+
+## Preserve the real InputMap and ProjectSettings independently: a runtime action
+## may have no persisted setting, or its setting may differ from the live events.
+static func _snapshot_action(name: String) -> Dictionary:
+	var exists := InputMap.has_action(name)
+	var key := "input/" + name
+	return {
+		"exists": exists,
+		"deadzone": InputMap.action_get_deadzone(name) if exists else 0.0,
+		"events": InputMap.action_get_events(name) if exists else [],
+		"setting_exists": ProjectSettings.has_setting(key),
+		"setting": ProjectSettings.get_setting(key) if ProjectSettings.has_setting(key) else null,
+	}
+
+
+static func _restore_action(name: String, previous: Dictionary) -> void:
+	if InputMap.has_action(name):
+		InputMap.erase_action(name)
+	if previous.exists:
+		InputMap.add_action(name, previous.deadzone)
+		for event in previous.events:
+			InputMap.action_add_event(name, event)
+	if previous.setting_exists:
+		ProjectSettings.set_setting("input/" + name, previous.setting)
+	else:
+		ProjectSettings.clear("input/" + name)
 
 
 ## 把 InputMap 的当前状态写回项目设置：只改 InputMap 不会随项目重载保留。

@@ -649,6 +649,7 @@ version = "0.2.0"
 dependencies = [
  "godot",
  "httparse",
+ "libc",
  "tokio",
  "ureq",
  "windows-sys 0.61.2",

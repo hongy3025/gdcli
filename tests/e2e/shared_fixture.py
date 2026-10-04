@@ -241,10 +241,7 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         text=True,
-        env={
-            **build_editor_environment(env["project"]),
-            "GDAPI_HANDLER_TIMEOUT_MS": "180000",
-        },
+        env=build_editor_environment(env["project"]),
     )
     env["editor_pid"] = process.pid
     env["godot"] = process
@@ -252,12 +249,7 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
     try:
         meta = wait_for_metadata(env["project"])
     except BaseException:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=10)
+        _terminate_editor_process(process)
         raise
 
     started = time.monotonic()
@@ -274,8 +266,7 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
             break
         time.sleep(0.5)
     else:
-        process.terminate()
-        process.wait(timeout=10)
+        _terminate_editor_process(process)
         log_handle.close()
         raise RuntimeError(
             f"gdapi ping never succeeded within {ping_timeout:g}s; log tail:\n{_read_log_tail(log_path)}"
@@ -314,15 +305,32 @@ def _remove_tree(path: Path, *, attempts: int = 5, delay: float = 0.2) -> None:
     raise AssertionError(f"could not remove {path}: {last_error}")
 
 
+def _terminate_editor_process(process: subprocess.Popen) -> None:
+    """终止编辑器进程及其后代。
+
+    Windows 的 `godot_console.exe` 会以子进程方式启动真正的 `godot.exe`：只 terminate
+    Popen 句柄会留下编辑器进程，它继续占用内存/端口并锁住项目目录，使后续运行 OOM 或
+    文件基线恢复失败。POSIX 上直接使用 terminate/kill。
+    """
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
 def _stop_editor(env: dict[str, Any]) -> None:
     process = env.get("godot")
     if process is not None and process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=10)
+        _terminate_editor_process(process)
     log_handle = env.get("godot_log")
     if log_handle is not None and not log_handle.closed:
         log_handle.close()
@@ -373,16 +381,22 @@ def is_tracked_project_file(relative: str) -> bool:
     )
 
 
-def _tracked_project_files(project: Path) -> dict[str, Path]:
-    """Project files covered by the baseline (generated/installed state excluded)."""
+def tracked_project_files(project: Path) -> dict[str, Path]:
+    """Enumerate pinned files without traversing generated or installed trees."""
     files: dict[str, Path] = {}
-    for path in project.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = str(path.relative_to(project)).replace("\\", "/")
-        if not is_tracked_project_file(rel):
-            continue
-        files[rel] = path
+    for directory, subdirectories, names in os.walk(project):
+        base = Path(directory)
+        relative = base.relative_to(project)
+        subdirectories[:] = [
+            name for name in subdirectories
+            if is_tracked_project_file((relative / name).as_posix() + "/")
+        ]
+        for name in names:
+            rel = (relative / name).as_posix()
+            if is_tracked_project_file(rel):
+                path = base / name
+                if path.is_file():
+                    files[rel] = path
     return files
 
 
@@ -408,7 +422,7 @@ def restore_file_state(env: dict[str, Any], baseline: dict[str, bytes]) -> None:
     project = env["project"]
     mismatched: list[str] = []
     for _attempt in range(RESTORE_ATTEMPTS):
-        current_files = _tracked_project_files(project)
+        current_files = tracked_project_files(project)
         for rel, path in current_files.items():
             if rel not in baseline:
                 try:
@@ -434,15 +448,7 @@ def restore_file_state(env: dict[str, Any], baseline: dict[str, bytes]) -> None:
 def snapshot_files(env: dict[str, Any]) -> dict[str, bytes]:
     """Snapshot every non-generated file in the project for later restore."""
     project = env["project"]
-    baseline: dict[str, bytes] = {}
-    for path in project.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = str(path.relative_to(project)).replace("\\", "/")
-        if not is_tracked_project_file(rel):
-            continue
-        baseline[rel] = path.read_bytes()
-    return baseline
+    return {rel: path.read_bytes() for rel, path in tracked_project_files(project).items()}
 
 
 def _current_scene_path(env: dict[str, Any]) -> str:

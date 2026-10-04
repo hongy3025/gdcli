@@ -4,23 +4,39 @@ use serde_json::{Map, Value};
 
 /// 递归应用 R1/R2/R3/R4 变换。
 pub fn normalize(v: Value) -> Value {
+    reorder_and_coerce(v, true)
+}
+
+/// 仅把 `ok` 字段前置，不做 R1 有损压缩。
+///
+/// `--json` 模式承诺输出原始 JSON：`[]` 不能变成 `""`，单元素数组不能降级为标量。
+pub fn reorder_ok_fields(v: Value) -> Value {
+    reorder_and_coerce(v, false)
+}
+
+fn reorder_and_coerce(v: Value, coerce: bool) -> Value {
     match v {
         Value::Array(arr) => {
-            let arr: Vec<Value> = arr.into_iter().map(normalize).collect();
-            if let Some(coerced) = try_coerce_with_r1(&arr) {
-                Value::Array(coerced)
-            } else {
-                Value::Array(arr)
+            let arr: Vec<Value> = arr
+                .into_iter()
+                .map(|item| reorder_and_coerce(item, coerce))
+                .collect();
+            if !coerce {
+                return Value::Array(arr);
+            }
+            match try_coerce_with_r1(&arr) {
+                Some(coerced) => Value::Array(coerced),
+                None => Value::Array(arr),
             }
         }
         Value::Object(map) => {
             let mut out = Map::new();
             if let Some(v) = map.get("ok") {
-                out.insert("ok".to_string(), normalize(v.clone()));
+                out.insert("ok".to_string(), reorder_and_coerce(v.clone(), coerce));
             }
             for (k, v) in map {
                 if k != "ok" {
-                    out.insert(k, normalize(v));
+                    out.insert(k, reorder_and_coerce(v, coerce));
                 }
             }
             Value::Object(out)
@@ -175,6 +191,24 @@ mod tests {
         let out = n(v);
         let inner = out.get("data").unwrap().as_object().unwrap();
         let keys: Vec<&str> = inner.keys().map(|s| s.as_str()).collect();
+        assert_eq!(keys, vec!["ok", "version"]);
+    }
+
+    #[test]
+    fn json_mode_preserves_empty_and_single_element_arrays() {
+        let v = json!({"items":[{"events":[],"params":["x"]}]});
+        assert_eq!(reorder_ok_fields(v.clone()), v);
+    }
+
+    #[test]
+    fn json_mode_reorders_nested_ok_without_coercion() {
+        let out = reorder_ok_fields(json!({"items":[{"version":"1","ok":true}]}));
+        let keys: Vec<&str> = out["items"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
         assert_eq!(keys, vec!["ok", "version"]);
     }
 }

@@ -14,19 +14,12 @@ from typing import Any
 
 import pytest
 
-from e2e.shared_fixture import is_tracked_project_file, reset_shared_state, restore_file_state
+from e2e.shared_fixture import tracked_project_files, reset_shared_state, restore_file_state
 
 
 def project_snapshot(project: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted(project.rglob("*")):
-        if not path.is_file():
-            continue
-        rel = str(path.relative_to(project)).replace("\\", "/")
-        # Skip generated, addon-installed and engine-maintained files that
-        # change without being a test artifact; the shared reset hook owns them.
-        if not is_tracked_project_file(rel):
-            continue
+    for rel, path in sorted(tracked_project_files(project).items()):
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())

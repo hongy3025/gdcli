@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +93,7 @@ def wait_for_metadata(project: Path, timeout: float = 45.0) -> dict:
                 return json.loads(meta.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 pass
-        time.sleep(1.0)
+        time.sleep(0.05)
     raise RuntimeError(f"gdapi metadata never appeared at {meta}")
 
 
@@ -209,40 +210,65 @@ def tree_digest(project: Path) -> str:
 
 
 @successful_wait("undo_bridge")
-def wait_for_test_result(env: dict, timeout: float = 10.0) -> dict:
-    """Wait for the fixture plugin's next-frame history result."""
-    result_path = env["project"] / ".godot" / "gdapi-test-result.json"
+def wait_for_test_result(env: dict, *, request_id: str = "", timeout: float = 10.0) -> dict:
+    """Wait for the fixture plugin's next-frame history result.
+
+    给定 `request_id` 时必须匹配该 id，重投命令后不会误读上一次的结果。结果读取容忍
+    插件用临时文件 + rename 发布时的 Windows 共享冲突（PermissionError）与半写状态。
+    """
+    result_path = Path(env["project"]) / ".godot" / "gdapi-test-result.json"
     timeout = positive_seconds("GDAPI_E2E_UNDO_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
+    last_error: OSError | ValueError | None = None
     while time.monotonic() < deadline:
         if result_path.exists():
-            return json.loads(result_path.read_text(encoding="utf-8"))
-        time.sleep(0.05)
-    raise RuntimeError("gdapi_test plugin never produced a result")
+            try:
+                payload = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                last_error = exc
+            else:
+                if not request_id or payload.get("request_id") == request_id:
+                    return payload
+        time.sleep(0.01)
+    raise RuntimeError(f"gdapi_test plugin never produced a result (last error: {last_error})")
+
+
+def history_action(env: dict, action: str) -> dict:
+    """Run one editor undo/redo through the fixture plugin's file bridge.
+
+    命令携带 `request_id`；插件对同一 id 只执行一次（重投只重发结果），因此超时后重投
+    命令是安全的：既覆盖「命令在编辑器读取前被上一帧的 remove 删除」的竞态，也覆盖
+    编辑器短暂卡顿。
+    """
+    command_path = Path(env["project"]) / ".godot" / "gdapi-test-command.json"
+    request_id = uuid.uuid4().hex
+    timeout = positive_seconds("GDAPI_E2E_UNDO_TIMEOUT_SECONDS", 10.0)
+    last_error: RuntimeError | None = None
+    for _attempt in range(3):
+        try:
+            command_path.write_text(
+                json.dumps({"action": action, "request_id": request_id}), encoding="utf-8"
+            )
+        except OSError as exc:
+            last_error = RuntimeError(str(exc))
+            continue
+        try:
+            return wait_for_test_result(env, request_id=request_id, timeout=timeout)
+        except RuntimeError as exc:
+            last_error = exc
+    raise RuntimeError(f"gdapi_test plugin never completed {action}: {last_error}")
 
 
 def editor_undo(env: dict) -> None:
-    result_path = env["project"] / ".godot" / "gdapi-test-result.json"
-    result_path.unlink(missing_ok=True)
-    command = env["project"] / ".godot" / "gdapi-test-command.json"
-    command.write_text(json.dumps({"action": "undo"}), encoding="utf-8")
-    payload = wait_for_test_result(env)
+    payload = history_action(env, "undo")
     assert payload.get("ok") is True, payload
 
 
 def editor_redo(env: dict) -> None:
-    result_path = env["project"] / ".godot" / "gdapi-test-result.json"
-    result_path.unlink(missing_ok=True)
-    command = env["project"] / ".godot" / "gdapi-test-command.json"
-    command.write_text(json.dumps({"action": "redo"}), encoding="utf-8")
-    payload = wait_for_test_result(env)
+    payload = history_action(env, "redo")
     assert payload.get("ok") is True, payload
 
 
 def editor_clear_undo(env: dict) -> None:
-    result_path = env["project"] / ".godot" / "gdapi-test-result.json"
-    result_path.unlink(missing_ok=True)
-    command = env["project"] / ".godot" / "gdapi-test-command.json"
-    command.write_text(json.dumps({"action": "clear_undo"}), encoding="utf-8")
-    payload = wait_for_test_result(env)
+    payload = history_action(env, "clear_undo")
     assert payload.get("ok") is True, payload

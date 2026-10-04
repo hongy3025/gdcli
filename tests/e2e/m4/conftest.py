@@ -18,18 +18,13 @@ import pytest
 from e2e.m3.conftest import command_doc, exec_error, exec_ok  # noqa: F401
 from e2e.shared_fixture import is_tracked_project_file  # noqa: F401 — re-export
 from e2e.shared_fixture import m4_env  # noqa: F401 — re-export
-from e2e.shared_fixture import reset_shared_state, restore_file_state
+from e2e.shared_fixture import reset_shared_state, restore_file_state, tracked_project_files
 
 
 def project_files(project: Path) -> dict[str, str]:
     """Tracked project files → sha256 hex, excluding generated/installed state."""
     files: dict[str, str] = {}
-    for path in sorted(project.rglob("*")):
-        if not path.is_file():
-            continue
-        rel = str(path.relative_to(project)).replace("\\", "/")
-        if not is_tracked_project_file(rel):
-            continue
+    for rel, path in sorted(tracked_project_files(project).items()):
         files[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
     return files
 

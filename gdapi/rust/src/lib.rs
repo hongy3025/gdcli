@@ -21,7 +21,9 @@ pub mod server;
 use godot::prelude::*;
 use http::validate_response_header;
 use process_runner::{PollOutcome, ProcessRunnerCore};
+use queue::{CancelReason, RequestControl};
 use server::ServerCore;
+use std::sync::Arc;
 
 /// GDExtension 入口标记结构体。
 ///
@@ -152,6 +154,8 @@ impl GdApiServer {
                 // 优化：使用 from slice 替代逐字节 push
                 let body = PackedByteArray::from(req.body.as_slice());
                 dict.set(&GString::from("body"), &body.to_variant());
+                let control = Gd::from_object(GdApiRequestControl { core: req.control });
+                dict.set(&GString::from("control"), &control.to_variant());
                 dict.to_variant()
             }
         }
@@ -206,6 +210,34 @@ impl GdApiServer {
 
 #[derive(GodotClass)]
 #[class(base=RefCounted, no_init)]
+pub struct GdApiRequestControl {
+    core: Arc<RequestControl>,
+}
+
+#[godot_api]
+impl GdApiRequestControl {
+    #[func]
+    fn remaining_ms(&self) -> i64 {
+        self.core.remaining_ms() as i64
+    }
+
+    #[func]
+    fn cancellation_reason(&self) -> GString {
+        if self.core.remaining_ms() == 0 {
+            self.core.cancel(CancelReason::Timeout);
+        }
+        match self.core.reason() {
+            Some(CancelReason::Timeout) => "timeout",
+            Some(CancelReason::Disconnected) => "disconnected",
+            Some(CancelReason::Shutdown) => "shutdown",
+            None => "",
+        }
+        .into()
+    }
+}
+
+#[derive(GodotClass)]
+#[class(base=RefCounted, no_init)]
 pub struct GdApiProcessRunner {
     core: ProcessRunnerCore,
 }
@@ -222,6 +254,7 @@ impl GdApiProcessRunner {
     #[func]
     fn start(
         &mut self,
+        request: Gd<GdApiRequestControl>,
         executable: GString,
         args: PackedStringArray,
         cwd: GString,
@@ -235,12 +268,13 @@ impl GdApiProcessRunner {
             .map(|arg| arg.to_string())
             .collect::<Vec<_>>();
         let cwd_path = std::path::PathBuf::from(cwd.to_string());
-        match self.core.start(
+        match self.core.start_for_request(
             executable.as_str(),
             &argv,
             &cwd_path,
             timeout_ms,
             max_output_bytes,
+            Arc::clone(&request.bind().core),
         ) {
             Ok(id) => id,
             Err(err) => {

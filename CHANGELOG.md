@@ -18,6 +18,13 @@
 - 新增音频 bus 属性及 AudioEffect 编辑、AnimationTree blend graph 增删连线与参数持久化、运行时 Tween 进度/停止。
 
 ### Fixes
+- 修复合并审查 R01/R02/R09：跨 origin 重定向永久剥离认证/Cookie 等敏感头；受限 eval 在 Variant 解码/资源加载前递归拒绝危险输入；通用审计摘要清除 URL userinfo，包括错误路径及嵌套字段。
+- 修复 R03 与 Unix 任务生命周期：保持生产默认 30 秒期限，用请求级绝对期限/取消原因协调 HTTP、实际进程和审计；超时、断连、shutdown、drop 先清理后返回失败。Unix 原子创建独立进程组，Windows 保留 Job Object；自然退出也清理持有管道的后代，输出线程可停止并有界排空。
+- 修复 R04/R05：场景另存前检查可写性，读取实际磁盘场景并比较解码后的 SceneState，而非不稳定的 PackedScene 内部索引；失败恢复路径/dirty 状态和目标字节。`scene/current.edited` 返回真实未保存状态；删除依赖扫描覆盖 GDScript preload/load 的资源、相对和 UID 路径，扫描不执行脚本。
+- 修复 R06/R07/R08：UID 修复使用统一写权限及全计划预检；InputMap 保存失败恢复真实的完整前态；资源赋值验证原生/自定义子类并确认实际属性值后提交 undo action，失败不破坏 undo/redo 历史。
+- `gdcli --json` 只把 `ok` 前置，不再套用 TOON 有损压缩：空数组保持 `[]`、单元素数组保持数组（此前 `--json` 会把表格行里的 `[]` 写成 `""`）。
+- `scene/current.edited` 按场景索引对齐编辑器的未保存记录（`save-as` 之后编辑器内部的场景条目路径仍指向旧文件），另存为之后再改动仍报告未保存；写权限探测不再创建会被编辑器扫描到的空 `.tscn`。
+- `network/http_request` 为 `http://host?query` 这类缺少路径的 URL 补上 `/`，避免 Godot `HTTPRequest` 直接拒绝请求（此前报 `HTTP request could not start`）。
 - 运行时 `runtime/input/key` 注入后立即刷新 Godot 缓冲输入事件，使按键被运行期接收端与录制器在同一派发周期内观察；`runtime/node/find` 结果新增规范化 `node_path` 字段，保留原有 `path`。
 - `resource/preview` 在 headless 编辑器中使用与 Godot 内置 Gradient 预览生成器相同的 `GradientTexture1D` 渲染，避免等待 headless 模式下不会派发的 EditorResourcePreview 回调；活动预览队列仍按原 `deadline_ms` 超时。
 - 修复 runtime file transport 的 hello 发布状态：此前一次文件 open/rename 失败也会提前标记为“已发送”，导致 probe 永久停在 `connecting / transport=none`；现在只有 `hello.json` 原子发布成功才标记为已发送，否则在原定延迟到期后继续完成发布，不重启游戏、不扩大 harness 超时或重试次数。新增真实文件系统故障回归，覆盖立即写入失败、延迟 rename 失败及已断开端点不复活。
@@ -35,8 +42,11 @@
 - `scene3d` 修复 `MeshLibrary` item-ID 检查对不存在 `has_item()` 的调用；真实渲染器 gate 验证 GridMap/MultiMesh 状态读回，headless 下非空 MultiMesh 返回 `not_supported` 而不伪报 RenderingServer dummy values。
 
 ### Maintenance
+- CLI 的同步 HTTP/install 路径不再创建 Tokio 多线程池，LSP 按需创建单线程运行时；E2E 文件隔离在遍历前剪枝 `.godot` 和安装目录，保留相同文件基线与实际字节核验。
+- 完整门禁的 file/budget 共用同一次新鲜父进程计时，移除重复全套运行；独立 budget 命令仍执行完整套件。E2E 不再覆盖生产 handler 期限；格式/lint 合并有命令行长度上限的批次，去重 junction 的同一物理源码，不减少检查覆盖。
 - 修正 E2E 隔离：`default_bus_layout.tres` 由 Godot 自身维护，不再纳入文件基线（此前导致 M2/M4 隔离断言间歇失败）；`restore_file_state` 写回后校验并在失败时重试，仍不一致则报错而不是静默吞掉。
 - E2E harness 收口：会话级断言「只允许启动一个编辑器」（并打印 pid/时间线/调用栈），修掉测试模块导入 fixture 函数导致的重复定义（实测会真的启动两个编辑器）；`scene/open` 之后等待场景切换完成（避免 UndoRedo 绑到旧场景）；M6 增加每测试文件恢复；`teardown_environment` 不再吞掉重置失败；只有缺少 cargo 才 skip；undo 桥等待放宽到 10s（m2/m4 两份）、`wait_for` 默认与 m3 输入等待放宽；budget 测试默认排除（`pyproject.toml` 与文档一致）；`attach_game` 握手失败时打印 status/运行期目录/编辑器 console 诊断。
+- undo/redo 文件桥改为带 `request_id` 的幂等协议：插件对同一 id 只执行一次并重发结果，harness 超时后重投命令即可覆盖「命令在编辑器读取前被上一帧删除」的竞态与编辑器短暂卡顿，读取结果容忍 Windows rename 共享冲突；m5 InputMap 用例自建动作后自行清理，不再依赖文件基线回滚运行时状态。编辑器终止改为整棵进程树（Windows 的 `godot_console.exe` 会以子进程启动真正的 `godot.exe`，只终止 wrapper 会留下编辑器占用内存/端口/项目目录）。
 - 新增 `GDAPI_E2E_TRANSPORT=engine_debugger`：让整套 E2E 走 EngineDebugger 数据面（默认仍是确定性的 file transport），并补 [外部 godot-mcp 能力对比](docs/reports/2026-10-03-external-parity-comparison.md) 与 [遗留问题清单](docs/todos/2026-10-03-open-issues.md)。
 - 里程碑 route manifest 调整为 M5 = 25、M6 = 7；新增桌面导出验收 `tests/e2e/m5/test_export.py`。
 - 修正 fixture 导出预设平台名（`Windows` → `Windows Desktop`）——此前 Godot 会忽略该预设，导致桌面导出用例无法执行。
