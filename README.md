@@ -294,7 +294,7 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 | `scene/current` | 获取当前编辑场景信息 |
 | `scene/current/save` | 保存当前编辑场景（可选另存为 `{path?}`） |
 | `scene/open` | 在编辑器中打开场景，并等到编辑器实际切换完成 `{path}` |
-| `scene/close` | 关闭场景 `{path?}` |
+| `scene/close` | 关闭当前场景（`path` 可省略或仅能指向当前场景） |
 | `scene/tree` | 查询场景树结构 `{path?, max_depth?}` |
 | `scene/list_open` | 列出所有已打开场景 |
 
@@ -449,7 +449,7 @@ M3 提供 runtime 路由；M6 引入 `runtime/eval` 作为 v2 协议下运行进
 | `runtime/node/info\|get\|set\|call\|find\|remove\|reparent\|create\|duplicate\|rename` | 10 | 节点增删改查，方法调用需要在节点元数据 `gdapi_callable_methods` allowlist 中 |
 | `runtime/input/key\|mouse\|gamepad\|touch\|action\|sequence` | 6 | 输入模拟；sequence 最多 100 项、累计 ≤ 10 秒 |
 | `runtime/screenshot/viewport\|camera\|frames` | 3 | PNG 截图，尺寸限制 1920x1080（超限源在 CPU readback 前拒绝），单响应 ≤ 4 MiB |
-| `runtime/log/read\|clear` `runtime/debug/performance\|monitors\|errors\|breakpoints` | 6 | 游标读取 + 性能监控 |
+| `runtime/log/read\|clear` `runtime/debug/performance\|monitors\|errors\|breakpoints` | 6 | 日志游标与性能监控；`errors` 当前返回空列表，`breakpoints` 返回 `not_supported` |
 | `runtime/assert/condition\|node_exists\|property_equals\|signal_received` | 4 | 等待 / 断言，使用固定 json grammar，不调用 Expression/eval |
 | `runtime/signal/connect\|disconnect\|emit\|await` | 4 | 信号连接 / 等待 |
 

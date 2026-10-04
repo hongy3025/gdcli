@@ -51,7 +51,7 @@ gdcli exec command/list --project .
 
 | 选项 | 默认 | 说明 |
 |------|------|------|
-| `--project <path>` | 当前目录 | Godot 项目根目录 |
+| `--project <path>` | 未指定 | 项目根目录，用于相对路径解析和端口发现；未指定时文件相对当前工作目录解析 |
 | `--host <addr>` | 127.0.0.1 | LSP 服务器主机地址 |
-| `--port <port>` | 6005 | LSP 端口（自动发现时无需指定） |
+| `--port <port>` | 自动发现 | 显式 `--port` > 项目 `.godot/gdapi.json` 的 `lsp_port` > `6005` |
 | `--json` | — | JSON 输出格式（替代人类可读格式） |
