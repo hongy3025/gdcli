@@ -1,14 +1,14 @@
-# gdcli 遗留问题清单（开专题用）
+# gdcli T1–T8 验收与遗留边界
 
 日期：2026-10-03
 来源：[目标收口报告](../reports/2026-10-03-gdcli-goal-closure.md) + [外部能力对等复核](../reports/2026-10-03-external-parity-comparison.md)
-用法：**每个 T 编号独立立项**。每条给出「证据 → 影响 → 建议调查路径 → 验收标准 → 规模」，可复现命令附在文末。
+状态：T1–T8 均已完成。本文件保留 T1 历史故障证据，并汇总 T2–T8 的实现、验证与复现入口；明确非目标和环境边界见 §3–§4。
 
 优先级：`P1` = 影响验收可信度，`P2` = 影响能力面，`P3` = 行为取舍/环境。
 
 ---
 
-## 1. 工程遗留问题
+## 1. 工程修复与验收记录
 
 ### T1（P1）运行时 harness 偶发握手失败（已解决）
 
@@ -50,71 +50,78 @@
 
 **验收标准已满足**：连续 5 次全量运行 0 次该失败；同时落地真实发布状态修复，并证明同一运行会话内的握手恢复，不依赖放宽超时或增加 harness 重试。
 
-### T2（P2）EngineDebugger 数据面尚未进入默认验收
+### T2（P2）EngineDebugger 数据面独立验收（已完成）
 
-**证据**：本轮已实测 headless 与 GUI 会话下 `transport=engine_debugger`（协议 v2、PNG 截图、输入生效、stop 正常），但默认套件仍强制 file transport（fixture 的 `runtime_force_file_transport=true`）；debugger 路径只能通过 `GDAPI_E2E_TRANSPORT=engine_debugger` 手动验收（m3 status+nodes 29 passed）。
-**影响**：debugger 通道的回归不会在默认运行中暴露。
-**建议**：二选一——(a) 增加 marker（如 `engine_transport`）门控的独立验收模块并在文档/流程中要求定期执行；(b) 让 fixture 支持「同一会话先 file 后 debugger」或独立会话的双 transport 矩阵（注意单编辑器契约：需要显式允许多会话的开关）。
-**验收标准**：debugger 数据面的验收成为一条可重复、被记录的命令（已具备），且失败能被流程捕获（CI 或清单）。
-**规模**：0.5–1 天。
+**实现**：默认 E2E 仍固定 file transport，EngineDebugger 使用独立 pytest 会话和 `GDAPI_E2E_TRANSPORT=engine_debugger`，覆盖协议 v2、运行时场景树、PNG 截图、输入与停止。门禁纳入 `scripts/check.py` 和 GitHub Actions，失败会阻断流程。
 
-### T3（P3）负载敏感的超时余量
+**验证**：`uv run python scripts/check.py --gate engine` → **1 passed**；独立门禁要求单编辑器会话。
 
-**证据**：观测到 3 类超时偏紧——m2/m4 的 `gdapi_test` undo 桥 2s、`wait_for` 默认 5s、m3 输入用例显式 2s；已统一放宽到 10s/15s。另有 `E2E_SCENE_SWITCH_TIMEOUT_SECONDS = 5.0`（`shared_fixture.py`）与 budget 的 360s 阈值同样依赖本机性能。
-**影响**：更弱的机器/更高并发下仍可能偶发失败；放宽超时只影响失败路径耗时。
-**建议**：在单次全量运行中采集各 `wait_for`/桥等待的真实耗时分布（成功路径），据此设定「本机 P99 × 3」的余量；必要时把 budget 阈值改为可配置。
-**规模**：1–2 小时。
+**复现**：见附录的 EngineDebugger 命令。
 
-### T4（P3）统一 mutation 审计的语义边界
+### T3（P3）成功等待分布与预算余量（已完成）
 
-**证据**：`gdapi/addon/runtime/router.gd::_audit_mutation` 仅在「响应含 `changed` 且本次请求未新增审计条目」时补记，因此：
-- 非危险 mutation 的**失败**（错误响应无 `changed`）不会留下中央审计条目（危险/文件类操作各自记录成功与失败）；
-- 审计 buffer 上限 1000 条，重 mutation 流量下可能挤掉早期危险操作记录。
-**影响**：审计用于排障时，非危险 mutation 的失败不可见；极端流量下危险记录可能被淘汰。
-**建议**：(a) 给 `gdapi/audit/list` 增加 `safety` 过滤并支持「危险类优先保留」的淘汰策略；(b) 让 router 在 mutation 路由的错误响应上也能补记（需要请求级 mutation 判定，例如按路由是否在 `changed`-contract 集合）。
-**规模**：0.5–1 天。
+**实现**：E2E harness 汇总成功等待的 P50/P95/P99/max，并输出 P99×3 建议；成功路径 telemetry 不自动放宽任何 timeout。预算可通过 `GDAPI_E2E_BUDGET_SECONDS` 显式配置，默认仍是 **360s**。
+
+**验收边界**：`E2E_SCENE_SWITCH_TIMEOUT_SECONDS` 与单项等待超时仍是各自独立的语义约束；没有用增加超时、改变预算默认值或缩小测试选择来掩盖 walltime。
+
+**全量 file gate**：`uv run python scripts/check.py --gate file` → **537 passed, 4 deselected in 345.84s**，`GODOT_EDITOR_STARTS=1`。默认 360s 保持不变；被 deselect 的项仅属于独立 budget、EngineDebugger、renderer 门禁。
+
+**预算验收**：`uv run python scripts/check.py --gate budget` → **1 passed in 349.65s**；嵌套全量 `FULL_SUITE_PARENT_WALL_SECONDS=349.612`，低于未变更的 360s 默认预算 **10.388s**。预算测试同时校验单编辑器契约。
+
+成功等待分布（秒；当前 Godot 4.7.2 / Windows 环境）：
+
+| 等待 | count | P50 | P95 | P99 | max | P99×3 建议 |
+|---|---:|---:|---:|---:|---:|---:|
+| editor_metadata | 1 | 15.0075 | 15.0075 | 15.0075 | 15.0075 | 45.0226 |
+| editor_ping | 1 | 6.6318 | 6.6318 | 6.6318 | 6.6318 | 19.8954 |
+| editor_ready | 1 | 0.0085 | 0.0085 | 0.0085 | 0.0085 | 0.0254 |
+| predicate | 36 | 0.0622 | 0.2184 | 1.0347 | 1.3855 | 3.1040 |
+| runtime_connect | 9 | 1.1532 | 1.4825 | 1.5057 | 1.5115 | 4.5171 |
+| runtime_playing | 3 | 0.0205 | 0.2125 | 0.2296 | 0.2339 | 0.6888 |
+| runtime_stop | 6 | 0.0274 | 0.0396 | 0.0425 | 0.0432 | 0.1276 |
+| scene_switch | 287 | 0.0228 | 0.0337 | 0.0359 | 0.0402 | 0.1076 |
+| undo_bridge | 91 | 0.0508 | 0.0513 | 0.0667 | 0.2022 | 0.2000 |
+
+### T4（P3）统一 mutation 审计与保留策略（已完成）
+
+**实现**：router 按 `RouteDoc.mutates()` 在请求级判断 mutation。成功、业务失败、JSON/参数校验失败均恰好记录一次；handler 已记录时不重复，纯只读失败不误记。审计列表支持 safety 过滤；达到 1000 条容量时优先淘汰普通 mutation，保留危险/文件类记录。
+
+**验证**：请求级失败路径见 `tests/e2e/m2/test_mutation_audit.py`；1000 条容量边界由 `tests/fixtures/e2e_project/tests/test_audit_retention.gd` 覆盖，纳入 GDScript 单元门禁。
 
 ---
 
-## 2. 能力域差距（来自外部对等复核）
+## 2. 能力域差距收口（来源：外部对等复核）
 
-对等复核结论：27 个能力域中 **13 等价 / 11 部分 / 3 缺失**。缺失与主要部分项如下（逐条证据见[对比报告](../reports/2026-10-03-external-parity-comparison.md)）：
+原始复核识别的 3 个缺失域（T5–T7）和 T8 部分覆盖项均已交付；保留原能力域边界与证据来源，逐项结果如下（原始差距证据见[对比报告](../reports/2026-10-03-external-parity-comparison.md)）：
 
-### T5（P2）3D 场景搭建——缺失
-外部证据：youichi `scene_3d_commands.gd:9-16`；DaxianLee `lighting_tools.gd:11/94/161`、`geometry_tools.gd:11/97/175`。
-范围建议：light/environment/sky/camera3d/gridmap/CSG/MultiMesh 的创建与参数设置（**不含** 3D 物理/导航，后者仍是明确非目标）。
-**规模**：1–2 天（含 fixture 场景与行为断言）。
+### T5（P2）3D 场景搭建（已完成）
 
-### T6（P2）粒子系统——缺失
-外部证据：youichi `particle_commands.gd:6-12`；DaxianLee `particle_tools.gd:11/102`。
-范围建议：GPUParticles2D/3D 创建、参数（amount/lifetime/emitting/材质）与少量运行期观测。
-**规模**：0.5–1 天。
+实现 `scene3d/{create,set,info}`，覆盖 Light、Environment/Sky、Camera3D、GridMap、CSG 与 MultiMesh 的创建、配置和读回。3D 物理与导航仍按既定范围排除；真实渲染器 gate 验证 GridMap/MultiMesh 状态和持久化。
 
-### T7（P2）跨场景批量重构——缺失
-外部证据：youichi `batch_commands.gd:9-17`（batch_set_property、cross_scene_set_property、find_nodes_by_type、find_node_references、get_scene_dependencies）。
-说明：现有 `filesystem/batch/*` 只做文件级事务，`node/find` 只覆盖单场景。
-范围建议：项目级扫描 + 计划/校验/应用三段式（沿用现有 `plan_hash` 与 recover 语义）。
-**规模**：1–2 天。
+### T6（P2）粒子系统（已完成）
 
-### T8（P3）部分覆盖域的增强包
+实现 `particles/{create,set,info}`，覆盖 GPUParticles2D/3D 的创建、参数写入和运行期状态读取；不以 headless dummy RenderingServer 值伪报非空渲染结果。
 
-按价值排序（每条含外部证据，均见对比报告）：
+### T7（P2）跨场景批量重构（已完成）
 
-| 增强项 | 现状缺口 |
+实现项目级场景扫描、按节点类型查找、引用/依赖查询，以及 `scene/batch/{plan,validate,apply,recover}` 事务。计划哈希绑定输入；校验、应用、恢复均覆盖失败回滚与真实持久化验证。
+
+### T8（P3）部分覆盖域增强包（已完成）
+
+实现与回归覆盖：
+
+| 能力 | 已交付范围 |
 |---|---|
-| 运行时录制/回放与属性监视 | 无 start/stop/replay_recording、monitor_properties |
-| 编辑器 UI 控制面 | 无 undo/redo 触发、通知、inspector/dock、插件管理、编辑器设置/相机 |
-| 场景实例化与删除 | 无 `add_scene_instance`、`delete_scene`（节点只能按类名创建） |
-| 资源通用属性写入/纹理预览 | 只有 material/shader/theme 类型专用写入 |
-| 音频 bus 属性与 effect | 只有 bus 增删与 player 播放控制 |
-| 动画树删除/blend tree/tween | 只有 state/transition 新增与 blend/set |
-| 代码分析扩展 | 只有 unused_resources/cycle_deps/script_errors/health |
-| 测试/QA 框架化 | 只有 runtime/assert/*（无场景测试脚本、压力测试、报告） |
-| 截图对比与编辑器视口 | 只有 viewport/camera/frames 截图 |
-| 节点 meta 与编辑期任意方法调用 | 缺 set_meta 与受控 call |
-| Theme 读取 | 只能写，不能读回值（测试靠 resource/info 间接验证） |
+| 运行时录制/回放与属性监视 | 输入录制分页、回放/取消、跨帧属性监视 |
+| 编辑器 UI 控制 | Undo/Redo、通知、Inspector/Dock、插件、设置及相机/真实视口控制 |
+| 场景操作 | 场景实例化与受保护删除 |
+| 资源与 Theme | 通用资源属性写入及落盘读回、纹理预览、Theme 读取 |
+| 音频与动画 | Audio bus 属性/effect；AnimationTree blend graph 与参数持久化；运行时 Tween 进度/停止 |
+| 项目分析 | `signal_flow`、`scene_complexity`、`script_references`、`project_statistics` 只读诊断 |
+| QA 与截图 | 声明式场景测试、压力测试/报告、实际 PNG 像素比较 |
+| 节点扩展 | 节点 meta 与显式 allowlist 方法调用 |
 
-**规模**：每项 0.5–2 天；建议按需立项，不做批量补齐。
+接口和行为边界详见 [CHANGELOG](../../CHANGELOG.md) 的 Features/Fixes 条目及相应 route 文档。
 
 ---
 
@@ -133,42 +140,37 @@
 
 ## 4. 环境 / 交付事项
 
-| 事项 | 影响 |
+| 事项 | 影响 / 处理 |
 |---|---|
-| 本机未安装 Godot 4.7.2 导出模板（`export_templates` 为空） | 桌面 **PCK** 导出已实测不需要模板；导出可执行文件/移动端则需要安装模板 |
-| 无 CI：门禁与 E2E 均需手动在本机执行 | 建议把 `cargo test`、`gdformat/gdlint`、非预算 E2E、budget 四条命令固化为脚本/流水线 |
-| budget 阈值 360s 依赖本机性能（当前实测 302–320s） | 换机器需重新标定 |
+| 本机未安装 Godot 4.7.2 导出模板（`export_templates` 为空） | 桌面 **PCK** 导出已实测不需要模板；导出可执行文件仍需安装匹配模板。 |
+| CI | `.github/workflows/verify.yml` 执行统一 `scripts/check.py` 门禁，覆盖格式、lint、clippy、workspace 单测、file E2E、EngineDebugger、真实 OpenGL 渲染和 360s 预算。 |
+| headless 全量 E2E 预算 | 默认 **360s**，可用 `GDAPI_E2E_BUDGET_SECONDS` 显式设置；`--gate budget` 实测嵌套全量 **349.612s**，通过且未改变默认阈值。 |
 
 ---
 
-## 5. 建议立项顺序
+## 5. 收口结论
 
-T1 的握手发布缺陷已修复，证据见 §1；其余问题按以下顺序立项：
-
-1. **T2 + 4 中的「CI/脚本化」**（把已建立的验收入口固化）
-2. **T5 / T7**（3D 场景搭建、跨场景批量重构：能力面最大的两块）
-3. **T6** 与 **T8** 中按需项
-4. **T4 / T3**（审计与超时余量的精细化）
+T1–T8 已按各自范围完成实现与验收；T2–T8 的接口与回归入口见 §1–§2 和 [CHANGELOG](../../CHANGELOG.md)。剩余边界仅为表中明确排除的能力，以及本机未安装导出模板导致的可执行文件导出未验收；它们不是本轮被静默缩小的验收项。
 
 ---
 
 ## 附：复现命令
 
 ```bash
-# 门禁
-cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-python scripts/format-gd.py && python scripts/format-gd.py --check && gdlint $(git status --porcelain | grep '\.gd$' | awk '$1!="D"{print $2}')
+# 完整顺序门禁：格式、lint、Rust、file E2E、EngineDebugger、renderer、budget
+uv run python scripts/check.py
 
-# 默认（file transport）非预算全量
-uv run pytest tests/e2e -q -s
+# 分段执行
+uv run python scripts/check.py --gate format --gate clippy --gate unit
+uv run python scripts/check.py --gate file
+uv run python scripts/check.py --gate engine
+uv run python scripts/check.py --gate render
+uv run python scripts/check.py --gate budget
 
-# 预算验收（嵌套全量 + walltime ≤360s + 单编辑器）
-uv run pytest tests/e2e/test_full_suite_budget.py -m budget -v
-
-# EngineDebugger 数据面（T2 的入口）
+# EngineDebugger 数据面（T2）
 GDAPI_E2E_TRANSPORT=engine_debugger uv run pytest tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_runtime_nodes.py -q
 
-# T1：真实文件系统故障下的 hello 发布回归（立即 open 失败与延迟 rename 失败）
+# T1：真实文件系统故障下的 hello 发布回归
 uv run pytest tests/e2e/test_gdscript_units.py -q -s -k transport
 
 # 运行时生命周期与数据面

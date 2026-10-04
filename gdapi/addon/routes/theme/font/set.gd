@@ -29,5 +29,8 @@ func doc() -> GdApiRouteDoc:
 		. param("type", "String", false, "控件类型或 Theme 类型变体", "Control")
 		. param("item", "String", true, "item 名")
 		. param("value", "Variant", true, "Font Resource 编码值")
+		. example(
+			'{"path":"res://resources/theme.tres","item":"font","value":{"class":"SystemFont"}}'
+		)
 		. returns("result", {"undoable": "false"})
 	)

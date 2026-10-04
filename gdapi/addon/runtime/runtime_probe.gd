@@ -260,9 +260,9 @@ func _send_request_rejection(request_msg: Dictionary, verdict: Dictionary) -> bo
 # gdlint: ignore=max-returns
 func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 	var result: Dictionary
+	if op.begins_with("runtime/recording/") or op.begins_with("runtime/monitor/"):
+		return await _sessions.dispatch(op, payload)
 	match op:
-		"runtime/recording/start", "runtime/recording/stop", "runtime/recording/read", "runtime/recording/replay", "runtime/recording/cancel", "runtime/monitor/start", "runtime/monitor/read", "runtime/monitor/stop":
-			result = await _sessions.dispatch(op, payload)
 		"runtime/test/run", "runtime/test/stress", "runtime/test/report", "runtime/assert/screen_text":
 			result = await _qa.dispatch(op, payload)
 		"runtime/screenshot/compare":

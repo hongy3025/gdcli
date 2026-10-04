@@ -30,6 +30,13 @@ func doc() -> GdApiRouteDoc:
 			"set_property: property/value、可选 scene 与 selector；支持 typed Variant"
 		)
 		. param("plan_hash", "String", true, "plan 返回的哈希；绑定参数、原场景与资源依赖")
+		. example(
+			(
+				'{"operations":[{"property":"visible","value":true,'
+				+ '"selector":{"class":"Node2D"}}],'
+				+ '"plan_hash":"<plan_hash from scene/batch/plan>"}'
+			)
+		)
 		. returns(
 			"事务结果",
 			{

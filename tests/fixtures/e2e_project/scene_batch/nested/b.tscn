@@ -9,7 +9,7 @@
 position = Vector2(5, 6)
 
 [node name="Reference" type="RemoteTransform2D" parent="."]
-remote_path = NodePath("../Target")
+remote_path = NodePath("../Collision")
 
 [node name="Collision" type="CollisionShape2D" parent="."]
 shape = ExtResource("2")

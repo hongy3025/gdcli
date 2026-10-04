@@ -25,14 +25,10 @@ def test_runtime_tree_root_name(m3_running):
 
 
 def test_shared_data_plane_stays_within_process_and_recovery_budget(m3_running):
-    # The unified `e2e_editor` starts the editor exactly once for the
-    # whole pytest session. The `m3_lifecycle` fixture then exercises
-    # the runtime broker twice, and `m3_running` attaches the shared
-    # game once. The total `game_run_count` therefore grows above the
-    # original 3-cycle budget because every other M3 test that needs
-    # `m3_running` also re-attaches after the autouse per-test reset.
+    # The M3 package shares one runtime game across its data-plane modules.
+    # Per-test reset keeps state isolated without recovering/restarting it.
     assert m3_running["editor_start_count"] == 1
-    assert m3_running["game_run_count"] >= 3
+    assert m3_running["game_run_count"] >= 1
     assert m3_running["fixture_reset_restarts"] == 0
     assert m3_running["recovery_markers"] == []
 

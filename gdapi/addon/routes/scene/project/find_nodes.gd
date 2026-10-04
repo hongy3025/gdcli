@@ -22,5 +22,6 @@ func doc() -> GdApiRouteDoc:
 		. param("scenes", "Array[String]", false, "显式场景列表，替代 root")
 		. param("selector", "Dictionary", false, "class/name/node_path 选择器")
 		. param("class", "String", false, "节点类型，含子类；find_nodes 使用")
+		. example('{"class":"Sprite2D"}')
 		. returns("扫描结果", {"items": "Array[Dictionary]", "warnings": "Array[String]"})
 	)

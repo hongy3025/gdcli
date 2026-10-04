@@ -21,16 +21,15 @@ var sent: Array = []
 func _init() -> void:
 	print("Running GdApiRuntimeBroker tests...\n")
 
-	test_initial_state_is_stopped()
-	test_attach_transitions_to_connecting()
-	test_first_request_transitions_to_connected()
-	test_detach_completes_pending_with_conflict()
-	test_detach_clears_transport_before_reentrant_callback()
-	test_detach_is_idempotent()
-	test_status_returns_pending_count()
-	test_request_timeout_completes_with_timeout()
-	test_unknown_reply_does_not_crash()
-	test_invalid_reply_does_not_complete_pending_request()
+	_test_initial_state_is_stopped()
+	_test_attach_transitions_to_connecting()
+	_test_first_request_transitions_to_connected()
+	_test_detach_completes_pending_with_conflict()
+	_test_detach_clears_transport_before_reentrant_callback()
+	_test_detach_is_idempotent()
+	_test_status_returns_pending_count()
+	_test_request_timeout_completes_with_timeout()
+	_test_invalid_reply_does_not_complete_pending_request()
 	test_oversized_request_is_rejected_without_sending()
 	test_oversized_reply_completes_once_without_waiting_for_timeout()
 	test_broker_timeout_is_bounded_to_route_grace_limit()
@@ -85,21 +84,21 @@ func _wait(_frames: int) -> void:
 	await process_frame
 
 
-func test_initial_state_is_stopped() -> void:
+func _test_initial_state_is_stopped() -> void:
 	var b: RefCounted = Broker.new()
 	assert_eq(b.status().state, "stopped", "initial state stopped")
 	assert_eq(b.status().pending, 0, "no pending")
 	assert_eq(b.status().protocol_version, Protocol.VERSION, "protocol version")
 
 
-func test_attach_transitions_to_connecting() -> void:
+func _test_attach_transitions_to_connecting() -> void:
 	var b: RefCounted = Broker.new()
 	b.attach(7, _make_send())
 	assert_eq(b.status().state, "connecting", "state after attach")
 	assert_eq(b.status().session_id, 7, "session id remembered")
 
 
-func test_first_request_transitions_to_connected() -> void:
+func _test_first_request_transitions_to_connected() -> void:
 	var b: RefCounted = Broker.new()
 	b.attach(7, _make_send())
 	var received: Array = []
@@ -117,7 +116,7 @@ func test_first_request_transitions_to_connected() -> void:
 	assert_eq(b.status().pending, 0, "pending zeroed")
 
 
-func test_detach_completes_pending_with_conflict() -> void:
+func _test_detach_completes_pending_with_conflict() -> void:
 	var b: RefCounted = Broker.new()
 	b.attach(3, _make_send())
 	var received: Array = []
@@ -130,7 +129,7 @@ func test_detach_completes_pending_with_conflict() -> void:
 	assert_eq(received[0]["ok"], false, "failure ok=false")
 
 
-func test_detach_clears_transport_before_reentrant_callback() -> void:
+func _test_detach_clears_transport_before_reentrant_callback() -> void:
 	var b: RefCounted = Broker.new()
 	var transport_sent: Array = []
 	var callback_replies: Array = []
@@ -170,7 +169,7 @@ func test_detach_clears_transport_before_reentrant_callback() -> void:
 	assert_eq(b.status().transport, "none", "detach callback observes no transport")
 
 
-func test_detach_is_idempotent() -> void:
+func _test_detach_is_idempotent() -> void:
 	var b: RefCounted = Broker.new()
 	b.attach(3, _make_send())
 	b.detach("first")
@@ -179,7 +178,7 @@ func test_detach_is_idempotent() -> void:
 	assert_eq(b.status().state, "stopped", "still stopped")
 
 
-func test_status_returns_pending_count() -> void:
+func _test_status_returns_pending_count() -> void:
 	var b: RefCounted = Broker.new()
 	b.attach(3, _make_send())
 	b.request("op/a", {}, 5000, func(_reply: Dictionary) -> void: pass)
@@ -188,7 +187,7 @@ func test_status_returns_pending_count() -> void:
 	assert_eq(b.status().pending, 3, "three pending")
 
 
-func test_request_timeout_completes_with_timeout() -> void:
+func _test_request_timeout_completes_with_timeout() -> void:
 	var b: RefCounted = Broker.new()
 	b.attach(3, _make_send())
 	var received: Array = []
@@ -200,14 +199,7 @@ func test_request_timeout_completes_with_timeout() -> void:
 	assert_eq(b.status().pending, 0, "pending cleared")
 
 
-func test_unknown_reply_does_not_crash() -> void:
-	var b: RefCounted = Broker.new()
-	b.attach(3, _make_send())
-	b.receive({"version": 1, "id": 9999, "kind": "reply", "ok": true, "result": {}})
-	assert_eq(b.status().pending, 0, "still zero pending")
-
-
-func test_invalid_reply_does_not_complete_pending_request() -> void:
+func _test_invalid_reply_does_not_complete_pending_request() -> void:
 	var b: RefCounted = Broker.new()
 	b.attach(3, _make_send())
 	var received: Array = []

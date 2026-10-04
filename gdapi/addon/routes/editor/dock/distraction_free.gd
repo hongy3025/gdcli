@@ -20,6 +20,7 @@ func doc() -> GdApiRouteDoc:
 		. make("Set distraction-free mode")
 		. mutates()
 		. param("enabled", "bool", true, "Enable distraction-free mode")
+		. example('{"enabled":true}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

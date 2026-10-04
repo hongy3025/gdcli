@@ -53,20 +53,10 @@ func dispatch(op: String, payload: Dictionary) -> Dictionary:
 func _scenario(payload: Dictionary) -> Dictionary:
 	var scenario: Variant = payload.get("scenario", {})
 	if payload.has("script_path"):
-		var guarded := _project_path(String(payload.script_path), "json")
-		if not guarded.get("ok", false):
-			return guarded
-		if not FileAccess.file_exists(guarded.path):
-			return _fail("not_found", "scenario script not found")
-		var file := FileAccess.open(guarded.path, FileAccess.READ)
-		if file == null or file.get_length() > 1048576:
-			return _fail("invalid_param", "scenario script must be readable and at most 1 MiB")
-		var parser := JSON.new()
-		if parser.parse(file.get_as_text()) != OK:
-			return _fail(
-				"invalid_param", "scenario script must be declarative JSON, not executable source"
-			)
-		scenario = parser.data
+		var loaded := _read_scenario_file(String(payload.script_path))
+		if not loaded.ok:
+			return loaded
+		scenario = loaded.value
 	if (
 		typeof(scenario) != TYPE_DICTIONARY
 		or typeof(scenario.get("steps")) != TYPE_ARRAY
@@ -91,6 +81,23 @@ func _scenario(payload: Dictionary) -> Dictionary:
 			return guarded
 		scenario.scene_path = guarded.path
 	return {"ok": true, "scenario": scenario}
+
+
+func _read_scenario_file(path: String) -> Dictionary:
+	var guarded := _project_path(path, "json")
+	if not guarded.get("ok", false):
+		return guarded
+	if not FileAccess.file_exists(guarded.path):
+		return _fail("not_found", "scenario script not found")
+	var file := FileAccess.open(guarded.path, FileAccess.READ)
+	if file == null or file.get_length() > 1048576:
+		return _fail("invalid_param", "scenario script must be readable and at most 1 MiB")
+	var parser := JSON.new()
+	if parser.parse(file.get_as_text()) != OK:
+		return _fail(
+			"invalid_param", "scenario script must be declarative JSON, not executable source"
+		)
+	return {"ok": true, "value": parser.data}
 
 
 func _run(payload: Dictionary, stress: bool) -> Dictionary:
@@ -229,45 +236,56 @@ func _worker(
 
 
 func _step(op: String, data: Dictionary, deadline: int, epoch: int) -> Dictionary:
-	var tree := Engine.get_main_loop() as SceneTree
+	var result: Dictionary
 	match op:
 		"wait":
+			var tree := Engine.get_main_loop() as SceneTree
 			var until := mini(deadline, Time.get_ticks_msec() + int(data.get("duration_ms", 0)))
 			while Time.get_ticks_msec() < until and epoch == _epoch:
 				await tree.process_frame
-			if Time.get_ticks_msec() >= deadline or epoch != _epoch:
-				return _fail("timeout", "scenario wait timed out or was reset")
-			return {"ok": true, "result": {"waited": true}}
+			result = (
+				_fail("timeout", "scenario wait timed out or was reset")
+				if Time.get_ticks_msec() >= deadline or epoch != _epoch
+				else {"ok": true, "result": {"waited": true}}
+			)
 		"runtime/node/get":
-			return NodeOps.get_property(data)
+			result = NodeOps.get_property(data)
 		"runtime/node/set":
-			return NodeOps.set_property(data)
+			result = NodeOps.set_property(data)
 		"runtime/node/call":
-			return NodeOps.call_method(data)
+			result = NodeOps.call_method(data)
 		"runtime/signal/emit":
-			return NodeOps.signal_emit(data)
+			result = NodeOps.signal_emit(data)
 		"runtime/assert/signal_received":
-			return await _signal_assert(data, deadline, epoch)
+			result = await _signal_assert(data, deadline, epoch)
 		"runtime/assert/screen_text":
-			return await assert_screen_text(data)
+			result = await assert_screen_text(data)
 		"runtime/assert/node_exists", "runtime/assert/property_equals", "runtime/assert/condition":
-			while epoch == _epoch and Time.get_ticks_msec() < deadline:
-				var result: Dictionary
-				if op.ends_with("node_exists"):
-					result = NodeOps.info(data)
-				elif op.ends_with("property_equals"):
-					result = _property_check(data)
-				else:
-					result = Condition.evaluate(data.get("condition", {}))
-					if result.get("ok", false) and not result.get("value", false):
-						result = _fail("timeout", "condition not satisfied")
-				if result.get("ok", false):
-					return result
-				if result.get("code", "") not in ["timeout", "not_found", "assertion_failed"]:
-					return result
-				await tree.process_frame
-			return _fail("timeout", "scenario assertion timed out or was reset")
-	return InputOps._dispatch_child(op, data)
+			result = await _poll_assertion(op, data, deadline, epoch)
+		_:
+			result = InputOps._dispatch_child(op, data)
+	return result
+
+
+func _poll_assertion(op: String, data: Dictionary, deadline: int, epoch: int) -> Dictionary:
+	var tree := Engine.get_main_loop() as SceneTree
+	while epoch == _epoch and Time.get_ticks_msec() < deadline:
+		var result: Dictionary
+		if op.ends_with("node_exists"):
+			result = NodeOps.info(data)
+		elif op.ends_with("property_equals"):
+			result = _property_check(data)
+		else:
+			result = Condition.evaluate(data.get("condition", {}))
+			if result.get("ok", false) and not result.get("value", false):
+				result = _fail("timeout", "condition not satisfied")
+		if (
+			result.get("ok", false)
+			or result.get("code", "") not in ["timeout", "not_found", "assertion_failed"]
+		):
+			return result
+		await tree.process_frame
+	return _fail("timeout", "scenario assertion timed out or was reset")
 
 
 func _property_check(data: Dictionary) -> Dictionary:

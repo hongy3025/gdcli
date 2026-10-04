@@ -19,6 +19,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("Read a real EditorSettings setting")
 		. param("name", "String", true, "Setting name")
+		. example('{"name":"interface/editor/save_on_focus_loss"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

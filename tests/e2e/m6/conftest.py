@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -168,7 +168,7 @@ class _ServerRef:
 
 @pytest.fixture(scope="module")
 def local_http_server() -> _ServerRef:
-    server = HTTPServer(("127.0.0.1", M6_HTTP_PORT), _EchoHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", M6_HTTP_PORT), _EchoHandler)
     port: int = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -176,6 +176,7 @@ def local_http_server() -> _ServerRef:
         yield _ServerRef(port)
     finally:
         server.shutdown()
+        server.server_close()
 
 
 def latest_audit(env: dict[str, Any], route: str) -> dict[str, Any]:
@@ -224,8 +225,8 @@ def _wait_stopped(env: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def m6_runtime_eval_running(m6_editor_eval: dict[str, Any]) -> dict[str, Any]:
     project_run(m6_editor_eval)
-    _wait_for_game_running(m6_editor_eval)
     m6_editor_eval["game_attached"] = True
+    _wait_for_game_running(m6_editor_eval)
     try:
         yield m6_editor_eval
     finally:

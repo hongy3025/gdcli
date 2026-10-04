@@ -80,7 +80,7 @@ def test_script_references_preserve_locations_and_ignore_comment_string_code(m5_
     resource_refs = [item for item in refs if item["kind"] in {"load", "preload"}]
     assert [(item["kind"], item["target"], item["status"]) for item in resource_refs] == [
         ("preload", ROOT + "/data.tres", "resolved"),
-        ("load", ROOT + "/data.tres", "resolved"),
+        ("load", ROOT + "/base.gd", "resolved"),
         ("load", "", "unknown"),
     ]
     for item in resource_refs:

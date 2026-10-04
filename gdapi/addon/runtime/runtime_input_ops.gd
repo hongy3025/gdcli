@@ -38,6 +38,7 @@ static func key(payload: Dictionary) -> Dictionary:
 	event.keycode = keycode
 	event.pressed = pressed
 	Input.parse_input_event(event)
+	Input.flush_buffered_events()
 	return _success(
 		{
 			"event_type": "key",

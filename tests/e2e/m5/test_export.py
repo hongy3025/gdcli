@@ -29,36 +29,23 @@ def test_export_presets_lists_desktop_preset(m5_editor):
     assert by_name[PRESET_NAME]["platform"] == "Windows Desktop"
 
 
-def test_export_run_produces_matching_artifact_digest(m5_editor):
+
+def test_export_run_overwrites_previous_artifact(m5_editor):
+    """预先放置非 PCK 文件，真实导出必须覆盖它且摘要匹配落盘结果。"""
     output = _artifact(m5_editor)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    stale = b"stale export artifact"
+    output.write_bytes(stale)
+    payload = {"preset": PRESET_NAME, "path": "res://" + OUTPUT_RELATIVE}
     try:
-        result = exec_export(
-            m5_editor,
-            "export/run",
-            {"preset": PRESET_NAME, "path": "res://" + OUTPUT_RELATIVE},
-        )
+        result = exec_export(m5_editor, "export/run", payload)
         assert output.is_file(), result
         assert result["size"] == output.stat().st_size
         assert result["sha256"] == _sha256(output)
-    finally:
-        output.unlink(missing_ok=True)
-
-
-def test_export_run_overwrites_previous_artifact(m5_editor):
-    """同一路径重复导出必须成功覆盖，且响应摘要与落盘文件一致。
-
-    产物本身位于项目内，因此第二次导出会把它当作资源一起打包：
-    两次摘要不要求相同，只要求各自与当次落盘文件一致。
-    """
-    output = _artifact(m5_editor)
-    payload = {"preset": PRESET_NAME, "path": "res://" + OUTPUT_RELATIVE}
-    try:
-        exec_export(m5_editor, "export/run", payload)
-        assert output.is_file()
-        second = exec_export(m5_editor, "export/run", payload)
-        assert output.is_file()
-        assert second["size"] == output.stat().st_size
-        assert second["sha256"] == _sha256(output)
+        assert (result["size"], result["sha256"]) != (
+            len(stale),
+            hashlib.sha256(stale).hexdigest(),
+        )
     finally:
         output.unlink(missing_ok=True)
 

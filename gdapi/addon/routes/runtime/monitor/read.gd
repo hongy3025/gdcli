@@ -13,6 +13,7 @@ func doc() -> GdApiRouteDoc:
 		. param("monitor_id", "String", true, "Subscription id")
 		. param("after_cursor", "int", false, "Exclusive cursor; default 0")
 		. param("limit", "int", false, "1..500; default 100")
+		. example('{"monitor_id":"1"}')
 		. returns(
 			"Change page",
 			{

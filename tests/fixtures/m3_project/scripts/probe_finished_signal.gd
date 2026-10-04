@@ -2,8 +2,6 @@ extends Node
 
 ## ProbeFinishedSignal — 当 ProbeTarget.emit_finished 被调用时,触发一次已知事件。
 
-var _target: Node = null
-var _on_finished: Callable = Callable()
 var event_count: int = 0
 var temporary_finished_connections: int:
 	get:
@@ -18,6 +16,8 @@ var temporary_finished_connections: int:
 var runtime_wait_timer_count: int:
 	get:
 		return get_tree().get_nodes_in_group(&"gdapi_runtime_wait_timer").size()
+var _target: Node = null
+var _on_finished: Callable = Callable()
 
 
 func _ready() -> void:

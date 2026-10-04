@@ -32,6 +32,7 @@ func doc() -> GdApiRouteDoc:
 			"Metadata identifier; internal and gdapi_ mutation keys protected"
 		)
 		. param("value", "Variant", true, "Serializable typed VariantCodec value")
+		. example('{"node_path":"/root/Main/Target","key":"label","value":"example"}')
 		. returns(
 			"Operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

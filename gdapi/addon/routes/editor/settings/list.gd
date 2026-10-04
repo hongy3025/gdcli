@@ -19,6 +19,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("List real EditorSettings values")
 		. param("prefix", "String", false, "Setting-name prefix")
+		. example('{"prefix":"interface/editor/"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

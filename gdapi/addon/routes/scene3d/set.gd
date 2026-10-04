@@ -17,8 +17,10 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("scene3d/set")
 		. desc(
-			"Atomic staging validation, one UndoRedo action, resources embedded in saved scenes; "
-			+ "excludes physics/navigation."
+			(
+				"Atomic staging validation, one UndoRedo action, resources embedded in saved scenes; "
+				+ "excludes physics/navigation."
+			)
 		)
 		. mutates()
 		. param("node_path", "String", true, "Absolute edited-scene node path")
@@ -44,9 +46,12 @@ func doc() -> GdApiRouteDoc:
 			"multimesh",
 			"Dictionary",
 			false,
-			"MultiMeshInstance3D: {mesh,instances:[{transform:Transform3D,color:Color,"
-			+ "custom_data:Color}],visible_instance_count}"
+			(
+				"MultiMeshInstance3D: {mesh,instances:[{transform:Transform3D,color:Color,"
+				+ "custom_data:Color}],visible_instance_count}"
+			)
 		)
+		. example('{"node_path":"/root/Node3D/Camera3D","properties":{"current":true}}')
 		. returns(
 			"Configured state",
 			{

@@ -31,6 +31,7 @@ func doc() -> GdApiRouteDoc:
 			true,
 			"Metadata identifier; internal and gdapi_ mutation keys protected"
 		)
+		. example('{"node_path":"/root/Main/Target","key":"label"}')
 		. returns(
 			"Operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

@@ -35,7 +35,7 @@ func doc() -> GdApiRouteDoc:
 		. param("value", "Variant", true, "StyleBox 编码值")
 		. example(
 			(
-				'{"path":"res://themes/main.tres","type":"Button","item":"normal",'
+				'{"path":"res://resources/theme.tres","type":"Button","item":"normal",'
 				+ '"value":{"type":"Resource","value":"res://resources/box.tres"}}'
 			)
 		)

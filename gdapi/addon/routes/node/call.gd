@@ -27,6 +27,7 @@ func doc() -> GdApiRouteDoc:
 			"Safe native method, or @tool method explicitly declared in gdapi_callable_methods"
 		)
 		. param("args", "Array", false, "Typed VariantCodec arguments matching method signature")
+		. example('{"node_path":"/root/Main/Target","method":"get_position","args":[]}')
 		. returns(
 			"Operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

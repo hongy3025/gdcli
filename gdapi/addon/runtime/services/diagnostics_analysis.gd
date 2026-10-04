@@ -125,7 +125,7 @@ static func _statistics(files: Array, scope: Dictionary) -> Dictionary:
 			scripts += 1
 		if extension in ["tscn", "scn"]:
 			scenes += 1
-		var type := ResourceLoader.get_resource_type(path)
+		var type: String = EditorInterface.get_resource_filesystem().get_file_type(path)
 		if not type.is_empty():
 			resources += 1
 			types[type] = int(types.get(type, 0)) + 1
@@ -140,8 +140,10 @@ static func _statistics(files: Array, scope: Dictionary) -> Dictionary:
 		"extension_counts": extensions,
 		"scope": scope,
 		"count_semantics":
-		"ResourceLoader-recognized resources include scripts and scenes; "
-		+ "bytes include all selected source files, not import-cache outputs."
+		(
+			"ResourceLoader-recognized resources include scripts and scenes; "
+			+ "bytes include all selected source files, not import-cache outputs."
+		)
 	}
 
 
@@ -210,9 +212,11 @@ static func _complexity(files: Array, body: Dictionary, scope: Dictionary) -> Di
 		"total": items.size(),
 		"scope": scope,
 		"count_semantics":
-		"Expanded SceneState nodes (instances and inheritance), root depth 0; "
-		+ "scripts count attached nodes; resources are unique external and built-in resources, "
-		+ "including recursive scene dependencies; connections are serialized connections only."
+		(
+			"Expanded SceneState nodes (instances and inheritance), root depth 0; "
+			+ "scripts count attached nodes; resources are unique external and built-in resources, "
+			+ "including recursive scene dependencies; connections are serialized connections only."
+		)
 	}
 
 
@@ -299,7 +303,7 @@ static func _collect_resources(
 	value: Variant, scene: String, resources: Array, visited: Dictionary
 ) -> void:
 	if value is Resource:
-		var identity := value.get_instance_id()
+		var identity: int = value.get_instance_id()
 		if visited.has(identity):
 			return
 		visited[identity] = true
@@ -324,7 +328,12 @@ static func _collect_dependencies(path: String, resources: Array, visited: Dicti
 	if path.is_empty() or visited.has(path):
 		return
 	visited[path] = true
-	for dependency in ResourceLoader.get_dependencies(path):
+	var dependencies := ResourceLoader.get_dependencies(path)
+	if path.get_extension().to_lower() == "gd":
+		for reference in ScriptAnalysis.scan(path).references:
+			if reference.kind == "preload" and reference.status == "resolved":
+				dependencies.append(reference.target)
+	for dependency in dependencies:
 		var pieces := String(dependency).split("::")
 		var target := String(pieces[pieces.size() - 1])
 		if target.begins_with("uid://"):

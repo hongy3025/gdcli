@@ -64,6 +64,28 @@ def _fake_env(project: Path) -> dict[str, Any]:
     }
 
 
+def test_reset_skips_stop_when_game_is_known_detached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    env = _fake_env(project)
+    env["game_attached"] = False
+    calls: list[str] = []
+    monkeypatch.setattr(
+        shared_fixture, "gdcli_call",
+        lambda _env, route, _data=None: calls.append(route) or {"ok": True},
+    )
+    monkeypatch.setattr(shared_fixture, "wait_for_scene", lambda *_args: True)
+
+    shared_fixture.reset_shared_state(env, reason="detached")
+
+    assert "project/stop" not in calls
+    assert "scene/open" in calls
+    assert "editor/selection/set" in calls
+    assert "gdapi/audit/clear" in calls
+
+
 def test_reset_shared_state_reports_failing_phase(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
@@ -71,6 +93,7 @@ def test_reset_shared_state_reports_failing_phase(
     project = tmp_path / "project"
     project.mkdir()
     env = _fake_env(project)
+    env["game_attached"] = True
 
     def _fake_gdcli_call(_env, route, data=None):
         if route == "project/stop":
@@ -78,6 +101,7 @@ def test_reset_shared_state_reports_failing_phase(
         return {"ok": True}
 
     monkeypatch.setattr(shared_fixture, "gdcli_call", _fake_gdcli_call)
+    monkeypatch.setattr(shared_fixture, "wait_for_scene", lambda *_args: True)
 
     with pytest.raises(AssertionError) as exc_info:
         shared_fixture.reset_shared_state(env, reason="unit")
@@ -88,7 +112,7 @@ def test_reset_shared_state_reports_failing_phase(
 def test_build_environment_yields_one_process(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
-    """Two builds share the same Popen, PID, and metadata, and the start counter ticks once."""
+    """Build copies the unified project and starts exactly one shared process."""
     shared_fixture.EDITOR_START_COUNTER["starts"] = 0
     shared_fixture.EDITOR_START_COUNTER["pids"] = set()
     captured: dict[str, Any] = {}
@@ -118,12 +142,17 @@ def test_build_environment_yields_one_process(
         lambda _project: {"pid": captured["pid"], "ping": "ok"},
     )
     monkeypatch.setattr(shared_fixture, "wait_for_godot_ready", lambda _project: None)
+    monkeypatch.setattr(shared_fixture, "wait_for_scene", lambda *_args: True)
     monkeypatch.setattr(shared_fixture, "_gdcli_ping", lambda _env: True)
 
     env = shared_fixture.build_environment(tmp_path_factory)
     try:
         assert env["editor_pid"] == captured["pid"]
         assert env["meta"]["pid"] == captured["pid"]
+        project = Path(env["project"])
+        assert (project / "project.godot").is_file()
+        assert (project / "addons" / "gdapi_test" / "plugin.gd").is_file()
+        assert env["fixture_root"] is shared_fixture.E2E_FIXTURE_SOURCE
     finally:
         shared_fixture.teardown_environment(env, reset=False)  # mock 环境没有真实编辑器可重置
 
@@ -131,16 +160,6 @@ def test_build_environment_yields_one_process(
     assert shared_fixture.EDITOR_START_COUNTER["pids"] == {captured["pid"]}
 
 
-def test_build_editor_command_uses_headless_audio_driver(tmp_path: Path):
-    assert shared_fixture.build_editor_command("godot.exe", tmp_path) == [
-        "godot.exe",
-        "--editor",
-        "--headless",
-        "--audio-driver",
-        "Dummy",
-        "--path",
-        str(tmp_path),
-    ]
 
 
 def test_build_editor_environment_isolates_godot_user_data(tmp_path: Path):
@@ -152,44 +171,36 @@ def test_build_editor_environment_isolates_godot_user_data(tmp_path: Path):
     assert Path(environment["LOCALAPPDATA"]).is_dir()
 
 
-def test_build_environment_copies_unified_project(
-    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
+
+def test_start_editor_terminates_process_when_readiness_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """The fixture lays down a copy of tests/fixtures/e2e_project."""
-    shared_fixture.EDITOR_START_COUNTER["starts"] = 0
+    from e2e.timing import TIMINGS
 
-    captured_project: dict[str, Path] = {}
-
-    def _fake_start(env: dict[str, Any]) -> mock.MagicMock:
-        captured_project["path"] = env["project"]
-        process = mock.MagicMock(
-            pid=2,
-            poll=mock.Mock(return_value=None),
-            terminate=mock.Mock(),
-            wait=mock.Mock(return_value=0),
-            returncode=0,
-        )
-        env["godot"] = process
-        env["editor_pid"] = process.pid
-        env["meta"] = {"pid": process.pid}
-        return process
-
-    monkeypatch.setattr(shared_fixture, "_start_editor", _fake_start)
-    monkeypatch.setattr(
-        shared_fixture.subprocess, "run",
-        lambda cmd, *a, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
+    monkeypatch.setattr(TIMINGS, "enabled", False)
+    project = tmp_path / "project"
+    project.mkdir()
+    process = mock.MagicMock(
+        pid=4321,
+        poll=mock.Mock(return_value=None),
+        terminate=mock.Mock(),
+        wait=mock.Mock(return_value=0),
     )
-    monkeypatch.setattr(shared_fixture, "require_godot_47", lambda _b: (4, 7, 1))
-    monkeypatch.setattr(shared_fixture, "wait_for_metadata", lambda _p: {"pid": 2})
-    monkeypatch.setattr(shared_fixture, "wait_for_godot_ready", lambda _p: None)
-    monkeypatch.setattr(shared_fixture, "_gdcli_ping", lambda _e: True)
+    monkeypatch.setattr(shared_fixture, "build_editor_command", lambda *_: ["fake-godot"])
+    monkeypatch.setattr(shared_fixture, "build_editor_environment", lambda *_: {})
+    monkeypatch.setattr(shared_fixture.subprocess, "Popen", lambda *_, **__: process)
+    monkeypatch.setattr(shared_fixture, "wait_for_metadata", lambda _: {"pid": process.pid})
+    monkeypatch.setattr(shared_fixture, "_gdcli_ping", lambda _: True)
 
-    env = shared_fixture.build_environment(tmp_path_factory)
-    try:
-        project = captured_project["path"]
-        assert (project / "project.godot").is_file()
-        assert (project / "addons" / "gdapi_test" / "plugin.gd").is_file()
+    def fail_readiness(_: Path) -> None:
+        raise RuntimeError("editor readiness failed")
 
-        assert env["fixture_root"] is shared_fixture.E2E_FIXTURE_SOURCE
-    finally:
-        shared_fixture.teardown_environment(env, reset=False)  # mock 环境没有真实编辑器可重置
+    monkeypatch.setattr(shared_fixture, "wait_for_godot_ready", fail_readiness)
+    env = {"godot_bin": "fake-godot", "project": project}
+
+    with pytest.raises(RuntimeError, match="editor readiness failed"):
+        shared_fixture._start_editor(env)
+
+    process.terminate.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=10)
+    assert env["godot_log"].closed

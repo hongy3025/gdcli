@@ -21,9 +21,6 @@ def repository_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def gdscript_files(root: Path) -> list[Path]:
-    formatter = runpy.run_path(str(Path(__file__).with_name("format-gd.py")))
-    return formatter["gdscript_files"](root)
 
 
 def command_environment() -> dict[str, str]:
@@ -66,11 +63,12 @@ def main() -> int:
         return 127
 
     root = repository_root()
-    files = gdscript_files(root)
-    failures: list[Path] = []
-    for path in files:
+    formatter = runpy.run_path(str(Path(__file__).with_name("format-gd.py")))
+    files = formatter["gdscript_files"](root)
+    failed = False
+    for batch in formatter["batches"](files, root):
         result = subprocess.run(
-            [gdlint, str(path.relative_to(root))],
+            [gdlint, *(str(path.relative_to(root)) for path in batch)],
             cwd=root,
             check=False,
             text=True,
@@ -78,14 +76,12 @@ def main() -> int:
             env=command_environment(),
         )
         if result.returncode != 0:
-            failures.append(path)
+            failed = True
             sys.stderr.write(result.stdout)
             sys.stderr.write(result.stderr)
 
-    if failures:
-        print(f"gdlint failed for {len(failures)} of {len(files)} GDScript files:", file=sys.stderr)
-        for path in failures:
-            print(f"  {path.relative_to(root)}", file=sys.stderr)
+    if failed:
+        print(f"gdlint failed; see diagnostics above ({len(files)} files checked).", file=sys.stderr)
         return 1
 
     print(f"gdlint passed for {len(files)} GDScript files.")

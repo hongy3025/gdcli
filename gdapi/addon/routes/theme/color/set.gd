@@ -36,7 +36,7 @@ func doc() -> GdApiRouteDoc:
 		. param("value", "Variant", true, "Color 编码值")
 		. example(
 			(
-				'{"path":"res://themes/main.tres","type":"Button",'
+				'{"path":"res://resources/theme.tres","type":"Button",'
 				+ '"item":"font_color","value":{"type":"Color","value":[1.0,0.0,0.0]}}'
 			)
 		)

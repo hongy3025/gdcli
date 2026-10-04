@@ -21,8 +21,10 @@ func doc() -> GdApiRouteDoc:
 		. param("input_index", "int", true, "输入端口索引", "")
 		. param("output_node", "String", true, "提供输出的节点，拒绝悬空与循环", "")
 		. example(
-			'{"tree_path": "AnimationTree", "input_node": "output", '
-			+ '"input_index": 0, "output_node": "blend"}'
+			(
+				'{"tree_path": "AnimationTree", "input_node": "output", '
+				+ '"input_index": 0, "output_node": "blend"}'
+			)
 		)
 		. returns("result", {"undoable": "bool", "changed": "bool"})
 	)

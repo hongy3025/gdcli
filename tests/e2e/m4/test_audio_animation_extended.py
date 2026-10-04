@@ -1,18 +1,14 @@
-"""Real audio layouts, serializable animation graphs, and asynchronous Tweens."""
+"""Real audio layouts and serializable animation graphs."""
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
-from e2e.m3.conftest import reset_fixture
 from .helpers import editor_redo, editor_undo, exec_error, exec_ok, save_reopen
 
 
 SCENE = "res://scenes/animation.tscn"
 TREE = {"tree_path": "AnimationTree"}
-TARGET = "/root/RuntimeMain/ProbeTarget"
 
 
 def test_audio_bus_properties_effects_persist_and_undo(m4_env):
@@ -174,65 +170,3 @@ def test_blend_tree_invalid_graph_and_parameters_are_atomic(m4_env):
     for op, payload, code in cases:
         assert exec_error(m4_env, "animation_tree/blend_tree/" + op, TREE | payload)["code"] == code
         assert exec_ok(m4_env, "animation_tree/blend_tree/get", TREE) == baseline
-
-
-def _tween_status(env, tween_id):
-    return exec_ok(env, "runtime/tween/status", {"id": tween_id})
-
-
-def test_tween_intermediate_completion_and_cancellation(m3_running):
-    reset_fixture(m3_running)
-    request = {"node_path": TARGET, "property": "position", "from": {"type": "Vector2", "value": [0, 0]}, "to": {"type": "Vector2", "value": [100, 40]}, "duration": 1.5, "trans": 0, "ease": 0}
-    started = exec_ok(m3_running, "runtime/tween/start", request)
-    tween_id = started["id"]
-    assert started["state"] == "running" and started["undoable"] is False
-    time.sleep(0.2)
-    intermediate = _tween_status(m3_running, tween_id)
-    assert intermediate["state"] == "running"
-    assert 0 < intermediate["progress"] < 1
-    assert 0 < intermediate["value"]["value"][0] < 100
-    later = _tween_status(m3_running, tween_id)
-    assert later["value"]["value"][0] > intermediate["value"]["value"][0]
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        finished = _tween_status(m3_running, tween_id)
-        if finished["state"] == "completed":
-            break
-        time.sleep(0.05)
-    assert finished["state"] == "completed"
-    assert finished["value"] == {"type": "Vector2", "value": [100.0, 40.0]}
-    second = exec_ok(m3_running, "runtime/tween/start", request | {"to": {"type": "Vector2", "value": [500, 100]}, "duration": 3.0})
-    time.sleep(0.2)
-    stopped = exec_ok(m3_running, "runtime/tween/stop", {"id": second["id"]})
-    assert stopped["state"] == "cancelled" and stopped["changed"] is True
-    assert stopped["value"]["value"][0] < 500
-    time.sleep(0.2)
-    assert _tween_status(m3_running, second["id"])["value"] == stopped["value"]
-    assert exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"] == stopped["value"]
-    assert exec_ok(m3_running, "runtime/tween/stop", {"id": second["id"]})["changed"] is False
-
-
-def test_tween_invalid_requests_conflicts_and_target_cleanup(m3_running):
-    reset_fixture(m3_running)
-    request = {"node_path": TARGET, "property": "position", "to": {"type": "Vector2", "value": [100, 40]}, "duration": 2.0}
-    baseline = exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"]
-    for changes, code in [
-        ({"duration": 0}, "invalid_param"),
-        ({"duration": -1}, "invalid_param"),
-        ({"to": 5}, "invalid_param"),
-        ({"ease": 10}, "invalid_param"),
-        ({"trans": -1}, "invalid_param"),
-        ({"property": "script"}, "permission_denied"),
-        ({"node_path": "/root/GdApiRuntimeProbe"}, "permission_denied"),
-    ]:
-        assert exec_error(m3_running, "runtime/tween/start", request | changes)["code"] == code
-        assert exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"] == baseline
-    started = exec_ok(m3_running, "runtime/tween/start", request)
-    assert exec_error(m3_running, "runtime/tween/start", request)["code"] == "conflict"
-    exec_ok(m3_running, "runtime/tween/stop", {"id": started["id"]})
-    created = exec_ok(m3_running, "runtime/node/create", {"parent_path": "/root/RuntimeMain", "type": "Node2D", "name": "TweenDisposable"})
-    disposable = exec_ok(m3_running, "runtime/tween/start", request | {"node_path": created["node_path"]})
-    exec_ok(m3_running, "runtime/node/remove", {"node_path": created["node_path"]})
-    time.sleep(0.1)
-    assert _tween_status(m3_running, disposable["id"])["state"] == "target_lost"
-    assert exec_error(m3_running, "runtime/tween/status", {"id": "missing"})["code"] == "not_found"

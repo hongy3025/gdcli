@@ -12,10 +12,12 @@ func doc() -> GdApiRouteDoc:
 		. make("Replay real runtime input")
 		. mutates()
 		. desc(
-			"Injects validated events in timestamp order with original relative spacing "
-			+ "and at least one frame per event. Returns actual completed/cancelled/"
-			+ "timed_out/failed state. Reset cancels pending replay and clears recording; "
-			+ "export read items and pass events to replay after reset."
+			(
+				"Injects validated events in timestamp order with original relative spacing "
+				+ "and at least one frame per event. Returns actual completed/cancelled/"
+				+ "timed_out/failed state. Reset cancels pending replay and clears recording; "
+				+ "export read items and pass events to replay after reset."
+			)
 		)
 		. param(
 			"events",
@@ -24,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 			"At most 1000 ordered {at_ms,route,data}; omitted uses current recording"
 		)
 		. param("timeout_ms", "int", false, "Operation deadline 1..25000 ms; default 5000")
+		. example('{"events":[]}')
 		. returns(
 			"Replay completion",
 			{

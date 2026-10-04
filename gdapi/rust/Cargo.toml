@@ -12,6 +12,9 @@ name = "gdapi"
 godot = { version = "0.5.4", features = ["api-4-7"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "time"] }
 httparse = "1"
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects"] }
+
 
 [dev-dependencies]
 ureq = { version = "2", default-features = false }

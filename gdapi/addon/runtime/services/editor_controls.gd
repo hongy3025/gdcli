@@ -129,8 +129,9 @@ static func _collect_docks(node: Node, docks: Array) -> void:
 
 
 static func _find_dock(node: Node, dock_name: String) -> Node:
-	if node.is_class("EditorDock") and (
-		str(node.name) == dock_name or str(node.get("title")) == dock_name
+	if (
+		node.is_class("EditorDock")
+		and (str(node.name) == dock_name or str(node.get("title")) == dock_name)
 	):
 		return node
 	for index in node.get_child_count():
@@ -448,7 +449,9 @@ static func _camera(operation: String, payload: Dictionary) -> Dictionary:
 			):
 				return _error(ErrorCodes.INVALID_PARAM, "transform must be finite and invertible")
 			var previous: Variant = (
-				viewport.global_canvas_transform if selected.dimension == "2d" else camera.global_transform
+				viewport.global_canvas_transform
+				if selected.dimension == "2d"
+				else camera.global_transform
 			)
 			var entry := {
 				"viewport": weakref(viewport),
@@ -514,7 +517,7 @@ static func screenshot(payload: Dictionary) -> Dictionary:
 		)
 	EditorInterface.set_main_screen_editor("2D" if selected.dimension == "2d" else "3D")
 	await (Engine.get_main_loop() as SceneTree).process_frame
-	await RenderingServer.frame_post_draw
+	RenderingServer.force_draw(false)
 	var viewport: SubViewport = selected.viewport
 	var image := viewport.get_texture().get_image()
 	if image == null or image.is_empty():

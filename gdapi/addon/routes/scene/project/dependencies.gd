@@ -20,5 +20,6 @@ func doc() -> GdApiRouteDoc:
 		. desc("离线递归扫描 .tscn/.scn，不依赖当前编辑场景；排除生成及 PathGuard 保护根。返回实际场景路径和匹配上下文。")
 		. param("root", "String", false, "递归扫描根", "res://")
 		. param("scenes", "Array[String]", false, "显式场景列表，替代 root")
+		. example('{"root":"res://"}')
 		. returns("扫描结果", {"items": "Array[Dictionary]", "warnings": "Array[String]"})
 	)

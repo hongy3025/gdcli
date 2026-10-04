@@ -32,8 +32,8 @@ def run_domain(env: dict[str, Any], domain: str) -> None:
     """Start a fixed M4 scene and wait for its runtime broker connection."""
     scene_path = DOMAIN_SCENES[domain]
     exec_ok(env, "project/run", {"scene_path": scene_path})
-    wait_for_connected(env, timeout=60.0)
     env["game_attached"] = True
+    wait_for_connected(env, timeout=60.0)
     time.sleep(0.1)
 
 

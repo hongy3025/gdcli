@@ -12,12 +12,14 @@ func doc() -> GdApiRouteDoc:
 		. make("Run runtime scene QA")
 		. mutates()
 		. desc(
-			"Runs a declarative scenario in the game process. A scene_path loads a real "
-			+ "PackedScene in an isolated branch, cleaned after completion. "
-			+ "Use $scene paths in steps. script_path accepts project-local JSON test scripts "
-			+ "only; never eval or executable source. Controlled operations retain existing "
-			+ "node method/property allowlists. Assertion failures and deadlines "
-			+ "are preserved in a saved report."
+			(
+				"Runs a declarative scenario in the game process. A scene_path loads a real "
+				+ "PackedScene in an isolated branch, cleaned after completion. "
+				+ "Use $scene paths in steps. script_path accepts project-local JSON test scripts "
+				+ "only; never eval or executable source. Controlled operations retain existing "
+				+ "node method/property allowlists. Assertion failures and deadlines "
+				+ "are preserved in a saved report."
+			)
 		)
 		. param("scenario", "Dictionary", false, "{scene_path?, steps:[{op,data}]} up to 100 steps")
 		. param(
@@ -27,6 +29,7 @@ func doc() -> GdApiRouteDoc:
 			"Project-local .json scenario outside addons/.godot; alternative to scenario"
 		)
 		. param("timeout_ms", "int", false, "1..25000 ms total deadline")
+		. example('{"scenario":{"steps":[]}}')
 		. returns(
 			"QA report",
 			{

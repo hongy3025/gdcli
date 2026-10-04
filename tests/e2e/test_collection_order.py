@@ -34,7 +34,6 @@ def test_classify_puts_contract_tests_in_bucket_0() -> None:
     assert _classify("tests/e2e/test_shared_editor_contract.py") == 0
     assert _classify("tests/e2e/test_collection_order.py") == 0
 
-
 def test_classify_puts_slow_paths_in_bucket_4() -> None:
     for rel in [
         "tests/e2e/m5/test_export.py",
@@ -56,6 +55,8 @@ def test_classify_puts_m3_runtime_in_bucket_3() -> None:
         "tests/e2e/m3/test_runtime_observability.py",
         "tests/e2e/m3/test_runtime_extensions.py",
         "tests/e2e/m3/test_engine_transport.py",
+        "tests/e2e/m3/test_audit_concurrency.py",
+        "tests/e2e/m3/test_runtime_status.py",
     ]:
         assert _classify(rel) == 3, rel
 
@@ -64,7 +65,7 @@ def test_classify_defaults_to_bucket_2_for_m2_m4_m3_contract() -> None:
     for rel in [
         "tests/e2e/m2/test_m2_contract.py",
         "tests/e2e/m4/test_m4_contract.py",
-        "tests/e2e/m3/test_runtime_status.py",
+        "tests/e2e/m3/test_m3_contract.py",
         "tests/e2e/m5/test_m5_smoke.py",
     ]:
         assert _classify(rel) == 2, rel
@@ -77,6 +78,7 @@ def test_bucketize_preserves_relative_order_within_buckets() -> None:
         "tests/e2e/test_unified_fixture_contract.py",  # bucket 0
         "tests/e2e/m3/test_runtime_input.py",  # bucket 3
         "tests/e2e/m4/test_m4_contract.py",  # bucket 2
+        "tests/e2e/m3/test_runtime_status.py",  # bucket 3
     )
     reordered = bucketize(items)
     file_names = [item.fspath.name for item in reordered]
@@ -85,6 +87,7 @@ def test_bucketize_preserves_relative_order_within_buckets() -> None:
         "test_m2_contract.py",                # bucket 2
         "test_m4_contract.py",                # bucket 2
         "test_runtime_input.py",              # bucket 3
+        "test_runtime_status.py",             # bucket 3
         "test_export.py",                     # bucket 4
     ]
 

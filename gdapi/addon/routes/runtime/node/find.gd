@@ -21,7 +21,7 @@ func doc() -> GdApiRouteDoc:
 		. returns(
 			"查找结果",
 			{
-				"nodes": "Array, 每项含 path/type/name",
+				"nodes": "Array, 每项含 path/node_path/type/name",
 				"total": "int",
 			}
 		)

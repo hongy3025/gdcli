@@ -21,6 +21,7 @@ func doc() -> GdApiRouteDoc:
 		. mutates()
 		. param("name", "String", true, "Dock name")
 		. param("visible", "bool", true, "Open and focus, or close")
+		. example('{"name":"Inspector","visible":true}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

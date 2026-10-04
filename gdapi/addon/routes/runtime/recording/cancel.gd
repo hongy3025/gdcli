@@ -12,8 +12,10 @@ func doc() -> GdApiRouteDoc:
 		. make("Cancel active input replay")
 		. mutates()
 		. desc(
-			"Cancellation is observed on the next process frame; "
-			+ "the pending replay request completes once with its actual injected event count."
+			(
+				"Cancellation is observed on the next process frame; "
+				+ "the pending replay request completes once with its actual injected event count."
+			)
 		)
 		. returns("Cancellation", {"replay": "Dictionary", "changed": "bool", "undoable": "bool"})
 	)

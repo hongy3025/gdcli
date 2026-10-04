@@ -11,8 +11,10 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("Observe running GPU particles")
 		. desc(
-			"Reads actual game-process GPUParticles2D/3D state, material and draw resources; "
-			+ "requires an attached running game."
+			(
+				"Reads actual game-process GPUParticles2D/3D state, material and draw resources; "
+				+ "requires an attached running game."
+			)
 		)
 		. param("node_path", "String", true, "Absolute running scene path")
 		. example('{"node_path":"/root/RuntimeMain/Particles3D"}')

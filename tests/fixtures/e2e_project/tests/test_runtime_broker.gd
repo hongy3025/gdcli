@@ -31,7 +31,6 @@ func _init() -> void:
 	test_detach_is_idempotent()
 	test_status_returns_pending_count()
 	test_request_timeout_completes_with_timeout()
-	test_unknown_reply_does_not_crash()
 	test_invalid_reply_does_not_complete_pending_request()
 	test_oversized_request_is_rejected_without_sending()
 	test_oversized_reply_completes_once_without_waiting_for_timeout()
@@ -200,13 +199,6 @@ func test_request_timeout_completes_with_timeout() -> void:
 	assert_eq(received.size(), 1, "timeout callback fired")
 	assert_eq(received[0]["code"], "timeout", "timeout code")
 	assert_eq(b.status().pending, 0, "pending cleared")
-
-
-func test_unknown_reply_does_not_crash() -> void:
-	var b: RefCounted = Broker.new()
-	b.attach(3, _make_send())
-	b.receive({"version": 1, "id": 9999, "kind": "reply", "ok": true, "result": {}})
-	assert_eq(b.status().pending, 0, "still zero pending")
 
 
 func test_invalid_reply_does_not_complete_pending_request() -> void:

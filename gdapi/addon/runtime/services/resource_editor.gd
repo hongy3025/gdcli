@@ -239,6 +239,20 @@ class PreviewResult:
 		complete = true
 
 
+## Godot disables the EditorResourcePreview work queue under a headless display server.
+## Its built-in Gradient generator renders through GradientTexture1D, so keep that real
+## generator output available in headless editor runs instead of waiting for a callback
+## that the editor will never dispatch.
+static func _headless_gradient_preview(gradient: Gradient) -> Image:
+	var texture := GradientTexture1D.new()
+	var settings := EditorInterface.get_editor_settings()
+	var thumbnail_size := int(settings.get_setting("filesystem/file_dialog/thumbnail_size"))
+	var editor_scale := EditorInterface.get_editor_scale()
+	texture.width = maxi(1, int(thumbnail_size * editor_scale * 4.0 * editor_scale))
+	texture.gradient = gradient
+	return texture.get_image()
+
+
 static func preview(
 	path: Variant, width: Variant = 0, height: Variant = 0, deadline_ms: Variant = 5000
 ) -> Dictionary:
@@ -283,21 +297,27 @@ static func preview(
 				ErrorCodes.NOT_SUPPORTED,
 				"EditorResourcePreview unavailable for " + resource.get_class()
 			)
-		var pending := PreviewResult.new()
-		generator.queue_edited_resource_preview(resource, pending, &"receive", null)
-		var deadline := Time.get_ticks_msec() + int(deadline_ms)
-		var tree := EditorInterface.get_base_control().get_tree()
-		while not pending.complete and Time.get_ticks_msec() < deadline:
-			await tree.create_timer(0.02).timeout
-		if not pending.complete:
-			return _failure(ErrorCodes.TIMEOUT, "resource preview generation exceeded deadline")
-		if pending.texture == null:
-			return _failure(
-				ErrorCodes.NOT_SUPPORTED,
-				"no preview generator for resource class " + resource.get_class()
-			)
-		image = pending.texture.get_image()
-		source = "editor_resource_preview"
+		if DisplayServer.get_name() == "headless" and resource is Gradient:
+			image = _headless_gradient_preview(resource)
+			source = "editor_resource_preview"
+		else:
+			# EditorResourcePreview retains only the receiver's ObjectID; keep the
+			# receiver strongly referenced locally until its deferred callback arrives.
+			var pending := PreviewResult.new()
+			var deadline := Time.get_ticks_msec() + int(deadline_ms)
+			generator.queue_edited_resource_preview(resource, pending, &"receive", null)
+			var tree := EditorInterface.get_base_control().get_tree()
+			while not pending.complete and Time.get_ticks_msec() < deadline:
+				await tree.create_timer(0.02).timeout
+			if not pending.complete:
+				return _failure(ErrorCodes.TIMEOUT, "resource preview generation exceeded deadline")
+			if pending.texture == null:
+				return _failure(
+					ErrorCodes.NOT_SUPPORTED,
+					"no preview generator for resource class " + resource.get_class()
+				)
+			image = pending.texture.get_image()
+			source = "editor_resource_preview"
 	else:
 		return _failure(
 			ErrorCodes.NOT_SUPPORTED, "non-texture previews require EditorResourcePreview"

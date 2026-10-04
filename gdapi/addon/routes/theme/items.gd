@@ -25,5 +25,6 @@ func doc() -> GdApiRouteDoc:
 		. param("path", "String", true, "项目内 .tres Theme 路径")
 		. param("data_type", "String", false, "空值列举全部域", "")
 		. param("type", "String", false, "空值列举全部已定义类型", "")
+		. example('{"path":"res://resources/theme.tres"}')
 		. returns("result", {"items": "Array<Dictionary>", "types": "Array<String>"})
 	)

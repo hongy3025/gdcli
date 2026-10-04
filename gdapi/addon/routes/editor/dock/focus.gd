@@ -22,6 +22,7 @@ func doc() -> GdApiRouteDoc:
 		. param("name", "String", true, "Dock name")
 		. param("path", "String", false, "Script or FileSystem target path")
 		. param("line", "int", false, "One-based script line")
+		. example('{"name":"Inspector"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

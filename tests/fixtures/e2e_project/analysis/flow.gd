@@ -1,5 +1,5 @@
-extends "res://analysis/base.gd"
 class_name AnalysisFixtureFlow
+extends "res://analysis/base.gd"
 
 signal pulse(value: int)
 const DATA = preload("res://analysis/data.tres")
@@ -10,7 +10,7 @@ emit_signal("fake_signal")"""
 
 
 func exercise(dynamic_path: String, dynamic_signal: String, dynamic_callable: Callable) -> void:
-	var loaded = load("res://analysis/data.tres")
+	var loaded = load("res://analysis/base.gd")
 	var computed = load(dynamic_path)
 	pulse.connect(_on_pulse)
 	pulse.connect(dynamic_callable)

@@ -662,11 +662,13 @@ static func _walk_find(
 		and (type_filter == "" or node.is_class(type_filter))
 		and (group == "" or node.is_in_group(group))
 	):
+		var node_path := String(node.get_path())
 		(
 			out
 			. append(
 				{
-					"path": String(node.get_path()),
+					"path": node_path,
+					"node_path": node_path,
 					"type": node.get_class(),
 					"name": String(node.name),
 				}

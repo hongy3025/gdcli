@@ -74,8 +74,7 @@ static func apply(body: Dictionary) -> Dictionary:
 		if failures.is_empty():
 			_cleanup(stage)
 		return _transaction_error("cannot finalize recovery manifest", failures)
-	if Engine.is_editor_hint():
-		EditorInterface.get_resource_filesystem().scan()
+	_schedule_filesystem_refresh(entries)
 	return {
 		"ok": true,
 		"changed": true,
@@ -177,8 +176,7 @@ static func recover(body: Dictionary) -> Dictionary:
 	parsed.state = "recovered"
 	if not _write_manifest(stage, parsed):
 		return _transaction_error("cannot finalize recovery", _rollback(restores, restores.size()))
-	if Engine.is_editor_hint():
-		EditorInterface.get_resource_filesystem().scan()
+	_schedule_filesystem_refresh(restores)
 	return {
 		"ok": true,
 		"changed": true,
@@ -364,7 +362,7 @@ static func _build(body: Dictionary, stage: String = "") -> Dictionary:
 					failure = target_dependencies
 					break
 				deps.items.append_array(target_dependencies.items)
-				var changed := _fingerprint(previous) != _fingerprint(target)
+				var changed: bool = _fingerprint(previous) != _fingerprint(target)
 				var operation := {
 					"scene": path,
 					"node_path": node_path,
@@ -391,7 +389,7 @@ static func _build(body: Dictionary, stage: String = "") -> Dictionary:
 					ancestor = ancestor.get_parent()
 				node.set(property, target)
 				var stored: Variant = node.get(property)
-				var rejected := _fingerprint(stored) != _fingerprint(target)
+				var rejected: bool = _fingerprint(stored) != _fingerprint(target)
 				if typeof(stored) == TYPE_FLOAT and typeof(target) == TYPE_FLOAT:
 					rejected = not is_equal_approx(stored, target)
 				if rejected:
@@ -671,6 +669,29 @@ static func _load_scene(path: String) -> Dictionary:
 	return {"ok": true, "root": root, "scene": resource}
 
 
+static func _refresh_scene_cache(entries: Array) -> Dictionary:
+	if not Engine.is_editor_hint():
+		return {"ok": true}
+	for entry in entries:
+		var resource := ResourceLoader.load(
+			entry.path, "PackedScene", ResourceLoader.CACHE_MODE_REPLACE
+		)
+		if not resource is PackedScene or not resource.can_instantiate():
+			return _error(
+				ErrorCodes.GODOT_ERROR, "cannot refresh editor scene cache: " + entry.path
+			)
+	return {"ok": true}
+
+
+static func _schedule_filesystem_refresh(entries: Array) -> void:
+	if not Engine.is_editor_hint():
+		return
+	var file_system := EditorInterface.get_resource_filesystem()
+	for entry in entries:
+		file_system.update_file(entry.path)
+	file_system.scan()
+
+
 static func _nodes(root: Node) -> Array:
 	var nodes: Array = [root]
 	for child in root.get_children():
@@ -765,6 +786,15 @@ static func _commit(entries: Array, fail_after: int) -> Dictionary:
 		if not readback.ok:
 			return _transaction_error("scene write reload failed", _rollback(entries, moved))
 		readback.root.free()
+	var refreshed := _refresh_scene_cache(entries)
+	if not refreshed.ok:
+		var failures := _rollback(entries, moved)
+		var restored := _refresh_scene_cache(entries)
+		if not restored.ok:
+			failures.append("editor resource cache")
+		var result := _transaction_error("scene cache refresh failed", failures)
+		result.details.cache_error = refreshed.error
+		return result
 	return {"ok": true}
 
 

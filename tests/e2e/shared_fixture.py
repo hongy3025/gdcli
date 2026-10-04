@@ -205,15 +205,13 @@ def _copy_native_library(env: dict[str, Any]) -> None:
 
 
 def build_editor_command(godot_bin: str, project: Path) -> list[str]:
-    return [
-        godot_bin,
-        "--editor",
-        "--headless",
-        "--audio-driver",
-        "Dummy",
-        "--path",
-        str(project),
-    ]
+    command = [godot_bin, "--editor"]
+    if os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless") == "gui":
+        command.extend(["--rendering-method", "gl_compatibility"])
+    else:
+        command.append("--headless")
+    command.extend(["--audio-driver", "Dummy", "--path", str(project)])
+    return command
 
 
 def build_editor_environment(project: Path) -> dict[str, str]:
@@ -285,7 +283,18 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
 
     from .timing import TIMINGS
     TIMINGS.record("editor_ping", time.monotonic() - started)
-    wait_for_godot_ready(env["project"])
+    try:
+        wait_for_godot_ready(env["project"])
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
+        log_handle.close()
+        raise
     env["meta"] = meta
     return process
 
@@ -476,16 +485,23 @@ def reset_shared_state(env: dict[str, Any], *, reason: str) -> None:
     project = env["project"]
     failures: list[str] = []
 
-    def _run(phase: str, route: str, data: dict | None = None) -> None:
+    def _run(phase: str, route: str, data: dict | None = None) -> bool:
         try:
             gdcli_call(env, route, data)
+            return True
         except BaseException as exc:
             failures.append(
                 f"[{phase}] {route}: {exc}\n"
                 f"godot log tail:\n{_read_log_tail(env.get('godot_log_path', project / '.godot' / 'godot.log'))}"
             )
+            return False
 
-    _run("project/stop", "project/stop", None)
+    # M2/M4/M5 only run the game through lifecycle helpers that maintain this
+    # flag. Avoid an unnecessary stop RPC when those helpers prove it detached;
+    # environments without the flag retain the conservative stop behavior.
+    if env.get("game_attached") is not False:
+        if _run("project/stop", "project/stop", None):
+            env["game_attached"] = False
     # Close and re-open the M2 baseline scene so signal connections and
     # other in-memory mutations from a previous test do not survive.
     try:
@@ -650,7 +666,7 @@ def e2e_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
 # (file path substring, test function name) → bucket index
 _BUCKET_RULES: tuple[tuple[str, str | None, int], ...] = (
-    # Bucket 0: contract / lifecycle / lightweight (no editor needed)
+    # Bucket 0: repository/fixture lifecycle checks that run first
     ("test_unified_fixture_contract.py", None, 0),
     ("test_shared_editor_lifecycle.py", None, 0),
     ("test_shared_editor_contract.py", None, 0),
@@ -662,6 +678,7 @@ _BUCKET_RULES: tuple[tuple[str, str | None, int], ...] = (
     ("m6/test_network_request.py", None, 4),
     ("m6/test_runtime_eval.py", None, 4),
     ("m6/test_eval.py", None, 4),
+    ("m3/test_audit_concurrency.py", None, 3),
     # Bucket 3: m3 runtime tests that need m3_running
     ("m3/test_runtime_input.py", None, 3),
     ("m3/test_runtime_nodes.py", None, 3),
@@ -670,6 +687,7 @@ _BUCKET_RULES: tuple[tuple[str, str | None, int], ...] = (
     ("m3/test_runtime_observability.py", None, 3),
     ("m3/test_runtime_extensions.py", None, 3),
     ("m3/test_engine_transport.py", None, 3),
+    ("m3/test_runtime_status.py", None, 3),
     # Bucket 2: m2 / m4 / m3 contract / m5 lightweight (default fallback)
 )
 
@@ -717,14 +735,9 @@ def m3_editor(e2e_editor) -> dict[str, Any]:
     return e2e_editor
 
 
-@pytest.fixture(scope="module")
-def m3_running(m3_editor, m3_lifecycle) -> Any:
-    """Own one shared data-plane game for all fixture-state E2E tests.
-
-    The first request triggers the lifecycle scenario, which exercises
-    the runtime broker twice. Subsequent requests reuse the already-
-    attached game.
-    """
+@pytest.fixture(scope="package")
+def m3_running(m3_editor) -> Any:
+    """Share one runtime game across M3 data-plane modules."""
     from e2e.m3.conftest import attach_game, detach_game
     if not m3_editor.get("game_attached"):
         attach_game(m3_editor)
@@ -735,7 +748,7 @@ def m3_running(m3_editor, m3_lifecycle) -> Any:
             detach_game(m3_editor)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def m3_lifecycle(e2e_editor) -> dict[str, Any]:
     """Run the single status lifecycle scenario: initial stopped, then run/stop twice.
 
@@ -748,6 +761,8 @@ def m3_lifecycle(e2e_editor) -> dict[str, Any]:
         wait_for_connected, wait_for_editor_playing, detach_game, reset_fixture,
     )
 
+    if e2e_editor.get("game_attached"):
+        detach_game(e2e_editor)
     initial = exec_ok(e2e_editor, "runtime/status")
     cycles: list[dict[str, Any]] = []
     scenario_error: BaseException | None = None

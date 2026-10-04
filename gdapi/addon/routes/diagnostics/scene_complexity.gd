@@ -35,8 +35,10 @@ func doc() -> GdApiRouteDoc:
 			"真实节点/类型/资源/连接指标及阈值结果",
 			{
 				"items":
-				"Array: node_count/max_depth/type_counts/script_count/"
-				+ "resource_references/connection_count/exceeded/within_thresholds",
+				(
+					"Array: node_count/max_depth/type_counts/script_count/"
+					+ "resource_references/connection_count/exceeded/within_thresholds"
+				),
 				"total": "int",
 				"scope": "Dictionary",
 				"count_semantics": "String"

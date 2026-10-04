@@ -23,14 +23,17 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("生成资源 PNG 预览")
 		. desc(
-			"Texture2D 直接读取真实 Image；其他资源由 EditorResourcePreview 生成，"
-			+ "超时/无生成器返回明确错误。最近邻缩放；"
-			+ "双尺寸为零时最长边不超过 256，单尺寸保留比例。"
+			(
+				"Texture2D 直接读取真实 Image；其他资源由 EditorResourcePreview 生成，"
+				+ "超时/无生成器返回明确错误。最近邻缩放；"
+				+ "双尺寸为零时最长边不超过 256，单尺寸保留比例。"
+			)
 		)
 		. param("path", "String", true, "res:// 或 user:// 资源路径")
 		. param("width", "int", false, "输出宽度，0 自动；上限 4096", 0)
 		. param("height", "int", false, "输出高度，0 自动；上限 4096", 0)
 		. param("deadline_ms", "int", false, "编辑器预览生成期限 1-30000ms", 5000)
+		. example('{"path":"res://resources/tile.svg"}')
 		. returns(
 			"result",
 			{

@@ -117,60 +117,41 @@ func _append_sample(monitor: Dictionary, fields: Dictionary) -> void:
 
 
 func dispatch(op: String, payload: Dictionary) -> Dictionary:
+	var result: Dictionary
 	match op:
 		"runtime/recording/start":
-			if _recording.get("status", "") == "recording":
-				return _fail("conflict", "recording is already active")
-			var cap: Variant = payload.get("max_events", 100)
-			if not _integer(cap, 1, MAX_EVENTS):
-				return _fail("invalid_param", "max_events must be 1..1000")
-			_serial += 1
-			_recording = {
-				"recording_id": str(_serial),
-				"status": "recording",
-				"started_ms": Time.get_ticks_msec(),
-				"started_frame": Engine.get_process_frames(),
-				"max_events": int(cap),
-				"events": []
-			}
-			return _ok(
-				{
-					"recording_id": _recording.recording_id,
-					"status": _recording.status,
-					"changed": true
-				}
-			)
+			result = _start_recording(payload)
 		"runtime/recording/stop":
 			if _recording.is_empty():
 				return _fail("not_found", "recording not found")
 			var changed: bool = _recording.status == "recording"
 			if changed:
 				_recording.status = "stopped"
-			return _ok(
+			result = _ok(
 				{
 					"recording_id": _recording.recording_id,
 					"status": _recording.status,
 					"count": _recording.events.size(),
-					"changed": changed
+					"changed": changed,
 				}
 			)
 		"runtime/recording/read":
 			if _recording.is_empty():
 				return _fail("not_found", "recording not found")
-			return _page(
+			result = _page(
 				_recording.events,
 				payload,
 				{"recording_id": _recording.recording_id, "status": _recording.status}
 			)
 		"runtime/recording/replay":
-			return await _play(payload)
+			result = await _play(payload)
 		"runtime/recording/cancel":
 			var changed: bool = _replay.get("status", "") == "running"
 			if changed:
 				_replay.status = "cancelled"
-			return _ok({"changed": changed, "replay": _replay.duplicate(true)})
+			result = _ok({"changed": changed, "replay": _replay.duplicate(true)})
 		"runtime/monitor/start":
-			return _start_monitor(payload)
+			result = _start_monitor(payload)
 		"runtime/monitor/read", "runtime/monitor/stop":
 			var id := String(payload.get("monitor_id", ""))
 			if not _monitors.has(id):
@@ -180,13 +161,40 @@ func dispatch(op: String, payload: Dictionary) -> Dictionary:
 				var changed: bool = monitor.status == "running"
 				if changed:
 					monitor.status = "stopped"
-				return _ok({"monitor_id": id, "status": monitor.status, "changed": changed})
-			return _page(
-				monitor.samples,
-				payload,
-				{"monitor_id": id, "status": monitor.status, "cursor": monitor.cursor}
-			)
-	return _fail("invalid_param", "unknown session operation")
+				result = _ok({"monitor_id": id, "status": monitor.status, "changed": changed})
+			else:
+				result = _page(
+					monitor.samples,
+					payload,
+					{"monitor_id": id, "status": monitor.status, "cursor": monitor.cursor}
+				)
+		_:
+			result = _fail("invalid_param", "unknown session operation")
+	return result
+
+
+func _start_recording(payload: Dictionary) -> Dictionary:
+	if _recording.get("status", "") == "recording":
+		return _fail("conflict", "recording is already active")
+	var cap: Variant = payload.get("max_events", 100)
+	if not _integer(cap, 1, MAX_EVENTS):
+		return _fail("invalid_param", "max_events must be 1..1000")
+	_serial += 1
+	_recording = {
+		"recording_id": str(_serial),
+		"status": "recording",
+		"started_ms": Time.get_ticks_msec(),
+		"started_frame": Engine.get_process_frames(),
+		"max_events": int(cap),
+		"events": [],
+	}
+	return _ok(
+		{
+			"recording_id": _recording.recording_id,
+			"status": _recording.status,
+			"changed": true,
+		}
+	)
 
 
 func _start_monitor(payload: Dictionary) -> Dictionary:

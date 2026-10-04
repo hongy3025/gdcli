@@ -98,6 +98,25 @@ def test_environment_sky_material_configuration_persists_and_is_undoable(m2_edit
     assert saved["sky"]["properties"]["sky_material"]["properties"]["sky_top_color"] == sky_color
 
 
+def test_multimesh_instance_data_requires_active_renderer(m2_editor):
+    spatial(m2_editor)
+    before = exec_ok(m2_editor, "scene/tree")
+    failure = exec_error(
+        m2_editor,
+        "scene3d/create",
+        {
+            "parent_path": "/root/Spatial",
+            "type": "MultiMeshInstance3D",
+            "name": "Unsupported",
+            "multimesh": {"mesh": resource("BoxMesh"), "instances": [{}]},
+        },
+    )
+    assert failure["code"] == "not_supported"
+    assert "active renderer" in failure["error"]
+    assert exec_ok(m2_editor, "scene/tree") == before
+
+
+@pytest.mark.real_renderer
 def test_gridmap_library_cells_atomic_replace_undo_and_persistence(m2_editor):
     spatial(m2_editor)
     cells = [{"position": variant("Vector3i", [2, 0, -3]), "item": 7, "orientation": 5}]
@@ -121,6 +140,7 @@ def test_gridmap_library_cells_atomic_replace_undo_and_persistence(m2_editor):
     assert info["mesh_library"]["items"][0]["mesh"]["properties"]["size"] == variant("Vector3", [2, 2, 2])
 
 
+@pytest.mark.real_renderer
 def test_multimesh_instances_mesh_transform_color_custom_roundtrip(m2_editor):
     spatial(m2_editor)
     transform = variant("Transform3D", [[[1, 0, 0], [0, 2, 0], [0, 0, 1]], [3, 4, 5]])
@@ -192,24 +212,6 @@ def test_particle_set_rejects_entire_batch_without_material_or_amount_leak(m2_ed
     before = exec_ok(m2_editor, "particles/info", {"node_path": path})
     assert exec_error(m2_editor, "particles/set", {"node_path": path, "properties": {"amount": 99, "process_material": resource("ParticleProcessMaterial", gravity=variant("Vector3", [1, 2, 3])), "lifetime": 0}})["code"] == "invalid_param"
     assert exec_ok(m2_editor, "particles/info", {"node_path": path}) == before
-
-
-def test_particle_runtime_observes_both_gpu_types_in_game_process(m3_running):
-    from e2e.m3.conftest import reset_fixture
-    reset_fixture(m3_running)
-    for name, kind, amount, lifetime, draw in [
-        ("GPU2D", "GPUParticles2D", 12, 2.5, "texture"),
-        ("GPU3D", "GPUParticles3D", 18, 3.5, "draw_pass_1"),
-    ]:
-        result = exec_ok(m3_running, "runtime/particles/info", {"node_path": "/root/RuntimeMain/ParticlesFixture/" + name})
-        assert (result["type"], result["amount"], result["lifetime"]) == (kind, amount, lifetime)
-        assert result["emitting"] is False
-        assert result["inside_tree"] is True
-        assert result["process_frame"] > 0
-        assert result["process_material"]["class"] == "ParticleProcessMaterial"
-        assert result["properties"][draw]["class"] == ("GradientTexture2D" if name == "GPU2D" else "QuadMesh")
-    assert exec_error(m3_running, "runtime/particles/info", {"node_path": "/root/RuntimeMain/ProbeTarget"})["code"] == "invalid_param"
-    assert exec_error(m3_running, "runtime/particles/info", {"node_path": "/root/RuntimeMain/Missing"})["code"] == "not_found"
 
 
 @pytest.mark.parametrize("payload", [

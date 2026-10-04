@@ -20,6 +20,7 @@ func doc() -> GdApiRouteDoc:
 		. make("Reload an enabled editor plugin")
 		. mutates()
 		. param("plugin", "String", true, "Addon directory key; gdapi is protected")
+		. example('{"plugin":"example_plugin"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

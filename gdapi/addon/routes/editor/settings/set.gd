@@ -21,6 +21,7 @@ func doc() -> GdApiRouteDoc:
 		. mutates()
 		. param("name", "String", true, "Existing non-dangerous setting name")
 		. param("value", "Variant", true, "Typed VariantCodec value matching existing setting")
+		. example('{"name":"interface/editor/save_on_focus_loss","value":false}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

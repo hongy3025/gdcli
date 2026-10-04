@@ -98,22 +98,29 @@ def wait_for_metadata(project: Path, timeout: float = 45.0) -> dict:
 
 @successful_wait("editor_ready")
 def wait_for_godot_ready(project: Path, timeout: float = 30.0) -> None:
-    """Wait until the editor fully finishes loading (logs include 'loading_editor_layout' DONE)."""
+    """Wait for the editor initialization markers emitted by the selected mode."""
     log = project / ".godot" / "godot.log"
+    layout = project / ".godot" / "editor" / "editor_layout.cfg"
     timeout = positive_seconds("GDAPI_E2E_READY_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if log.exists():
             try:
                 content = log.read_text(encoding="utf-8", errors="replace")
-                # The headless editor prints ANSI-colored progress lines; check for
-                # the completion of the loading_editor_layout step.
-                if "loading_editor_layout" in content and "DONE" in content:
+                if os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless") == "gui":
+                    ready = (
+                        layout.is_file()
+                        and "OpenGL API" in content
+                        and "listening on 127.0.0.1:" in content
+                    )
+                else:
+                    ready = "loading_editor_layout" in content and "DONE" in content
+                if ready:
                     return
             except OSError:
                 pass
         time.sleep(0.2)
-    raise RuntimeError("godot never reached 'Editor layout ready' within timeout")
+    raise RuntimeError("godot editor did not reach its ready state within timeout")
 
 
 # ── gdcli exec wrappers ────────────────────────────────────────────────────

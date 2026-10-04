@@ -24,6 +24,9 @@ func doc() -> GdApiRouteDoc:
 		. param("path", "String", true, "res:// 或 user:// 资源路径")
 		. param("property", "String", true, "资源真实属性名")
 		. param("value", "Variant", true, "VariantCodec typed 值")
+		. example(
+			'{"path":"res://resources/player_data.tres","property":"resource_name","value":"example"}'
+		)
 		. returns(
 			"result", {"value": "Variant", "changed": "bool", "saved": "bool", "undoable": "false"}
 		)

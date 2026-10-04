@@ -214,6 +214,12 @@ static func remove_autoload(name: String) -> Dictionary:
 ## Godot 4.7.2 在目标文件不可写时会返回 OK（先写临时文件，rename 失败被吞掉），
 ## 因此这里比较保存前后的文件摘要：没有变化即视为失败，并回滚内存状态。
 static func _write_project_settings(restore: Callable = Callable()) -> Dictionary:
+	# Avoid the slow save path when the existing project file is explicitly read-only.
+	# Keep the digest check below for writable files and failures while replacing the file.
+	if FileAccess.file_exists(PROJECT_FILE) and FileAccess.get_read_only_attribute(PROJECT_FILE):
+		if restore.is_valid():
+			restore.call()
+		return _err(ErrorCodes.GODOT_ERROR, "project settings were not written to project.godot")
 	var before := _project_file_digest()
 	var error := ProjectSettings.save()
 	if error != OK or _project_file_digest() == before:

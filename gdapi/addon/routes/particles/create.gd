@@ -17,9 +17,11 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("particles/create")
 		. desc(
-			"GPU particles with ParticleProcessMaterial; "
-			+ "2D Texture2D or active 3D draw-pass meshes. "
-			+ "Atomic staging validation and one UndoRedo action."
+			(
+				"GPU particles with ParticleProcessMaterial; "
+				+ "2D Texture2D or active 3D draw-pass meshes. "
+				+ "Atomic staging validation and one UndoRedo action."
+			)
 		)
 		. mutates()
 		. param("parent_path", "String", true, "Absolute edited-scene parent path")
@@ -31,6 +33,7 @@ func doc() -> GdApiRouteDoc:
 			false,
 			"Allowlisted node properties; typed VariantCodec values or nested {class,properties} resources"
 		)
+		. example('{"parent_path":"/root/Main","type":"GPUParticles2D","name":"Particles"}')
 		. returns(
 			"Configured state",
 			{

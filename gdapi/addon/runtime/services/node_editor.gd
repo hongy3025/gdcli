@@ -731,7 +731,7 @@ static func _call_checked(payload: Dictionary) -> Dictionary:
 			if str(info.name) == method:
 				script_method = true
 	var declared: Variant = node.get_meta("gdapi_callable_methods", PackedStringArray())
-	var explicit := (declared is PackedStringArray or declared is Array) and method in declared
+	var explicit: bool = (declared is PackedStringArray or declared is Array) and method in declared
 	if script_method:
 		if not explicit or not script.is_tool():
 			return {
@@ -782,7 +782,9 @@ static func _call_checked(payload: Dictionary) -> Dictionary:
 			elif expected == TYPE_FLOAT and (value is int or value is float):
 				value = float(value)
 			elif (
-				expected == TYPE_INT and value is float and is_finite(value)
+				expected == TYPE_INT
+				and value is float
+				and is_finite(value)
 				and value == floor(value)
 				and value >= -9223372036854775808.0
 				and value < 9223372036854775808.0

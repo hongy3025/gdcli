@@ -17,11 +17,11 @@ def run_budget_session(root: Path, report_path: Path) -> float:
     budget = positive_seconds("GDAPI_E2E_BUDGET_SECONDS")
     command = [
         sys.executable, "-m", "pytest", "tests/e2e/", "-q", "-s",
-        "--durations=20", "-m", "not budget and not engine_transport",
+        "--durations=20", "-m", "not budget and not engine_transport and not real_renderer",
         "--ignore", "tests/e2e/test_full_suite_budget.py",
     ]
     environment = os.environ.copy()
-    environment.update(GDAPI_E2E_TRANSPORT="file", GDAPI_E2E_TIMING_JSON=str(report_path))
+    environment.update(GDAPI_E2E_TRANSPORT="file", GDAPI_E2E_EDITOR_MODE="headless", GDAPI_E2E_TIMING_JSON=str(report_path))
     started = time.monotonic()
     try:
         result = subprocess.run(

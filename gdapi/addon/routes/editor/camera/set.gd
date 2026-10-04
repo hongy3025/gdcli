@@ -31,6 +31,9 @@ func doc() -> GdApiRouteDoc:
 		. param(
 			"release", "bool", false, "Release override and restore native interactive navigation"
 		)
+		. example(
+			'{"dimension":"2d","transform":{"type":"Transform2D","value":[[2,0],[0,2],[120,90]]}}'
+		)
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

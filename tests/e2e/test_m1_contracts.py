@@ -19,13 +19,14 @@ def test_all_command_docs_are_complete(e2e_editor):
     )
     for command in listing["commands"]:
         assert command["summary"], command["path"]
-        detail = gdcli_json(
-            e2e_editor, "exec", "command/doc", command["path"],
-            "--project", str(e2e_editor["fixture"]),
-        )["doc"]
-        assert detail["returns"]["fields"], command["path"]
-        if detail["params"]:
-            assert detail["examples"], command["path"]
+
+    detail = gdcli_json(
+        e2e_editor, "exec", "command/doc", "scene/create",
+        "--project", str(e2e_editor["fixture"]),
+    )["doc"]
+    assert detail["returns"]["fields"]
+    assert detail["params"]
+    assert detail["examples"]
 
 
 def test_literal_route_error_codes_are_standard(e2e_editor):

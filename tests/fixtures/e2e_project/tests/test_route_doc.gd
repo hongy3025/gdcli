@@ -13,6 +13,10 @@
 extends SceneTree
 
 var RouteDoc = preload("res://addons/gdapi/runtime/route_doc.gd")
+var Router = preload("res://addons/gdapi/runtime/router.gd")
+var BuiltinRoutes = preload("res://addons/gdapi/runtime/builtin_routes.gd")
+var BuiltinCommands = preload("res://addons/gdapi/runtime/builtin_commands.gd")
+var BuiltinCommandHelp = preload("res://addons/gdapi/runtime/builtin_command_help.gd")
 var ParamDoc = preload("res://addons/gdapi/runtime/param_doc.gd")
 
 var passed := 0
@@ -31,6 +35,7 @@ func _init() -> void:
 	test_route_doc_example_fluent()
 	test_route_doc_to_dict_complete()
 	test_route_doc_to_summary_dict_minimal()
+	test_all_route_docs_complete()
 	test_route_doc_chained_call()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
@@ -171,3 +176,26 @@ func test_route_doc_chained_call() -> void:
 	assert_eq(rd.description, "y", "chained description")
 	assert_eq(rd.params.size(), 1, "chained param count")
 	assert_eq(rd.returns_desc, "ok", "chained returns_desc")
+
+
+func test_all_route_docs_complete() -> void:
+	var router = Router.new()
+	router.scan("res://addons/gdapi/routes", true)
+	var handlers: Dictionary = router._routes.duplicate()
+	handlers["gdapi/routes"] = BuiltinRoutes
+	handlers["command/list"] = BuiltinCommands
+	handlers["command/doc"] = BuiltinCommandHelp
+	for route_path in handlers:
+		var handler = handlers[route_path].new()
+		var detail: Dictionary = handler.doc().to_dict()
+		var returns: Dictionary = detail.get("returns", {})
+		var fields = returns.get("fields", {})
+		var params: Array = detail.get("params", [])
+		var examples: Array = detail.get("examples", [])
+		var complete: bool = (
+			not String(detail.get("summary", "")).is_empty()
+			and fields is Dictionary
+			and not fields.is_empty()
+			and (params.is_empty() or not examples.is_empty())
+		)
+		assert_true(complete, "complete route documentation: " + String(route_path))

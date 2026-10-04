@@ -11,10 +11,13 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("Read saved runtime QA results")
 		. desc(
-			"Returns actual run/stress results, including pending state if queried during execution. "
-			+ "Last 100 reports retained until reset or runtime generation exit."
+			(
+				"Returns actual run/stress results, including pending state if queried during execution. "
+				+ "Last 100 reports retained until reset or runtime generation exit."
+			)
 		)
 		. param("report_id", "String", true, "Id returned by run/stress")
+		. example('{"report_id":"1"}')
 		. returns(
 			"QA report",
 			{

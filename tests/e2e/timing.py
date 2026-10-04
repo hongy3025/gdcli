@@ -42,6 +42,9 @@ def validate_configuration() -> None:
     transport = os.environ.get("GDAPI_E2E_TRANSPORT", "file")
     if transport not in ("file", "engine_debugger"):
         raise ValueError(f"GDAPI_E2E_TRANSPORT={transport!r}: expected file or engine_debugger")
+    editor_mode = os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless")
+    if editor_mode not in ("headless", "gui"):
+        raise ValueError(f"GDAPI_E2E_EDITOR_MODE={editor_mode!r}: expected headless or gui")
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -101,6 +104,7 @@ def write_report(path: Path, *, exitstatus: int, editor_starts: int) -> None:
         "exitstatus": int(exitstatus),
         "editor_starts": editor_starts,
         "transport": os.environ.get("GDAPI_E2E_TRANSPORT", "file"),
+        "editor_mode": os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless"),
         "thresholds": {name: positive_seconds(name) for name in DEFAULTS},
         "groups": TIMINGS.summary(),
     }

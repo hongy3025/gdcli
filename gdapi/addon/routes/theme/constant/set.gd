@@ -35,7 +35,7 @@ func doc() -> GdApiRouteDoc:
 		. param("item", "String", true, "item 名")
 		. param("value", "int", true, "常量整数值")
 		. example(
-			'{"path":"res://themes/main.tres","type":"Button","item":"h_separation","value":4}'
+			'{"path":"res://resources/theme.tres","type":"Button","item":"h_separation","value":4}'
 		)
 		. returns("theme", {"undoable": "false"})
 	)

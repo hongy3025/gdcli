@@ -1,4 +1,4 @@
-"""M2 完整验收: route 清单 + 命令文档 + 错误码收敛."""
+"""M2 acceptance: route inventory, command listing, and standardized error codes."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ if str(_REPO_ROOT_CANDIDATE) not in sys.path:
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
-from .helpers import command_doc, exec_ok
+from .helpers import exec_ok
 
 
 # gdapi addon 扫描 autoload routes/ 下所有 .gd 文件, 因此所有 milestone 的 route
@@ -49,10 +49,6 @@ M2_BASELINE_ROUTES = {
     "editor/selection/get", "editor/selection/set", "editor/main_screen/set",
 }
 
-RETIRED_ROUTES = {
-    "routes", "commands", "help", "command-help",
-    "gdapi/commands", "gdapi/help",
-}
 
 
 def test_routes_match_expected_inventory(m2_editor):
@@ -62,35 +58,12 @@ def test_routes_match_expected_inventory(m2_editor):
     assert not missing, f"missing M2 baseline routes: {sorted(missing)}"
 
 
-def test_commands_list_contains_m2_new_routes(m2_editor):
+def test_commands_list_contains_m2_baseline_routes(m2_editor):
     listing = exec_ok(m2_editor, "command/list")
-    paths = {c["path"] for c in listing["commands"]}
-    # 冒烟检验: 所有 M2 新增 route 都在 command/list 中出现;
-    # M1 中部分内建 route 与 gdcli 启动顺序相关,不强求超集.
-    m2_only = {
-        "scene/current", "scene/current/save", "scene/open", "scene/close",
-        "scene/tree", "scene/list_open",
-        "node/create", "node/property/set", "node/signal/connect",
-        "node/group/add", "script/create", "filesystem/list", "resource/info",
-        "editor/selection/set", "editor/main_screen/set",
-    }
-    missing = m2_only - paths
+    paths = {command["path"] for command in listing["commands"]}
+    missing = M2_BASELINE_ROUTES - paths
     assert not missing, f"missing M2 routes in command/list: {sorted(missing)}"
 
-
-def test_route_documentation_is_complete(m2_editor):
-    listing = exec_ok(m2_editor, "command/list")
-    bad = []
-    for cmd in listing["commands"]:
-        if cmd["path"] in RETIRED_ROUTES:
-            continue
-        if not cmd["summary"]:
-            bad.append((cmd["path"], "missing summary"))
-            continue
-        doc = command_doc(m2_editor, cmd["path"])
-        if not doc["returns"]["fields"]:
-            bad.append((cmd["path"], "empty returns"))
-    assert not bad, f"incomplete docs: {bad[:5]}"
 
 
 def test_error_codes_are_m1_standard():

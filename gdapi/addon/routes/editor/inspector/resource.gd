@@ -21,6 +21,7 @@ func doc() -> GdApiRouteDoc:
 		. mutates()
 		. param("path", "String", true, "Resource path")
 		. param("property", "String", false, "Property to focus")
+		. example('{"path":"res://resources/tile.svg"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

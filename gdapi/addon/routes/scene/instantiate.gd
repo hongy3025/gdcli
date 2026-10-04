@@ -25,6 +25,7 @@ func doc() -> GdApiRouteDoc:
 		. mutates()
 		. param("path", "String", true, "PackedScene path")
 		. param("parent_path", "String", true, "Edited-scene parent path")
+		. example('{"path":"res://scenes/runtime_qa_scene.tscn","parent_path":"/root/Main"}')
 		. param("name", "String", false, "Unique instance-root name")
 		. returns(
 			"Operation result",

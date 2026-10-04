@@ -12,6 +12,7 @@ func doc() -> GdApiRouteDoc:
 		. make("Read recorded input events")
 		. param("after_cursor", "int", false, "Exclusive event cursor; default 0")
 		. param("limit", "int", false, "1..500; default 100")
+		. example("{}")
 		. returns(
 			"Recording page",
 			{

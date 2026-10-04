@@ -31,6 +31,7 @@ pub struct ProcessRunnerCore {
 
 struct Job {
     child: Child,
+    process_tree: Option<ProcessTreeGuard>,
     stdout_thread: Option<JoinHandle<()>>,
     stderr_thread: Option<JoinHandle<()>>,
     output: Arc<Mutex<SharedOutput>>,
@@ -49,6 +50,87 @@ struct SharedOutput {
 enum OutputStream {
     Stdout,
     Stderr,
+}
+
+#[cfg(windows)]
+struct ProcessTreeGuard {
+    handle: usize,
+}
+
+#[cfg(not(windows))]
+struct ProcessTreeGuard;
+
+#[cfg(windows)]
+impl ProcessTreeGuard {
+    fn attach(child: &Child) -> std::io::Result<Self> {
+        use std::mem::size_of;
+        use std::os::windows::io::AsRawHandle;
+        use std::ptr;
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        unsafe {
+            let handle = CreateJobObjectW(ptr::null(), ptr::null());
+            if handle.is_null() {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                &limits as *const _ as *const std::ffi::c_void,
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) == 0
+            {
+                let error = std::io::Error::last_os_error();
+                CloseHandle(handle);
+                return Err(error);
+            }
+            if AssignProcessToJobObject(handle, child.as_raw_handle() as HANDLE) == 0 {
+                let error = std::io::Error::last_os_error();
+                CloseHandle(handle);
+                return Err(error);
+            }
+            Ok(Self {
+                handle: handle as usize,
+            })
+        }
+    }
+
+    fn terminate(&self) {
+        use windows_sys::Win32::Foundation::HANDLE;
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+
+        unsafe {
+            TerminateJobObject(self.handle as HANDLE, 1);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessTreeGuard {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+
+        unsafe {
+            CloseHandle(self.handle as HANDLE);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl ProcessTreeGuard {
+    fn attach(_child: &Child) -> std::io::Result<Self> {
+        Ok(Self)
+    }
+
+    fn terminate(&self) {}
 }
 
 impl ProcessRunnerCore {
@@ -83,6 +165,13 @@ impl ProcessRunnerCore {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|err| format!("spawn failed: {err}"))?;
+        let process_tree = match ProcessTreeGuard::attach(&child) {
+            Ok(tree) => tree,
+            Err(err) => {
+                let _ = kill_and_wait(&mut child, None);
+                return Err(format!("failed to supervise process tree: {err}"));
+            }
+        };
 
         let output = Arc::new(Mutex::new(SharedOutput {
             remaining_bytes: max_output_bytes as usize,
@@ -103,6 +192,7 @@ impl ProcessRunnerCore {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let job = Job {
             child,
+            process_tree: Some(process_tree),
             stdout_thread: Some(spawn_output_reader(
                 stdout,
                 OutputStream::Stdout,
@@ -134,7 +224,8 @@ impl ProcessRunnerCore {
             Some(job) => {
                 if job.finished.is_none() {
                     if Instant::now() >= job.deadline {
-                        let status = kill_and_wait(&mut job.child);
+                        let process_tree = job.process_tree.take();
+                        let status = kill_and_wait(&mut job.child, process_tree);
                         finish_job(job, status, true, false);
                     } else if let Ok(Some(status)) = job.child.try_wait() {
                         finish_job(job, Some(status), false, false);
@@ -171,7 +262,8 @@ impl ProcessRunnerCore {
             return false;
         }
 
-        let status = kill_and_wait(&mut job.child);
+        let process_tree = job.process_tree.take();
+        let status = kill_and_wait(&mut job.child, process_tree);
         finish_job(job, status, false, true);
         true
     }
@@ -221,7 +313,10 @@ where
     })
 }
 
-fn kill_and_wait(child: &mut Child) -> Option<ExitStatus> {
+fn kill_and_wait(child: &mut Child, process_tree: Option<ProcessTreeGuard>) -> Option<ExitStatus> {
+    if let Some(process_tree) = process_tree {
+        process_tree.terminate();
+    }
     match child.kill() {
         Ok(()) => {}
         Err(err) if err.kind() == ErrorKind::InvalidInput => {}
@@ -231,6 +326,9 @@ fn kill_and_wait(child: &mut Child) -> Option<ExitStatus> {
 }
 
 fn finish_job(job: &mut Job, status: Option<ExitStatus>, timed_out: bool, cancelled: bool) {
+    if let Some(process_tree) = job.process_tree.take() {
+        process_tree.terminate();
+    }
     if let Some(handle) = job.stdout_thread.take() {
         let _ = handle.join();
     }

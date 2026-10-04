@@ -29,8 +29,10 @@ func doc() -> GdApiRouteDoc:
 		. param("properties", "Object", false, "AnimationNode资源属性，如animation/fadein_time", "")
 		. param("parameters", "Object", false, "运行参数，如blend_amount/scale/request", "")
 		. example(
-			'{"tree_path": "AnimationTree", "name": "blend", "type": "AnimationNodeBlend2", '
-			+ '"parameters": {"blend_amount": 0.5}}'
+			(
+				'{"tree_path": "AnimationTree", "name": "blend", "type": "AnimationNodeBlend2", '
+				+ '"parameters": {"blend_amount": 0.5}}'
+			)
 		)
 		. returns("result", {"undoable": "bool", "changed": "bool"})
 	)

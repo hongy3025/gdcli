@@ -24,6 +24,7 @@ func doc() -> GdApiRouteDoc:
 			true,
 			"Built-in dock name, such as Inspector, FileSystem, Script, 2D or 3D"
 		)
+		. example('{"name":"Inspector"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

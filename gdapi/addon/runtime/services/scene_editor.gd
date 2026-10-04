@@ -132,7 +132,6 @@ static func open_scene(path: String) -> Dictionary:
 			"error": "scene does not exist: " + checked.path,
 		}
 	EditorInterface.open_scene_from_path(checked.path)
-	AuditLog.record("scene/open", "file", {"path": checked.path}, true, "")
 	return {
 		"ok": true,
 		"changed": true,
@@ -197,7 +196,7 @@ static func instantiate_scene(
 		return {
 			"ok": false, "code": ErrorCodes.GODOT_ERROR, "error": "UndoRedo manager unavailable"
 		}
-	instance.name = node_editor._unique_name(
+	instance.name = NodeEditor._unique_name(
 		parent, node_name if node_name != "" else str(instance.name)
 	)
 	manager.create_action("gdcli: instantiate scene", UndoRedo.MERGE_DISABLE, root)
@@ -223,7 +222,7 @@ static func instantiate_scene(
 		"changed": true,
 		"undoable": true,
 		"path": checked.path,
-		"node_path": node_editor._user_path_for(instance),
+		"node_path": NodeEditor._user_path_for(instance),
 		"scene_file_path": instance.scene_file_path
 	}
 

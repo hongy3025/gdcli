@@ -26,6 +26,7 @@ func doc() -> GdApiRouteDoc:
 		. param("path", "String", true, "项目内 .tres Theme 路径")
 		. param("type", "String", false, "控件类型或 Theme 类型变体", "Control")
 		. param("item", "String", true, "item 名")
+		. example('{"path":"res://resources/theme.tres","item":"panel"}')
 		. returns(
 			"result",
 			{

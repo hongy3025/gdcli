@@ -185,5 +185,10 @@ func dispatch(req_dict: Dictionary, server) -> void:
 		return
 	# 同步 service.record 复用所有者；不可将上下文跨 await 留在全局。
 	var previous := AuditLog.enter_request(res.audit_context)
-	handler.handle(req, res)
+	_handle_async(handler, req, res)
 	AuditLog.enter_request(previous)
+
+
+## Route handlers are request-local RefCounted objects; retain them until awaited work replies.
+func _handle_async(handler, req: GdApiRequest, res: GdApiResponse) -> void:
+	await handler.handle(req, res)

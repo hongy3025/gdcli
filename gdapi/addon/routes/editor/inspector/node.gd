@@ -21,6 +21,7 @@ func doc() -> GdApiRouteDoc:
 		. mutates()
 		. param("node_path", "String", true, "Absolute edited-scene node path")
 		. param("property", "String", false, "Property to focus")
+		. example('{"node_path":"/root/Main/Target"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

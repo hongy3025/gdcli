@@ -31,6 +31,7 @@ static func safety_for_route(route: String) -> String:
 				"export/run",
 				"gdapi/audit/clear",
 				"scene/create",
+				"scene/delete",
 				"scene/add_node",
 				"scene/save",
 				"scene/load_sprite",
@@ -67,11 +68,18 @@ static func safety_for_route(route: String) -> String:
 				"script/patch",
 				"resource/create",
 				"resource/move",
+				"resource/set",
+				"scene/batch/apply",
+				"scene/batch/recover",
+				"editor/settings/set",
+				"editor/screenshot/viewport",
 				"resource/delete",
 				"resource/reimport",
 			]
 		)
 		or route.begins_with("filesystem/")
+		or route.begins_with("audio/bus/")
+		or route.begins_with("editor/plugins/")
 		or route.begins_with("theme/")
 	):
 		return "file"

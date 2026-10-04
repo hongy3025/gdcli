@@ -16,10 +16,9 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("scene3d/info")
-		. desc(
-			"Reads actual edited-scene 3D node parameters and embedded construction resources."
-		)
+		. desc("Reads actual edited-scene 3D node parameters and embedded construction resources.")
 		. param("node_path", "String", true, "Absolute edited-scene node path")
+		. example('{"node_path":"/root/Node3D/Camera3D"}')
 		. returns(
 			"Configured state",
 			{

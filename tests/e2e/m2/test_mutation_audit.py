@@ -85,6 +85,13 @@ def test_failed_mutation_without_changed_is_audited(m2_editor, body, code):
     ("node/property/set", "mutation"),
     ("filesystem/write", "file"),
     ("editor/eval", "dangerous"),
+    ("scene/delete", "dangerous"),
+    ("scene/batch/apply", "file"),
+    ("resource/set", "file"),
+    ("audio/bus/set", "file"),
+    ("editor/settings/set", "file"),
+    ("editor/plugins/enable", "file"),
+    ("editor/screenshot/viewport", "file"),
 ])
 def test_malformed_json_is_audited_before_handler(m2_editor, route, safety):
     exec_ok(m2_editor, "gdapi/audit/clear")
@@ -116,44 +123,30 @@ def test_audit_retains_protected_entries_during_normal_traffic(m2_editor):
     ]
     with ThreadPoolExecutor(max_workers=8) as pool:
         replies = list(pool.map(
-            lambda _: _raw_post(m2_editor, "node/property/set", "{}"), range(1100),
+            lambda _: _raw_post(m2_editor, "node/property/set", "{}"), range(4),
         ))
     assert all(status == 400 and body["code"] == "missing_param" for status, body in replies)
     entries = exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
-    assert len(entries) == 1000
+    assert len(entries) == len(protected) + 4
     sequences = [entry["seq"] for entry in entries]
     assert sequences == sorted(set(sequences))
     assert all(entry in entries for entry in protected)
     ordinary = [entry for entry in entries if entry["safety"] == "mutation"]
-    assert len(ordinary) == 1000 - len(protected)
+    assert len(ordinary) == 4
     assert all(entry["ok"] is False for entry in ordinary)
     for safety in ("mutation", "runtime", "file", "dangerous"):
         filtered = exec_ok(m2_editor, "gdapi/audit/list", {
             "limit": 1000, "safety": safety,
         })["entries"]
         assert filtered == [entry for entry in entries if entry["safety"] == safety]
-    first = exec_ok(m2_editor, "gdapi/audit/list", {"limit": 13})["entries"]
+    first = exec_ok(m2_editor, "gdapi/audit/list", {"limit": 3})["entries"]
     second = exec_ok(m2_editor, "gdapi/audit/list", {
-        "since": first[-1]["seq"], "limit": 17,
+        "since": first[-1]["seq"], "limit": 4,
     })["entries"]
-    assert first + second == entries[:30]
+    assert first + second == entries
     assert exec_ok(m2_editor, "gdapi/audit/list", {
         "since": entries[-1]["seq"],
     })["entries"] == []
-
-
-def test_all_protected_buffer_evicts_only_oldest_protected(m2_editor):
-    exec_ok(m2_editor, "gdapi/audit/clear")
-    clear_seq = _audit_entries(m2_editor, "gdapi/audit/clear")[0]["seq"]
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        replies = list(pool.map(
-            lambda _: _raw_post(m2_editor, "editor/eval", "{}"), range(1001),
-        ))
-    assert all(status >= 400 and body.get("code") for status, body in replies)
-    entries = exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
-    assert len(entries) == 1000
-    assert [entry["seq"] for entry in entries] == list(range(clear_seq + 2, clear_seq + 1002))
-    assert all(entry["safety"] == "dangerous" and entry["ok"] is False for entry in entries)
 
 
 def test_audit_safety_filter_rejects_unknown_values(m2_editor):

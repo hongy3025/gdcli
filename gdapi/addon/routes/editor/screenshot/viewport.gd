@@ -24,6 +24,7 @@ func doc() -> GdApiRouteDoc:
 		. param("index", "int", false, "3D viewport index 0..3")
 		. param("width", "int", false, "Output width 1..8192; requires height")
 		. param("height", "int", false, "Output height 1..8192; requires width")
+		. example('{"path":"res://viewport.png"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

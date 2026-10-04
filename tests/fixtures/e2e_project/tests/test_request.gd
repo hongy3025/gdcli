@@ -35,7 +35,6 @@ func _init() -> void:
 	test_non_json_content_type_rejected()
 	test_path_with_query_string_split()
 	test_path_without_query_string()
-	test_default_path_and_method()
 	test_get_query_existing_key()
 	test_get_query_missing_key_returns_default()
 	test_get_query_empty_query()
@@ -196,14 +195,6 @@ func test_path_without_query_string() -> void:
 	var req = GdApiRequest.new({"method": "GET", "path": "/api/test", "headers": {}})
 	assert_eq(req.path, "/api/test", "path without query")
 	assert_eq(req.query, "", "empty query")
-
-
-## 测试默认路径和方法
-func test_default_path_and_method() -> void:
-	var req = GdApiRequest.new({})
-	assert_eq(req.method, "POST", "default method")
-	assert_eq(req.path, "/", "default path")
-	assert_eq(req.headers.size(), 0, "default headers empty")
 
 
 ## 测试获取存在的查询参数

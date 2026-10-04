@@ -59,6 +59,7 @@ def read_open(env, scene, root, relative, property):
 def test_two_unopened_scenes_apply_reload_recover(m2_editor):
     before = contents(m2_editor)
     result, plan = apply(m2_editor)
+    assert contents(m2_editor) != before
     assert [op["previous"] for op in plan["operations"]] == [
         {"type": "Vector2", "value": [1.0, 2.0]},
         {"type": "Vector2", "value": [5.0, 6.0]},
@@ -70,6 +71,22 @@ def test_two_unopened_scenes_apply_reload_recover(m2_editor):
     reloaded = exec_ok(m2_editor, "scene/batch/plan", probe)
     assert {scene["path"]: scene["uid"] for scene in reloaded["scenes"]} == {scene["path"]: scene["uid"] for scene in plan["scenes"]}
     assert all(scene["uid"] for scene in plan["scenes"])
+    persisted = exec_ok(
+        m2_editor,
+        "scene/batch/plan",
+        request(
+            operations=[
+                {
+                    "property": "position",
+                    "value": {"type": "Vector2", "value": [91, 81]},
+                }
+            ]
+        ),
+    )
+    assert [op["previous"] for op in persisted["operations"]] == [
+        {"type": "Vector2", "value": [90.0, 80.0]},
+        {"type": "Vector2", "value": [90.0, 80.0]},
+    ]
     for scene, name in zip(SCENES, NAMES):
         assert read_open(m2_editor, scene, name, "Target", "position") == {"type": "Vector2", "value": [90.0, 80.0]}
         assert read_open(m2_editor, scene, name, "Collision", "shape") == {"type": "Resource", "value": ROOT + "/shape.tres"}
@@ -78,6 +95,10 @@ def test_two_unopened_scenes_apply_reload_recover(m2_editor):
     recovered = exec_ok(m2_editor, "scene/batch/recover", {"operation_id": result["operation_id"]})
     assert recovered["restored"] == 2
     assert contents(m2_editor) == before
+    assert read_open(m2_editor, SCENES[0], NAMES[0], "Target", "position") == {
+        "type": "Vector2",
+        "value": [1.0, 2.0],
+    }
     assert exec_error(m2_editor, "scene/batch/recover", {"operation_id": result["operation_id"]})["code"] == "conflict"
 
 
@@ -91,6 +112,7 @@ def test_single_scene_multi_property_and_instance_override(m2_editor):
     bound, plan = planned(m2_editor, body)
     assert len(plan["operations"]) == 3
     result = exec_ok(m2_editor, "scene/batch/apply", bound)
+    assert contents(m2_editor)[0] != before[0]
     assert result["files"] == 1
     assert contents(m2_editor)[1] == before[1]
     assert read_open(m2_editor, SCENES[0], NAMES[0], "Target", "rotation") == pytest.approx(0.5)
@@ -208,9 +230,10 @@ def test_unsaved_open_scene_is_rejected_without_losing_editor_changes(m2_editor)
 def test_project_scan_reports_real_nodepath_connection_instance_dependencies(m2_editor):
     nodes = exec_ok(m2_editor, "scene/project/find_nodes", {"root": ROOT, "class": "RemoteTransform2D"})["items"]
     assert {(row["path"], row["node_path"], row["class"]) for row in nodes} == {(scene, "Reference", "RemoteTransform2D") for scene in SCENES}
-    references = exec_ok(m2_editor, "scene/project/references", {"root": ROOT, "node_path": "Target"})["items"]
-    assert {(row["path"], row["property"], row["value"], row["target"]) for row in references if row["kind"] == "property"} == {(scene, "remote_path", "../Target", "Target") for scene in SCENES}
-    assert any(row["kind"] == "connection" and row["node_path"] == "Target" and row["target"] == "Twin" for row in references)
+    references = exec_ok(m2_editor, "scene/project/references", {"root": ROOT})["items"]
+    assert {(row["path"], row["value"], row["target"]) for row in references if row["kind"] == "property" and row["property"] == "remote_path"} == {(SCENES[0], "../Twin", "Twin"), (SCENES[1], "../Collision", "Collision")}
+    target_references = exec_ok(m2_editor, "scene/project/references", {"root": ROOT, "node_path": "Target"})["items"]
+    assert any(row["kind"] == "connection" and row["node_path"] == "Target" and row["target"] == "Twin" for row in target_references)
     dependencies = exec_ok(m2_editor, "scene/project/dependencies", {"scenes": SCENES})["items"]
     assert {(row["path"], row["dependency"]) for row in dependencies} == {(scene, ROOT + suffix) for scene in SCENES for suffix in ["/base.tscn", "/shape.tres"]}
     assert all(row["sha256"] == hashlib.sha256(disk(m2_editor, row["dependency"]).read_bytes()).hexdigest() for row in dependencies)
@@ -226,6 +249,7 @@ def test_binary_scene_scans_mutates_and_recovers(m2_editor):
     before = disk(m2_editor, binary).read_bytes()
     body, _ = planned(m2_editor, request(scenes=[binary]))
     result = exec_ok(m2_editor, "scene/batch/apply", body)
+    assert disk(m2_editor, binary).read_bytes() != before
     assert result["files"] == 1
     nodes = exec_ok(m2_editor, "scene/project/find_nodes", {"root": ROOT, "selector": {"name": "Target"}})["items"]
     assert binary in {row["path"] for row in nodes}

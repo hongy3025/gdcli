@@ -2,6 +2,8 @@ extends Node2D
 
 ## ProbeTarget — 可观测 counter 和 signal 用于 runtime assertion
 
+signal counted(value: int)
+signal finished
 var counter: int = 0
 var spawn_position: Vector2 = Vector2(10, 20)
 var input_keys: int = 0
@@ -11,9 +13,6 @@ var input_touch: int = 0
 var input_actions: int = 0
 var _reset_epoch: int = 0
 var _pending_timers: Array[Dictionary] = []
-
-signal counted(value: int)
-signal finished
 
 
 ## 在 autoload 中,声明可被 runtime/node/call 调用的方法名清单

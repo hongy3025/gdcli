@@ -22,6 +22,7 @@ func doc() -> GdApiRouteDoc:
 		. param("message", "String", true, "Toast text")
 		. param("severity", "String", false, "info, warning or error")
 		. param("tooltip", "String", false, "Tooltip text")
+		. example('{"message":"Build complete"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

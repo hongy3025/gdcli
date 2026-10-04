@@ -22,6 +22,7 @@ func doc() -> GdApiRouteDoc:
 			"使用 PackedScene 保留资源、owner 与实例 override；拒绝所有已打开的受影响场景，避免覆盖未保存修改。失败回滚全部已写项；恢复前校验所有场景和备份。"
 		)
 		. param("operation_id", "String", true, "apply 返回的事务 ID")
+		. example('{"operation_id":"<operation_id from scene/batch/apply>"}')
 		. returns(
 			"事务结果",
 			{

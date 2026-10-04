@@ -5,7 +5,7 @@ signal health_changed(new_value: int)
 var speed: int = 10
 
 
-func _on_health_changed(new_value: int) -> void:
+func _on_health_changed(_new_value: int) -> void:
 	pass
 
 

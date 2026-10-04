@@ -313,6 +313,16 @@ static func allowed_property(target: Object, property: String) -> bool:
 	return false
 
 
+static func is_persistent_property(target: Object, info: Dictionary) -> bool:
+	return (
+		int(info.usage) & PROPERTY_USAGE_STORAGE
+		or (
+			target is Node3D
+			and str(info.name) in ["position", "rotation", "rotation_degrees", "scale"]
+		)
+	)
+
+
 static func prepare_properties(target: Object, properties: Dictionary) -> Dictionary:
 	var values := {}
 	for key in properties:
@@ -323,7 +333,7 @@ static func prepare_properties(target: Object, properties: Dictionary) -> Dictio
 			)
 		var meta := {}
 		for info in target.get_property_list():
-			if str(info.name) == key and int(info.usage) & PROPERTY_USAGE_STORAGE:
+			if str(info.name) == key and is_persistent_property(target, info):
 				meta = info
 		if meta.is_empty():
 			return error("property does not exist: " + key, ErrorCodes.NOT_FOUND)
@@ -556,7 +566,7 @@ static func build_library(raw: Variant) -> Dictionary:
 			not item is Dictionary
 			or not integer(item.get("id"))
 			or int(item.id) < 0
-			or library.has_item(int(item.id))
+			or library.get_item_list().has(int(item.id))
 		):
 			return error("MeshLibrary item ids must be unique nonnegative integers")
 		var mesh := decode_value(item.get("mesh"))
@@ -625,18 +635,11 @@ static func build_multimesh(raw: Variant) -> Dictionary:
 		return mesh
 	if not mesh.value is Mesh:
 		return error("multimesh mesh must be a Mesh")
-	var multi := MultiMesh.new()
-	multi.transform_format = MultiMesh.TRANSFORM_3D
-	multi.use_colors = true
-	multi.use_custom_data = true
-	multi.mesh = mesh.value
-	multi.instance_count = raw.instances.size()
 	var visible: Variant = raw.get("visible_instance_count", -1)
-	if not integer(visible) or int(visible) < -1 or int(visible) > multi.instance_count:
+	if not integer(visible) or int(visible) < -1 or int(visible) > raw.instances.size():
 		return error("visible_instance_count must be -1 or within instance_count")
-	multi.visible_instance_count = int(visible)
-	for index in multi.instance_count:
-		var entry: Variant = raw.instances[index]
+	var instances: Array[Dictionary] = []
+	for entry in raw.instances:
 		if not entry is Dictionary:
 			return error("each instance must be a Dictionary")
 		var transform := decode_value(
@@ -655,9 +658,25 @@ static func build_multimesh(raw: Variant) -> Dictionary:
 			or not custom.get("value") is Color
 		):
 			return error("instance requires Transform3D transform and Color color/custom_data")
-		multi.set_instance_transform(index, transform.value)
-		multi.set_instance_color(index, color.value)
-		multi.set_instance_custom_data(index, custom.value)
+		instances.append(
+			{"transform": transform.value, "color": color.value, "custom_data": custom.value}
+		)
+	if not instances.is_empty() and DisplayServer.get_name() == "headless":
+		return error(
+			"MultiMesh instance data requires an active renderer", ErrorCodes.NOT_SUPPORTED
+		)
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.use_colors = true
+	multi.use_custom_data = true
+	multi.mesh = mesh.value
+	multi.instance_count = instances.size()
+	multi.visible_instance_count = int(visible)
+	for index in instances.size():
+		var instance: Dictionary = instances[index]
+		multi.set_instance_transform(index, instance.transform)
+		multi.set_instance_color(index, instance.color)
+		multi.set_instance_custom_data(index, instance.custom_data)
 	return {"ok": true, "value": multi}
 
 
@@ -757,7 +776,7 @@ static func inspect(node: Node) -> Dictionary:
 	var properties := {}
 	for meta in node.get_property_list():
 		var key := str(meta.name)
-		if int(meta.usage) & PROPERTY_USAGE_STORAGE and allowed_property(node, key):
+		if is_persistent_property(node, meta) and allowed_property(node, key):
 			properties[key] = encode_value(node.get(key))
 	var root: Node = (
 		EditorInterface.get_edited_scene_root()

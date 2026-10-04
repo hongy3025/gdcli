@@ -21,6 +21,6 @@ func doc() -> GdApiRouteDoc:
 		. make("创建 Theme 资源")
 		. mutates()
 		. param("path", "String", true, "项目内 .tres", "")
-		. example('{"path":"res://themes/main.tres"}')
+		. example('{"path":"res://resources/theme.tres"}')
 		. returns("theme", {"saved": "true", "undoable": "false"})
 	)

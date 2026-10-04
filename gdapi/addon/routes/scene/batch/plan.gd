@@ -29,6 +29,9 @@ func doc() -> GdApiRouteDoc:
 			true,
 			"set_property: property/value、可选 scene 与 selector；支持 typed Variant"
 		)
+		. example(
+			'{"operations":[{"property":"visible","value":true,"selector":{"class":"Node2D"}}]}'
+		)
 		. returns(
 			"事务结果",
 			{

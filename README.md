@@ -85,6 +85,14 @@ uv run pytest tests/e2e/m2 -v
 uv run pytest tests/e2e/m3 -v
 ```
 
+完整回归按统一顺序执行 formatter、GDScript lint、clippy、workspace 单元测试、file transport 全量 E2E、独立 EngineDebugger 会话、真实 OpenGL 渲染器验收及 headless 全量预算：
+
+```bash
+uv run python scripts/check.py
+```
+
+可重复传入 `--gate format|clippy|unit|file|engine|render|budget` 选择门禁。file、engine、render 是顺序运行的独立单编辑器 pytest 会话；render 在非 headless `gl_compatibility` 编辑器中验证 GridMap 与 MultiMesh 的实际状态/持久化（CI 使用 Mesa llvmpipe）。headless file/预算套件排除这两个需要 RenderingServer 的验收。`GDAPI_E2E_BUDGET_SECONDS` 显式配置完整 headless wall-clock 阈值（默认 360 秒）；成功等待只报告 P50/P95/P99/max 和 P99×3 建议，不会静默提高门限。每次运行的原始等待样本和 session 证据写入 `.pytest-artifacts/`。
+
 通过 `GODOT_BIN` 环境变量可覆盖 Godot 路径；共享 E2E fixture 在 Windows 上默认使用 `D:\app\devel\Godot\v4.7.2\godot_console.exe`，其他平台默认使用 PATH 中的 `godot`。直接调用 `build_environment(godot_bin=...)` 时，显式参数优先于环境变量。
 
 E2E fixture 默认强制 file transport（保证确定性）；需要验收 EngineDebugger 数据面时：
@@ -107,7 +115,7 @@ uv run pytest tests/e2e/test_m1_smoke.py -v
 
 完整分类清单、代码影响核对和实测证据见 [4.7.2 升级核对报告](docs/reports/2026-10-03-godot-4.7.2-upgrade.md)。目前未发现必须修改 Godot API 调用、LSP 协议或 Rust 依赖的适配项；已验证真实 4.7.2 编辑器、HTTP/HTTPS、LSP、原生进程和重复运行/停止链路。
 
-使用导出功能前还需安装匹配的 **4.7.2 导出模板**；本机新安装目录的 `export_templates` 为空，本次没有执行导出验收。历史报告中的 4.7.1 保留为当时的验证记录。
+使用导出功能前还需安装匹配的 **4.7.2 导出模板**；本机新安装目录的 `export_templates` 为空。file E2E 已验证桌面 PCK 导出；可执行文件/移动端导出仍需要模板，尚未在本机验收。历史报告中的 4.7.1 保留为当时的验证记录。
 
 ---
 
@@ -283,7 +291,7 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 |---|---|
 | `scene/current` | 获取当前编辑场景信息 |
 | `scene/current/save` | 保存当前编辑场景（可选另存为 `{path?}`） |
-| `scene/open` | 在编辑器中打开场景 `{path}` |
+| `scene/open` | 在编辑器中打开场景，并等到编辑器实际切换完成 `{path}` |
 | `scene/close` | 关闭场景 `{path?}` |
 | `scene/tree` | 查询场景树结构 `{path?, max_depth?}` |
 | `scene/list_open` | 列出所有已打开场景 |
@@ -385,10 +393,21 @@ gdcli exec 通过 gdapi 插件提供以下路由家族，覆盖 Godot 编辑器�
 | `editor/selection/get` | 获取当前选中节点 |
 | `editor/selection/set` | 设置选中节点 `{node_paths, clear?}` |
 | `editor/main_screen/set` | 切换主编辑器 Tab `{screen: "2D"|"3D"|"Script"|"AssetLib"}` |
+| `editor/undo` `editor/redo` | 执行当前场景真实 UndoRedo history |
+| `editor/inspector/*` `editor/dock/*` | 检查节点/资源，枚举、切换、聚焦原生 docks |
+| `editor/plugins/*` `editor/settings/*` | 管理非 gdapi 插件及受保护的已存在编辑器设置 |
+| `editor/camera/*` `editor/screenshot/viewport` | 临时覆盖/恢复 2D/3D editor 相机并截图 |
+| `node/meta/*` `node/call` | 读写 meta；调用安全原生方法或节点显式声明的 `gdapi_callable_methods` |
+| `scene/instantiate` `scene/delete` | 保留 PackedScene 链接的实例化，以及受引用/打开场景保护的删除 |
+| `scene3d/*` `particles/*` | 3D light/environment/sky/camera/gridmap/CSG/MultiMesh 与 2D/3D GPU 粒子 |
 
-### M4 游戏系统域
+`MultiMeshInstance3D` 的非空 `instances` 需要活动渲染器；headless 模式返回 `not_supported`，避免将 RenderingServer dummy values 当作成功读回。
 
-M4 提供 51 条游戏系统路由，覆盖 Animation/AnimationTree、TileMap、Material/Shader、Audio、UI/Theme、2D Physics 与 2D Navigation。编辑器节点和属性修改返回 `undoable:true` 并接入 UndoRedo；资源、shader、Audio bus layout 与导航 bake 文件写入返回 `undoable:false`，覆盖已有文件直接生效（开发期工具，无 force 门禁），写入不可撤销。
+`scene/batch/plan` → `validate` → `apply` → `recover` 对多个未打开场景执行带 `plan_hash`、资源依赖校验及全事务回滚的属性重构；`scene/project/find_nodes`、`references`、`dependencies` 提供项目级引用扫描。
+
+### M4 游戏系统与 T8 资源/动画
+
+M4 涵盖 Animation/AnimationTree、TileMap、Material/Shader、Audio、UI/Theme、2D Physics 与 2D Navigation。增强能力还包括音频 bus 属性和 effects、AnimationTree blend graph 与 Tween、通用资源 typed 属性写入及保存读回、Theme 属性读取和异步 Texture/EditorResourcePreview PNG。编辑器界面操作和资源写入按真实 UndoRedo/文件状态验证。
 
 Physics 与 Navigation 当前只支持 2D。3D 节点、形状、地图或查询在 mutation 前返回 `not_supported`。`physics/raycast`、`navigation/path/get` 和 `navigation/agent/target` 通过运行中的游戏 probe 执行；停止游戏后请求会按 broker 清理语义失败。
 
@@ -398,7 +417,7 @@ Physics 与 Navigation 当前只支持 2D。3D 节点、形状、地图或查询
 
 M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项目诊断和受控导出路由。配置变更使用隔离 fixture 快照验证，持久化 mutation 返回 `undoable:false`，删除/修复/覆盖为不可撤销写入。
 
-诊断路由 `diagnostics/health`、`unused_resources`、`cycle_deps` 和 `script_errors` 返回稳定的 `{severity,code,message,path?,line?,details?}` finding，并支持 `roots`、`offset`、`limit` 分页。`uid/repair` 默认 dry-run。
+除 health、unused-resource、dependency-cycle 与 script-error diagnostics，`diagnostics/signal_flow`、`scene_complexity`、`script_references`、`project_statistics` 返回带位置/类型信息的静态扫描结果。无法从静态源文件证明运行期连接行为时显式标记为 `unknown`。
 
 `export/presets` 从 `export_presets.cfg` 发现预设，`export/run` 只使用固定 Godot 导出参数并校验项目内目标路径；缺少模板返回 `not_supported`，超时返回 `timeout` 并删除半成品产物。导出在独立的 `--editor --headless --recovery-mode` 子进程中执行：不加载编辑器插件，避免与正在运行的编辑器争用 `.godot/gdapi.json`；响应 `messages` 已去除 ANSI 转义与控制字符。导出能力仅覆盖桌面预设（PCK/Pack），Android 预设与部署不在目标与验收范围内。
 
@@ -410,11 +429,13 @@ M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项�
 | 文件/资源操作 | ❌ `undoable:false` | 直接覆盖 |
 | 运行期 mutation（M3 runtime/*） | ❌ `undoable:false` | 不适用 |
 
-所有 mutation 响应包含 `ok`、`changed`、`undoable` 字段。危险操作记录审计日志（含成功与失败）；其余 mutation 由 router 统一补记一条 `safety=mutation` 审计条目（路由/service 已自行审计的不会重复）。
+所有 mutation 响应包含 `ok`、`changed`、`undoable` 字段。Router 根据 `RouteDoc.mutates()` 记录 mutation 成功与失败（含 body 校验错误），handler 已自审计时不会重复；纯只读请求的失败不会误记为 mutation。
+
+审计 `list` 支持 `safety` 过滤（`mutation`/`runtime`/`file`/`dangerous`）及 `since` 游标分页。容量上限为 1000，普通 mutation 优先淘汰；危险/文件类记录在保护记录队列填满前不会被普通流量驱逐。
 
 ### M3 运行时验证
 
-M3 增补 35 个 runtime 路由（`runtime/...`）；M6 引入 `runtime/eval` 作为 v2 协议下运行进程内执行的能力，必须在 broker 协商 v2 后才能路由。这些路由需要项目处于运行状态：使用 `gdcli exec project/run` 启动游戏后通过 `runtime/status` 等待 `connected`。所有 runtime/* 请求统一经后台 broker 转发：优先走 EditorDebuggerPlugin ↔ EngineDebugger 通道，不可用时回退到项目内 `.godot/gdapi_runtime` 文件 transport；公共路由不直接调用 session API。
+M3 提供 runtime 路由；M6 引入 `runtime/eval` 作为 v2 协议下运行进程内执行的能力，必须在 broker 协商 v2 后才能路由。这些路由需要项目处于运行状态：使用 `gdcli exec project/run` 启动游戏后通过 `runtime/status` 等待 `connected`。所有 runtime/* 请求统一经后台 broker 转发：优先走 EditorDebuggerPlugin ↔ EngineDebugger 通道，不可用时回退到项目内 `.godot/gdapi_runtime` 文件 transport；公共路由不直接调用 session API。
 
 | 分类 | 路由数 | 说明 |
 |---|---|---|
@@ -426,7 +447,15 @@ M3 增补 35 个 runtime 路由（`runtime/...`）；M6 引入 `runtime/eval` �
 | `runtime/assert/condition\|node_exists\|property_equals\|signal_received` | 4 | 等待 / 断言，使用固定 json grammar，不调用 Expression/eval |
 | `runtime/signal/connect\|disconnect\|emit\|await` | 4 | 信号连接 / 等待 |
 
-所有 runtime 请求默认 5 秒超时，可被 broker.tick 清理；stop/disconnect 会同步失败所有 pending 让 await/call 收到 `conflict`。
+补充的 Runtime 路由：
+- `runtime/recording/*`：有界输入录制分页、回放、取消与 session reset 清理。
+- `runtime/monitor/*`：typed 属性跨帧采样、cursor 分页、停止和目标消失状态。
+- `runtime/particles/info`：运行中读取 GPU emitter、材质、绘制资源和 frame。
+- `runtime/test/*` `runtime/assert/screen_text`：声明式 JSON 场景 QA、压力测试/报告和 `Control.text` 断言，不执行 eval 或源码。
+- `runtime/screenshot/compare`：比较实际 PNG 像素、尺寸、阈值、误差统计和差异框。
+- `runtime/tween/*` `runtime/node/meta/*`：typed tween 运行状态与受控运行节点 meta。
+
+等待阈值通过 `GDAPI_E2E_*_SECONDS` 显式配置；成功等待统计只给建议，不改动验收门限。独立 EngineDebugger gate 要求 `transport=engine_debugger`，验证协议 v2、运行时读写、输入、PNG 与 stop，不接受 file transport 回退。
 
 M6 高风险能力（`editor/eval`、`runtime/eval`、`process/run`、`network/http_request`、
 `filesystem/batch/delete`、`filesystem/batch/replace`、`filesystem/batch/recover`）自 2026-08-01 起默认可用，不再需要额外权限配置或

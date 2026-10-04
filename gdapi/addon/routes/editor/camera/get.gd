@@ -20,6 +20,7 @@ func doc() -> GdApiRouteDoc:
 		. make("Read the real editor viewport camera")
 		. param("dimension", "String", false, "2d or 3d (default 2d)")
 		. param("index", "int", false, "3D viewport index 0..3")
+		. example('{"dimension":"2d"}')
 		. returns(
 			"Editor operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

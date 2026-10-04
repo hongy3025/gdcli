@@ -9,7 +9,7 @@ import zlib
 
 import pytest
 
-from .conftest import exec_error, exec_ok, runtime_counter, wait_for, _fixture_hook_reset_once
+from .conftest import exec_error, exec_ok, runtime_counter, wait_for, reset_fixture, _fixture_hook_reset_once
 
 TARGET = "/root/RuntimeMain/ProbeTarget"
 
@@ -33,7 +33,7 @@ def test_record_real_input_reset_then_replay(m3_running):
     for _ in range(2):
         exec_ok(env, "runtime/input/key", {"keycode": 32, "pressed": True})
         exec_ok(env, "runtime/input/key", {"keycode": 32, "pressed": False})
-    wait_for(lambda: runtime_counter(env, "input_keys") == 2)
+    wait_for(lambda: runtime_counter(env, "input_keys") == 4)
     stopped = exec_ok(env, "runtime/recording/stop")
     recorded = exec_ok(env, "runtime/recording/read", {"limit": 100})
     assert recorded["recording_id"] == started["recording_id"]
@@ -49,7 +49,7 @@ def test_record_real_input_reset_then_replay(m3_running):
     assert replay["status"] == "completed"
     assert replay["completed_events"] == 4
     assert replay["elapsed_ms"] >= recorded["items"][-1]["at_ms"]
-    wait_for(lambda: runtime_counter(env, "input_keys") == 2)
+    wait_for(lambda: runtime_counter(env, "input_keys") == 4)
 
 
 def test_replay_timeout_and_cancellation_complete_real_requests(m3_running):
@@ -221,3 +221,82 @@ def test_png_comparison_current_viewport_and_dimension_allocation_bound(m3_runni
     oversized[16:20] = struct.pack(">I", 1921)
     error = exec_error(m3_running, "runtime/screenshot/compare", {"expected": {"data_base64": base64.b64encode(oversized).decode("ascii")}, "actual": png()})
     assert error["code"] == "invalid_param"
+
+
+def test_particle_runtime_observes_both_gpu_types_in_game_process(m3_running):
+    reset_fixture(m3_running)
+    for name, kind, amount, lifetime, draw in [
+        ("GPU2D", "GPUParticles2D", 12, 2.5, "texture"),
+        ("GPU3D", "GPUParticles3D", 18, 3.5, "draw_pass_1"),
+    ]:
+        result = exec_ok(m3_running, "runtime/particles/info", {"node_path": "/root/RuntimeMain/ParticlesFixture/" + name})
+        assert (result["type"], result["amount"], result["lifetime"]) == (kind, amount, lifetime)
+        assert result["emitting"] is False
+        assert result["inside_tree"] is True
+        assert result["process_frame"] > 0
+        assert result["process_material"]["class"] == "ParticleProcessMaterial"
+        assert result["properties"][draw]["class"] == ("GradientTexture2D" if name == "GPU2D" else "QuadMesh")
+    assert exec_error(m3_running, "runtime/particles/info", {"node_path": "/root/RuntimeMain/ProbeTarget"})["code"] == "invalid_param"
+    assert exec_error(m3_running, "runtime/particles/info", {"node_path": "/root/RuntimeMain/Missing"})["code"] == "not_found"
+
+
+def _tween_status(env, tween_id):
+    return exec_ok(env, "runtime/tween/status", {"id": tween_id})
+
+
+def test_tween_intermediate_completion_and_cancellation(m3_running):
+    reset_fixture(m3_running)
+    request = {"node_path": TARGET, "property": "position", "from": {"type": "Vector2", "value": [0, 0]}, "to": {"type": "Vector2", "value": [100, 40]}, "duration": 1.5, "trans": 0, "ease": 0}
+    started = exec_ok(m3_running, "runtime/tween/start", request)
+    tween_id = started["id"]
+    assert started["state"] == "running" and started["undoable"] is False
+    time.sleep(0.2)
+    intermediate = _tween_status(m3_running, tween_id)
+    assert intermediate["state"] == "running"
+    assert 0 < intermediate["progress"] < 1
+    assert 0 < intermediate["value"]["value"][0] < 100
+    later = _tween_status(m3_running, tween_id)
+    assert later["value"]["value"][0] > intermediate["value"]["value"][0]
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        finished = _tween_status(m3_running, tween_id)
+        if finished["state"] == "completed":
+            break
+        time.sleep(0.05)
+    assert finished["state"] == "completed"
+    assert finished["value"] == {"type": "Vector2", "value": [100.0, 40.0]}
+    second = exec_ok(m3_running, "runtime/tween/start", request | {"to": {"type": "Vector2", "value": [500, 100]}, "duration": 3.0})
+    time.sleep(0.2)
+    stopped = exec_ok(m3_running, "runtime/tween/stop", {"id": second["id"]})
+    assert stopped["state"] == "cancelled" and stopped["changed"] is True
+    assert stopped["value"]["value"][0] < 500
+    time.sleep(0.2)
+    assert _tween_status(m3_running, second["id"])["value"] == stopped["value"]
+    assert exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"] == stopped["value"]
+    assert exec_ok(m3_running, "runtime/tween/stop", {"id": second["id"]})["changed"] is False
+
+
+def test_tween_invalid_requests_conflicts_and_target_cleanup(m3_running):
+    reset_fixture(m3_running)
+    request = {"node_path": TARGET, "property": "position", "to": {"type": "Vector2", "value": [100, 40]}, "duration": 2.0}
+    baseline = exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"]
+    for changes, code in [
+        ({"duration": 0}, "invalid_param"),
+        ({"duration": -1}, "invalid_param"),
+        ({"to": 5}, "invalid_param"),
+        ({"ease": 10}, "invalid_param"),
+        ({"trans": -1}, "invalid_param"),
+        ({"property": "script"}, "permission_denied"),
+        ({"node_path": "/root/GdApiRuntimeProbe"}, "permission_denied"),
+    ]:
+        assert exec_error(m3_running, "runtime/tween/start", request | changes)["code"] == code
+        assert exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"] == baseline
+    started = exec_ok(m3_running, "runtime/tween/start", request)
+    assert exec_error(m3_running, "runtime/tween/start", request)["code"] == "conflict"
+    exec_ok(m3_running, "runtime/tween/stop", {"id": started["id"]})
+    created = exec_ok(m3_running, "runtime/node/create", {"parent_path": "/root/RuntimeMain", "type": "Node2D", "name": "TweenDisposable"})
+    disposable = exec_ok(m3_running, "runtime/tween/start", request | {"node_path": created["node_path"]})
+    exec_ok(m3_running, "runtime/node/remove", {"node_path": created["node_path"]})
+    time.sleep(0.1)
+    assert _tween_status(m3_running, disposable["id"])["state"] == "target_lost"
+    assert exec_error(m3_running, "runtime/tween/status", {"id": "missing"})["code"] == "not_found"

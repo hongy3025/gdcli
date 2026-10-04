@@ -53,8 +53,8 @@ jobs:
           "GODOT_BIN=$godot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Format, lint, clippy, Rust and Python unit gates
         run: uv run python scripts/check.py --gate format --gate clippy --gate unit
-      - name: Full file session then independent EngineDebugger protocol-2 session
-        run: uv run python scripts/check.py --gate file --gate engine
+      - name: Full file, EngineDebugger and real-renderer sessions
+        run: uv run python scripts/check.py --gate file --gate engine --gate render
       - name: Parent wall-clock full-suite budget
         run: uv run python scripts/check.py --gate budget
       - name: Publish measured waits and budget

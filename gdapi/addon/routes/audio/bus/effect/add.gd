@@ -22,8 +22,10 @@ func doc() -> GdApiRouteDoc:
 		. param("parameters", "Object", false, "效果属性，严格类型与范围校验", "")
 		. param("enabled", "bool", false, "效果启用状态", "")
 		. example(
-			'{"name": "SFX", "slot": 0, "type": "AudioEffectAmplify", '
-			+ '"parameters": {"volume_db": -3}, "enabled": true}'
+			(
+				'{"name": "SFX", "slot": 0, "type": "AudioEffectAmplify", '
+				+ '"parameters": {"volume_db": -3}, "enabled": true}'
+			)
 		)
 		. returns("result", {"undoable": "bool", "changed": "bool"})
 	)

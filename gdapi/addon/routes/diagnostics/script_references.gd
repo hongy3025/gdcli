@@ -17,10 +17,12 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("分析脚本与场景的真实静态引用")
 		. desc(
-			"词法扫描 extends/preload/load/class_name、函数与信号引用，"
-			+ "跳过注释与字符串中的代码；场景 script 来自 SceneState。"
-			+ "附着脚本随场景扫描，文件/行号保留；二进制场景行为行号为0。"
-			+ "不做类型推断，动态路径/接收者明确 unknown。"
+			(
+				"词法扫描 extends/preload/load/class_name、函数与信号引用，"
+				+ "跳过注释与字符串中的代码；场景 script 来自 SceneState。"
+				+ "附着脚本随场景扫描，文件/行号保留；二进制场景行为行号为0。"
+				+ "不做类型推断，动态路径/接收者明确 unknown。"
+			)
 		)
 		. param("roots", "Array[String]", false, "扫描文件或目录", ["res://"])
 		. param("path", "String", false, "单文件/目录选择，覆盖 roots")

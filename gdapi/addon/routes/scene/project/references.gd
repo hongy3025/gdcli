@@ -21,5 +21,6 @@ func doc() -> GdApiRouteDoc:
 		. param("root", "String", false, "递归扫描根", "res://")
 		. param("scenes", "Array[String]", false, "显式场景列表，替代 root")
 		. param("node_path", "String", false, "筛选引用目标，空值返回全部")
+		. example('{"node_path":"."}')
 		. returns("扫描结果", {"items": "Array[Dictionary]", "warnings": "Array[String]"})
 	)

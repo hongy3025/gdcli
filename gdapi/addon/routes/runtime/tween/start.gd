@@ -19,8 +19,10 @@ func doc() -> GdApiRouteDoc:
 		. param("ease", "int", false, "Tween.EaseType枚举，默认IN_OUT", "")
 		. param("trans", "int", false, "Tween.TransitionType枚举，默认LINEAR", "")
 		. example(
-			'{"node_path": "/root/RuntimeMain/ProbeTarget", "property": "position", '
-			+ '"to": {"type": "Vector2", "value": [100, 0]}, "duration": 1.0}'
+			(
+				'{"node_path": "/root/RuntimeMain/ProbeTarget", "property": "position", '
+				+ '"to": {"type": "Vector2", "value": [100, 0]}, "duration": 1.0}'
+			)
 		)
 		. returns(
 			"result",

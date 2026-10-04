@@ -20,6 +20,7 @@ func doc() -> GdApiRouteDoc:
 		. desc("按资源路径读取真实属性、类型、usage 与可写状态；值使用 VariantCodec。")
 		. param("path", "String", true, "res:// 或 user:// 资源路径")
 		. param("property", "String", true, "资源真实属性名")
+		. example('{"path":"res://resources/player_data.tres","property":"resource_name"}')
 		. returns(
 			"result", {"value": "Variant", "type": "String", "usage": "int", "writable": "bool"}
 		)

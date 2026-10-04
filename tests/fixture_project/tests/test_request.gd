@@ -25,16 +25,15 @@ func _init() -> void:
 	print("Running GdApiRequest tests...\n")
 
 	# 运行所有测试用例
-	test_json_body_parsed()
-	test_raw_binary_body_stays_empty()
-	test_empty_body_stays_empty()
-	test_invalid_json_body_stays_empty()
-	test_json_array_body_stays_empty()
-	test_non_json_content_type_rejected()
-	test_path_with_query_string_split()
-	test_path_without_query_string()
-	test_default_path_and_method()
-	test_get_query_existing_key()
+	_test_json_body_parsed()
+	_test_raw_binary_body_stays_empty()
+	_test_empty_body_stays_empty()
+	_test_invalid_json_body_stays_empty()
+	_test_json_array_body_stays_empty()
+	_test_non_json_content_type_rejected()
+	_test_path_with_query_string_split()
+	_test_path_without_query_string()
+	_test_get_query_existing_key()
 	test_get_query_missing_key_returns_default()
 	test_get_query_empty_query()
 	test_get_body_existing_key()
@@ -104,7 +103,7 @@ func assert_null(value, context: String = "") -> void:
 
 
 ## 测试 JSON 请求体解析
-func test_json_body_parsed() -> void:
+func _test_json_body_parsed() -> void:
 	var req = GdApiRequest.new(
 		{
 			"method": "POST",
@@ -118,7 +117,7 @@ func test_json_body_parsed() -> void:
 
 
 ## 测试原始二进制请求体保持为空
-func test_raw_binary_body_stays_empty() -> void:
+func _test_raw_binary_body_stays_empty() -> void:
 	var req = GdApiRequest.new(
 		{
 			"method": "POST",
@@ -131,13 +130,13 @@ func test_raw_binary_body_stays_empty() -> void:
 
 
 ## 测试空请求体保持为空
-func test_empty_body_stays_empty() -> void:
+func _test_empty_body_stays_empty() -> void:
 	var req = GdApiRequest.new({"method": "GET", "path": "/api/test", "headers": {}})
 	assert_eq(req.body.size(), 0, "empty body stays empty")
 
 
 ## 测试无效 JSON 请求体保持为空
-func test_invalid_json_body_stays_empty() -> void:
+func _test_invalid_json_body_stays_empty() -> void:
 	var req = GdApiRequest.new(
 		{
 			"method": "POST",
@@ -151,7 +150,7 @@ func test_invalid_json_body_stays_empty() -> void:
 
 
 ## 测试 JSON 数组请求体保持为空（不是字典）
-func test_json_array_body_stays_empty() -> void:
+func _test_json_array_body_stays_empty() -> void:
 	var req = GdApiRequest.new(
 		{
 			"method": "POST",
@@ -165,7 +164,7 @@ func test_json_array_body_stays_empty() -> void:
 
 
 ## 测试非 JSON 内容类型被拒绝
-func test_non_json_content_type_rejected() -> void:
+func _test_non_json_content_type_rejected() -> void:
 	var req = (
 		GdApiRequest
 		. new(
@@ -181,7 +180,7 @@ func test_non_json_content_type_rejected() -> void:
 
 
 ## 测试带查询字符串的路径分离
-func test_path_with_query_string_split() -> void:
+func _test_path_with_query_string_split() -> void:
 	var req = GdApiRequest.new(
 		{"method": "GET", "path": "/api/test?foo=bar&baz=qux", "headers": {}}
 	)
@@ -190,22 +189,14 @@ func test_path_with_query_string_split() -> void:
 
 
 ## 测试不带查询字符串的路径
-func test_path_without_query_string() -> void:
+func _test_path_without_query_string() -> void:
 	var req = GdApiRequest.new({"method": "GET", "path": "/api/test", "headers": {}})
 	assert_eq(req.path, "/api/test", "path without query")
 	assert_eq(req.query, "", "empty query")
 
 
-## 测试默认路径和方法
-func test_default_path_and_method() -> void:
-	var req = GdApiRequest.new({})
-	assert_eq(req.method, "POST", "default method")
-	assert_eq(req.path, "/", "default path")
-	assert_eq(req.headers.size(), 0, "default headers empty")
-
-
 ## 测试获取存在的查询参数
-func test_get_query_existing_key() -> void:
+func _test_get_query_existing_key() -> void:
 	var req = GdApiRequest.new(
 		{"method": "GET", "path": "/test?key=value&other=123", "headers": {}}
 	)

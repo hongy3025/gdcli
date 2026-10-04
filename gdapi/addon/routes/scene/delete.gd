@@ -34,6 +34,7 @@ func doc() -> GdApiRouteDoc:
 			false,
 			"Close current clean scene before deletion; other open tabs are conflicts"
 		)
+		. example('{"path":"res://scenes/runtime_qa_scene.tscn","dry_run":true}')
 		. returns(
 			"Operation result",
 			{"ok": "bool", "changed": "bool for mutations", "undoable": "bool for mutations"}

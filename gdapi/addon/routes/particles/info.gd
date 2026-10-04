@@ -17,10 +17,13 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("particles/info")
 		. desc(
-			"Reads edited-scene GPU particle parameters, "
-			+ "ParticleProcessMaterial and actual texture/draw-pass resources."
+			(
+				"Reads edited-scene GPU particle parameters, "
+				+ "ParticleProcessMaterial and actual texture/draw-pass resources."
+			)
 		)
 		. param("node_path", "String", true, "Absolute edited-scene node path")
+		. example('{"node_path":"/root/Main/Particles"}')
 		. returns(
 			"Configured state",
 			{

@@ -11,10 +11,12 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("Compare real PNG pixels")
 		. desc(
-			"Decodes PNGs and computes normalized RGBA pixel errors in the game process. "
-			+ "PNG allocation is bounded to 1920x1080 and 3 MiB. "
-			+ "Omit actual to compare the current runtime viewport. "
-			+ "Dimension mismatch returns matches=false and dimensions_match=false."
+			(
+				"Decodes PNGs and computes normalized RGBA pixel errors in the game process. "
+				+ "PNG allocation is bounded to 1920x1080 and 3 MiB. "
+				+ "Omit actual to compare the current runtime viewport. "
+				+ "Dimension mismatch returns matches=false and dimensions_match=false."
+			)
 		)
 		. param("expected", "Dictionary", true, "{path:res://...png} or {data_base64:...}")
 		. param("actual", "Dictionary", false, "Second PNG; omitted captures current viewport")
@@ -26,6 +28,17 @@ func doc() -> GdApiRouteDoc:
 		)
 		. param("max_diff_ratio", "float", false, "0..1 tolerated changed pixel ratio; default 0")
 		. param("timeout_ms", "int", false, "1..25000 ms")
+		. example(
+			(
+				'{"expected":{"data_base64":"'
+				+ "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1Pe"
+				+ "AAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+				+ '"},"actual":{"data_base64":"'
+				+ "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1Pe"
+				+ "AAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+				+ '"}}'
+			)
+		)
 		. returns(
 			"Pixel comparison",
 			{

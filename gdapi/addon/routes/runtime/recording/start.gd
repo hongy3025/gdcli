@@ -12,10 +12,13 @@ func doc() -> GdApiRouteDoc:
 		. make("Record real runtime input")
 		. mutates()
 		. desc(
-			"Captures supported InputEvents in the running game, including broker-controlled input. "
-			+ "Stops automatically at max_events."
+			(
+				"Captures supported InputEvents in the running game, including broker-controlled input. "
+				+ "Stops automatically at max_events."
+			)
 		)
 		. param("max_events", "int", false, "1..1000; default 100")
+		. example("{}")
 		. returns(
 			"Recording",
 			{"recording_id": "String", "status": "String", "changed": "bool", "undoable": "bool"}
