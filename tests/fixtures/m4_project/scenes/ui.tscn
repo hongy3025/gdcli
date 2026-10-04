@@ -1,0 +1,8 @@
+[gd_scene format=3]
+
+[node name="UiDomain" type="Control"]
+
+[node name="Button" type="Button" parent="."]
+offset_right = 120.0
+offset_bottom = 32.0
+text = "M4"

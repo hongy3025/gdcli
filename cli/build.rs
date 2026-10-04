@@ -14,4 +14,7 @@ fn main() {
 
     // Re-run if the workspace Cargo.toml changes (version source)
     println!("cargo:rerun-if-changed=../Cargo.toml");
+    // include_dir! embeds this tree in `gdcli install`; route/service additions
+    // must rebuild the CLI before E2E installs a private fixture copy.
+    println!("cargo:rerun-if-changed=../gdapi/addon");
 }

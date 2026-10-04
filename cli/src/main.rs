@@ -13,9 +13,7 @@
 //!   gdcli --port 6005 --json references player.gd:Player.health
 //!   gdcli --port 6005 diagnostics
 //!
-//! 【async fn main 说明】
-//! Rust 标准库的 main 不能是 async 的。
-//! #[tokio::main] 宏会把 main 包装成同步入口，内部启动 tokio 运行时来执行 async 代码。
+//! HTTP exec 和 install 直接同步执行；仅 LSP 命令创建单线程 tokio 运行时。
 
 // ==================== 版本号常量（由 build.rs 自动生成） ====================
 
@@ -132,7 +130,7 @@ enum Cmd {
     Exec {
         /// 命令名
         command: String,
-        /// 位置参数（command-help 使用：命令路径）
+        /// 位置参数（`command/doc <route>` 使用：待查询路由路径）
         args: Vec<String>,
         /// 请求 JSON 数据（字面 JSON、@file 或 - 表示 stdin）
         #[arg(long)]
@@ -238,9 +236,8 @@ pub(crate) fn parse_target(target: &str, _project: Option<&Path>) -> Result<Targ
 
 // ==================== 程序入口 ====================
 
-#[tokio::main]
-async fn main() {
-    if let Err(e) = run().await {
+fn main() {
+    if let Err(e) = run() {
         eprintln!("{}", e);
         std::process::exit(1);
     }
@@ -279,7 +276,7 @@ fn discover_lsp_port(explicit_port: Option<u16>, project_root: Option<&Path>) ->
 /// 3. 连接 LSP 服务器
 /// 4. 根据子命令分发处理
 /// 5. 断开连接并返回结果
-async fn run() -> Result<()> {
+fn run() -> Result<()> {
     let cli = Cli::parse();
     let project = cli.project.as_deref();
 
@@ -314,18 +311,24 @@ async fn run() -> Result<()> {
         Cmd::Status => {
             let project_root = project::resolve_project_root(project).ok();
             let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
-            return commands::lsp::handle_status_command(
-                &cli.host,
-                lsp_port,
-                project_root.as_deref(),
-                cli.json,
-            )
-            .await;
+            return tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(commands::lsp::handle_status_command(
+                    &cli.host,
+                    lsp_port,
+                    project_root.as_deref(),
+                    cli.json,
+                ));
         }
         Cmd::Lsp { ref sub } => {
             let project_root = project::resolve_project_root(project).ok();
             let lsp_port = discover_lsp_port(cli.port, project_root.as_deref());
 
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(async {
             let client = match GodotLspClient::connect(&cli.host, lsp_port, project).await {
                 Ok(c) => c,
                 Err(_) => {
@@ -410,7 +413,8 @@ async fn run() -> Result<()> {
             .await;
 
             client.disconnect().await;
-            return result;
+            result
+            });
         }
     }
 

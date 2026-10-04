@@ -7,18 +7,25 @@
 //! - `queue`: 请求队列，线程安全地传递 HTTP 请求
 //! - `http`: HTTP 协议解析器
 //! - `server`: HTTP 服务器核心实现
+//! - `process_runner`: shell-free 进程执行器
 //!
 //! GDExtension 集成：
 //! 通过 `#[gdextension]` 宏将 Rust 代码暴露为 Godot 可调用的类 `GdApiServer`。
 //! GDScript 可以直接调用 `GdApiServer.create()`、`start()`、`poll_request()` 等方法。
 
+pub mod atomic_file;
 pub mod http;
+pub mod process_runner;
 pub mod queue;
 pub mod server;
 
 use godot::prelude::*;
 use http::validate_response_header;
+use process_runner::{PollOutcome, ProcessRunnerCore};
+use queue::{CancelReason, RequestControl};
 use server::ServerCore;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// GDExtension 入口标记结构体。
 ///
@@ -149,9 +156,61 @@ impl GdApiServer {
                 // 优化：使用 from slice 替代逐字节 push
                 let body = PackedByteArray::from(req.body.as_slice());
                 dict.set(&GString::from("body"), &body.to_variant());
+                let control = Gd::from_object(GdApiRequestControl { core: req.control });
+                dict.set(&GString::from("control"), &control.to_variant());
                 dict.to_variant()
             }
         }
+    }
+
+    /// Returns whether an existing path resolves inside the canonical root.
+    #[func]
+    fn path_is_within_root(path: GString, allowed_root: GString) -> bool {
+        atomic_file::ensure_path_within_root(
+            &PathBuf::from(path.to_string()),
+            &PathBuf::from(allowed_root.to_string()),
+        )
+        .is_ok()
+    }
+
+    /// Creates a collision-safe temporary file next to a validated target.
+    #[func]
+    fn create_temp_file_for_path(
+        target_path: GString,
+        allowed_root: GString,
+        protected_roots: PackedStringArray,
+        contents: PackedByteArray,
+    ) -> Dictionary<GString, Variant> {
+        let target = PathBuf::from(target_path.to_string());
+        let root = PathBuf::from(allowed_root.to_string());
+        let protected = protected_roots
+            .to_vec()
+            .into_iter()
+            .map(|path| PathBuf::from(path.to_string()))
+            .collect::<Vec<_>>();
+        let contents = contents.to_vec();
+        let mut result = Dictionary::<GString, Variant>::new();
+        match atomic_file::create_sibling_temp(&target, &root, &protected, &contents) {
+            Ok(temp) => {
+                result.set(&GString::from("ok"), &Variant::from(true));
+                result.set(
+                    &GString::from("path"),
+                    &Variant::from(GString::from(temp.path.to_string_lossy().as_ref())),
+                );
+                result.set(
+                    &GString::from("target_path"),
+                    &Variant::from(GString::from(temp.target_path.to_string_lossy().as_ref())),
+                );
+            }
+            Err(error) => {
+                result.set(&GString::from("ok"), &Variant::from(false));
+                result.set(
+                    &GString::from("error"),
+                    &Variant::from(GString::from(error.to_string().as_str())),
+                );
+            }
+        }
+        result
     }
 
     /// 发送 HTTP 响应。
@@ -168,17 +227,17 @@ impl GdApiServer {
         status: i64,
         headers: Dictionary<GString, Variant>,
         body: PackedByteArray,
-    ) {
+    ) -> bool {
         if id < 0 {
             godot_error!("[gdapi] send_response rejected negative request id: {}", id);
-            return;
+            return false;
         }
         if !(100..=599).contains(&status) {
             godot_error!(
                 "[gdapi] send_response rejected invalid HTTP status: {}",
                 status
             );
-            return;
+            return false;
         }
         let mut hdrs: Vec<(String, String)> = Vec::new();
         for (k, v) in headers.iter_shared() {
@@ -186,17 +245,149 @@ impl GdApiServer {
             let vv: String = v.to_string();
             if let Err(e) = validate_response_header(&kk, &vv) {
                 godot_error!("[gdapi] send_response rejected invalid header: {}", e);
-                return;
+                return false;
             }
             hdrs.push((kk, vv));
         }
-        // 优化：使用 to_vec() 替代逐字节 push
         let body_vec = body.to_vec();
-        if let Err(e) = self
+        match self
             .core
             .send_response_raw(id as u64, status as u16, hdrs, body_vec)
         {
-            godot_error!("[gdapi] send_response failed: {}", e);
+            Ok(()) => true,
+            Err(error) => {
+                godot_error!("[gdapi] send_response failed: {}", error);
+                false
+            }
         }
+    }
+}
+
+#[derive(GodotClass)]
+#[class(base=RefCounted, no_init)]
+pub struct GdApiRequestControl {
+    core: Arc<RequestControl>,
+}
+
+#[godot_api]
+impl GdApiRequestControl {
+    #[func]
+    fn remaining_ms(&self) -> i64 {
+        self.core.remaining_ms() as i64
+    }
+
+    #[func]
+    fn cancellation_reason(&self) -> GString {
+        if self.core.remaining_ms() == 0 {
+            self.core.cancel(CancelReason::Timeout);
+        }
+        match self.core.reason() {
+            Some(CancelReason::Timeout) => "timeout",
+            Some(CancelReason::Disconnected) => "disconnected",
+            Some(CancelReason::Shutdown) => "shutdown",
+            None => "",
+        }
+        .into()
+    }
+}
+
+#[derive(GodotClass)]
+#[class(base=RefCounted, no_init)]
+pub struct GdApiProcessRunner {
+    core: ProcessRunnerCore,
+}
+
+#[godot_api]
+impl GdApiProcessRunner {
+    #[func]
+    fn create() -> Gd<Self> {
+        Gd::from_object(Self {
+            core: ProcessRunnerCore::new(),
+        })
+    }
+
+    #[func]
+    fn start(
+        &mut self,
+        request: Gd<GdApiRequestControl>,
+        executable: GString,
+        args: PackedStringArray,
+        cwd: GString,
+        timeout_ms: i64,
+        max_output_bytes: i64,
+    ) -> i64 {
+        let executable = executable.to_string();
+        let argv = args
+            .to_vec()
+            .into_iter()
+            .map(|arg| arg.to_string())
+            .collect::<Vec<_>>();
+        let cwd_path = std::path::PathBuf::from(cwd.to_string());
+        match self.core.start_for_request(
+            executable.as_str(),
+            &argv,
+            &cwd_path,
+            timeout_ms,
+            max_output_bytes,
+            Arc::clone(&request.bind().core),
+        ) {
+            Ok(id) => id,
+            Err(err) => {
+                godot_error!("[gdapi] process_runner start failed: {}", err);
+                -1
+            }
+        }
+    }
+
+    #[func]
+    fn poll(&mut self, id: i64) -> Dictionary<GString, Variant> {
+        let mut dict = Dictionary::<GString, Variant>::new();
+        if id <= 0 {
+            return dict;
+        }
+
+        match self.core.poll(id) {
+            PollOutcome::Running => {
+                dict.set(&GString::from("done"), &Variant::from(false));
+            }
+            PollOutcome::Done(result) => {
+                dict.set(&GString::from("done"), &Variant::from(true));
+                dict.set(
+                    &GString::from("exit_code"),
+                    &Variant::from(result.exit_code.unwrap_or(-1) as i64),
+                );
+                dict.set(
+                    &GString::from("timed_out"),
+                    &Variant::from(result.timed_out),
+                );
+                dict.set(
+                    &GString::from("cancelled"),
+                    &Variant::from(result.cancelled),
+                );
+                dict.set(
+                    &GString::from("stdout"),
+                    &Variant::from(GString::from(result.stdout.as_str())),
+                );
+                dict.set(
+                    &GString::from("stderr"),
+                    &Variant::from(GString::from(result.stderr.as_str())),
+                );
+                dict.set(
+                    &GString::from("truncated"),
+                    &Variant::from(result.truncated),
+                );
+            }
+            PollOutcome::Missing => {}
+        }
+
+        dict
+    }
+
+    #[func]
+    fn cancel(&mut self, id: i64) -> bool {
+        if id <= 0 {
+            return false;
+        }
+        self.core.cancel(id)
     }
 }

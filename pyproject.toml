@@ -4,11 +4,18 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
     "pytest>=8.0",
+    "pytest-timeout>=2.3",
 ]
 
+[dependency-groups]
+dev = ["gdtoolkit>=4.5"]
+
 [tool.pytest.ini_options]
-testpaths = ["tests/e2e"]
-addopts = "-v"
+pythonpath = ["."]
+addopts = "-v -m 'not budget and not engine_transport and not real_renderer'"
 markers = [
-    "e2e: requires Godot editor running (deselect with '-m not e2e')",
+    "e2e: requires Godot editor running (only runs when '-m e2e' is passed)",
+    "budget: runs the nested full-suite walltime acceptance test (excluded by default; use '-m budget' to run)",
+    "engine_transport: independent EngineDebugger protocol-2 data-plane acceptance session (excluded by default)",
+    "real_renderer: requires a non-headless editor and working OpenGL renderer; run with 'scripts/check.py --gate render'",
 ]

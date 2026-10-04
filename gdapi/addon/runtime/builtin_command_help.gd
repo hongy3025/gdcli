@@ -1,14 +1,17 @@
 ## 内置命令帮助路由
 ##
-## POST /command-help {command:"path"} → 返回指定命令的完整帮助文档
+## POST `command/doc` {command:"path"} → 返回指定命令的完整帮助文档
 ##
 ## 路由表由 router.scan() 完成后调用 set_routes() 注入。
 
 @tool
 extends "res://addons/gdapi/runtime/route_handler.gd"
 
+const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
+
 ## 完整路由表：{ path: handler_script }，由 router 注入
 var _routes: Dictionary = {}
+
 
 ## 由 router 在扫描完成后调用，传入完整路由表
 ##
@@ -16,7 +19,8 @@ var _routes: Dictionary = {}
 func set_routes(routes: Dictionary) -> void:
 	_routes = routes
 
-## 处理 /command-help 请求
+
+## 处理 `command/doc` 请求
 ##
 ## 必须提供 command 参数，返回该命令的完整文档；
 ## 命令不存在 → 404 not_found。
@@ -27,28 +31,38 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var command: String = req.get_body("command", "")
 
 	if command.is_empty():
-		res.error("missing required parameter: command", "invalid_request", 400)
+		res.error("missing required parameter: command", ErrorCodes.MISSING_PARAM, 400)
 		return
 
 	if not _routes.has(command):
-		res.error("command not found: " + command, "not_found", 404)
+		res.error("command not found: " + command, ErrorCodes.NOT_FOUND, 404)
 		return
 
-	var handler = _routes[command].new()
+	var handler_script: Script = _routes[command] as Script
+	if handler_script == null:
+		res.error("command handler is invalid: " + command, ErrorCodes.GODOT_ERROR, 500)
+		return
+	var handler = handler_script.new()
 	var detail: Dictionary = handler.doc().to_dict()
 	detail["path"] = command
 	res.json({"ok": true, "doc": detail})
 
+
 ## 自身的帮助文档
 ##
-## @return GdApiRouteDoc 描述 /command-help 路由的语义
+## @return GdApiRouteDoc 描述 `command/doc` 路由的语义
 func doc() -> GdApiRouteDoc:
 	return (
-		GdApiRouteDoc.make("查询单个命令的详细帮助文档")
-		.desc("返回指定命令的完整文档，包含参数、返回值和示例")
-		.param("command", "String", true, "要查询的命令路径", "")
-		.returns("命令详细文档", {
-			"ok": "bool, 是否成功",
-			"doc": "Dictionary, 命令完整文档",
-		})
+		GdApiRouteDoc
+		. make("查询单个命令的详细帮助文档")
+		. desc("返回指定命令的完整文档，包含参数、返回值和示例")
+		. param("command", "String", true, "要查询的命令路径", "")
+		. example('{"command":"gdapi/health/ping"}')
+		. returns(
+			"命令详细文档",
+			{
+				"ok": "bool, 是否成功",
+				"doc": "Dictionary, 命令完整文档",
+			}
+		)
 	)

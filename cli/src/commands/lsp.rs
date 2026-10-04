@@ -262,7 +262,7 @@ pub(crate) async fn handle_status_command(
     let http_status = if let Some(root) = project {
         match crate::gdapi_meta::read(root) {
             Ok(meta) => {
-                let url = format!("http://{}:{}/ping", host, meta.http_port);
+                let url = format!("http://{}:{}/gdapi/health/ping", host, meta.http_port);
                 let mut req = ureq::post(&url).timeout(std::time::Duration::from_secs(3));
                 if let Some(ref token) = meta.token {
                     if !token.is_empty() {

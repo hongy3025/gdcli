@@ -1,0 +1,24 @@
+; M4 game-system fixture. Each E2E test copies this project before editing it.
+config_version=5
+
+[application]
+
+config/name="gdcli_m4_fixture"
+run/main_scene="res://scenes/physics.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+GdApiRuntimeProbe="*res://addons/gdapi/runtime/runtime_probe.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdapi/plugin.cfg", "res://addons/gdapi_test/plugin.cfg")
+
+[gdapi]
+
+runtime_force_file_transport=true
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"

@@ -1,0 +1,18 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://analysis/flow.gd" id="1_flow"]
+[ext_resource type="Script" path="res://analysis/base.gd" id="2_base"]
+
+[node name="Analysis" type="Node"]
+script = ExtResource("1_flow")
+
+[node name="Branch" type="Node" parent="."]
+
+[node name="Leaf" type="Node2D" parent="Branch"]
+script = ExtResource("2_base")
+
+[node name="Timer" type="Timer" parent="Branch/Leaf"]
+
+[node name="Tip" type="Marker2D" parent="Branch/Leaf/Timer"]
+
+[connection signal="pulse" from="." to="." method="_on_pulse"]

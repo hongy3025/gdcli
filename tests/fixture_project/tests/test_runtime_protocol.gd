@@ -1,0 +1,193 @@
+## GdApiRuntimeProtocol 单元测试
+# gdlint: ignore=max-public-methods
+##
+## 测试运行时协议消息的构造和验证：
+## - request(id, op, payload) 构造合法消息
+## - validate_message 对版本/ID/kind/op/大小做边界校验
+## - 拒绝 eval/process-run/network/http_request 等保留 op
+
+@tool
+extends SceneTree
+
+const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
+
+var passed := 0
+var failed := 0
+
+
+func _init() -> void:
+	print("Running GdApiRuntimeProtocol tests...\n")
+
+	_test_request_message_shape()
+	_test_validate_message_accepts_valid_request()
+	_test_validate_message_rejects_wrong_version()
+	_test_validate_message_rejects_non_dict()
+	_test_validate_message_rejects_non_int_id()
+	_test_validate_message_rejects_zero_id()
+	_test_validate_message_rejects_unknown_kind()
+	_test_validate_message_rejects_missing_op()
+	_test_validate_message_rejects_eval_op()
+	_test_validate_message_rejects_process_run_op()
+	_test_validate_message_rejects_network_http_request_op()
+	_test_validate_message_rejects_oversized_payload()
+	_test_validate_message_accepts_reply()
+	_test_validate_message_accepts_event()
+	_test_request_default_payload_empty_dict()
+	_test_generation_metadata_is_preserved()
+	_test_v2_eval_request_is_allowed()
+	_test_versioned_builders_preserve_version()
+
+	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
+	if failed > 0:
+		quit(1)
+	else:
+		quit(0)
+
+
+func assert_eq(actual, expected, context: String = "") -> void:
+	if actual == expected:
+		passed += 1
+		print("  PASS: %s" % context)
+	else:
+		failed += 1
+		print("  FAIL: %s - expected '%s', got '%s'" % [context, expected, actual])
+
+
+func assert_true(value: bool, context: String = "") -> void:
+	assert_eq(value, true, context)
+
+
+func assert_false(value: bool, context: String = "") -> void:
+	assert_eq(value, false, context)
+
+
+func _test_request_message_shape() -> void:
+	var msg: Dictionary = Protocol.request(7, "runtime/status", {})
+	assert_eq(msg.get("version"), 1, "version")
+	assert_eq(msg.get("id"), 7, "id")
+	assert_eq(msg.get("kind"), "request", "kind")
+	assert_eq(msg.get("op"), "runtime/status", "op")
+	assert_eq(msg.get("payload"), {}, "payload")
+
+
+func _test_validate_message_accepts_valid_request() -> void:
+	var msg := Protocol.request(1, "runtime/status", {})
+	assert_true(Protocol.validate_message(msg).ok, "valid request")
+
+
+func _test_validate_message_rejects_wrong_version() -> void:
+	var msg := {"version": 99, "id": 1, "kind": "request", "op": "x", "payload": {}}
+	assert_eq(Protocol.validate_message(msg).code, "not_supported", "version mismatch")
+
+
+func _test_validate_message_rejects_non_dict() -> void:
+	assert_eq(Protocol.validate_message("not a dict").code, "invalid_param", "string input")
+	assert_eq(Protocol.validate_message(42).code, "invalid_param", "int input")
+	assert_eq(Protocol.validate_message(null).code, "invalid_param", "null input")
+	assert_eq(Protocol.validate_message([1, 2, 3]).code, "invalid_param", "array input")
+
+
+func _test_validate_message_rejects_non_int_id() -> void:
+	var msg := {"version": 1, "id": "7", "kind": "request", "op": "x", "payload": {}}
+	assert_eq(Protocol.validate_message(msg).code, "invalid_param", "string id")
+
+
+func _test_validate_message_rejects_zero_id() -> void:
+	var msg := {"version": 1, "id": 0, "kind": "request", "op": "x", "payload": {}}
+	assert_eq(Protocol.validate_message(msg).code, "invalid_param", "zero id")
+
+
+func _test_validate_message_rejects_unknown_kind() -> void:
+	var msg := {"version": 1, "id": 1, "kind": "banana", "op": "x", "payload": {}}
+	assert_eq(Protocol.validate_message(msg).code, "invalid_param", "unknown kind")
+
+
+func _test_validate_message_rejects_missing_op() -> void:
+	var msg := {"version": 1, "id": 1, "kind": "request", "payload": {}}
+	assert_eq(Protocol.validate_message(msg).code, "invalid_param", "missing op")
+
+
+func _test_validate_message_rejects_eval_op() -> void:
+	var msg := {"version": 1, "id": 1, "kind": "request", "op": "eval", "payload": {}}
+	assert_eq(Protocol.validate_message(msg).code, "permission_denied", "eval denied")
+
+
+func _test_validate_message_rejects_process_run_op() -> void:
+	var msg := {"version": 1, "id": 1, "kind": "request", "op": "process/run", "payload": {}}
+	assert_eq(Protocol.validate_message(msg).code, "permission_denied", "process/run denied")
+
+
+func _test_validate_message_rejects_network_http_request_op() -> void:
+	var msg := {
+		"version": 1, "id": 1, "kind": "request", "op": "network/http_request", "payload": {}
+	}
+	assert_eq(Protocol.validate_message(msg).code, "permission_denied", "network denied")
+
+
+func _test_validate_message_rejects_oversized_payload() -> void:
+	var big_value := ""
+	for i in range(1024):
+		big_value += "a"
+	# Build a payload whose JSON serialization exceeds 4 MiB after stringify.
+	var arr: Array = []
+	for i in range((4 * 1024 * 1024) / 1024 + 8):
+		arr.append(big_value)
+	var msg := {"version": 1, "id": 1, "kind": "request", "op": "x", "payload": {"big": arr}}
+	var verdict := Protocol.validate_message(msg)
+	assert_eq(verdict.code, "invalid_param", "oversize denied")
+
+
+func _test_validate_message_accepts_reply() -> void:
+	var msg := {"version": 1, "id": 3, "kind": "reply", "ok": true, "result": {}}
+	assert_true(Protocol.validate_message(msg).ok, "valid reply")
+
+
+func _test_validate_message_accepts_event() -> void:
+	var msg := {"version": 1, "id": 4, "kind": "event", "result": {}}
+	assert_true(Protocol.validate_message(msg).ok, "valid event")
+
+
+func _test_request_default_payload_empty_dict() -> void:
+	# request tolerates a missing/empty payload argument.
+	var msg1: Dictionary = Protocol.request(2, "runtime/scene/tree")
+	var msg2: Dictionary = Protocol.request(2, "runtime/scene/tree", {})
+	assert_eq(msg1.get("payload"), {}, "default empty payload")
+	assert_eq(msg2.get("payload"), {}, "explicit empty payload")
+
+
+func _test_generation_metadata_is_preserved() -> void:
+	var request := Protocol.request(8, "runtime/status", {}, "generation-a")
+	var reply := Protocol.reply(8, true, {"ready": true}, "", "", "generation-a")
+	var hello := (
+		Protocol
+		. event(
+			0,
+			"hello",
+			{
+				"protocol_version": Protocol.VERSION,
+				"generation": "generation-a",
+				"pid": 123,
+				"started_at": 1.5,
+				"transport": "file",
+			}
+		)
+	)
+	assert_eq(request.get("generation"), "generation-a", "request generation")
+	assert_eq(reply.get("generation"), "generation-a", "reply generation")
+	assert_eq(hello.get("result", {}).get("generation"), "generation-a", "event generation")
+	assert_true(Protocol.validate_message(request).ok, "generation request remains v1-valid")
+	assert_true(Protocol.validate_message(reply).ok, "generation reply remains v1-valid")
+	assert_true(Protocol.validate_message(hello).ok, "generation event remains v1-valid")
+
+
+func _test_v2_eval_request_is_allowed() -> void:
+	var v1 := Protocol.request_for_version(1, 1, "eval", {"source": "1+1"})
+	var v2 := Protocol.request_for_version(2, 2, "eval", {"source": "1+1"})
+	assert_eq(Protocol.validate_message(v1).code, "permission_denied", "v1 eval denied")
+	assert_true(Protocol.validate_message(v2).ok, "v2 eval accepted")
+
+
+func _test_versioned_builders_preserve_version() -> void:
+	var reply := Protocol.reply_for_version(2, 3, true, {"value": 2})
+	assert_eq(reply.version, 2, "v2 reply version")
+	assert_eq(reply.id, 3, "v2 reply id")

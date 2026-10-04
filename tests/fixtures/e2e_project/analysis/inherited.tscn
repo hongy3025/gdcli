@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://analysis/deep.tscn" id="1_scene"]
+
+[node name="Analysis" instance=ExtResource("1_scene")]
+
+[node name="Extra" type="Node" parent="."]

@@ -515,7 +515,7 @@ fn exec_command_help_with_path_sends_command_body() {
 fn exec_command_help_nonexistent_path_returns_exit_code_2() {
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST).path("/command-help");
+        when.method(POST).path("/command/doc");
         then.status(404)
             .body(r#"{"ok":false,"code":"not_found","msg":"command not found: foo"}"#);
     });
@@ -687,6 +687,10 @@ fn exec_commands_json_flag_preserves_raw() {
     assert!(
         stdout.contains(r#""ok":true"#),
         "should contain raw JSON, got: {stdout}"
+    );
+    assert!(
+        stdout.contains(r#""params":[]"#),
+        "JSON 模式必须保留原始数组结构, got: {stdout}"
     );
     assert!(
         !stdout.contains("Commands:"),

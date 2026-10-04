@@ -17,6 +17,10 @@ gdapi/addon/bin/windows/
 # Python
 .venv/
 __pycache__/
+.pytest-*/
 *.pyc
-.pytest_cache/
-/.pi/tasks
+*.uid
+.pi-subagents/
+.pi/tasks
+/pi-session*
+*.TMP

@@ -1,0 +1,27 @@
+[gd_scene load_steps=4 format=3]
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_domain"]
+vertices = PackedVector2Array(-50, -50, 150, -50, 150, 50, -50, 50)
+polygons = [PackedInt32Array(0, 1, 2, 3)]
+outlines = [PackedVector2Array(-50, -50, 150, -50, 150, 50, -50, 50)]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_obstacle"]
+size = Vector2(20, 20)
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_empty"]
+
+[node name="NavigationDomain" type="Node2D"]
+
+[node name="Region" type="NavigationRegion2D" parent="."]
+navigation_polygon = SubResource("NavigationPolygon_domain")
+
+[node name="Obstacle" type="StaticBody2D" parent="Region"]
+
+[node name="ObstacleShape" type="CollisionShape2D" parent="Region/Obstacle"]
+position = Vector2(20, 0)
+shape = SubResource("RectangleShape2D_obstacle")
+
+[node name="EmptyRegion" type="NavigationRegion2D" parent="."]
+navigation_polygon = SubResource("NavigationPolygon_empty")
+
+[node name="Agent" type="NavigationAgent2D" parent="."]

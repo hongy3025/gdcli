@@ -28,12 +28,12 @@ pub fn render_exec_body(body: &str) -> Cow<'_, str> {
 
 /// 对 JSON body 做 ok 字段前置后重新序列化。
 ///
-/// - 若 body 是合法 JSON 且顶层是 Object → 把 `ok` 键移到首位，其余保持原序
+/// - 若 body 是合法 JSON 且顶层是 Object → 把 `ok` 键移到首位，其余保持原序与原始结构
 /// - 若不是合法 JSON 或无 `ok` 键 → 原样透传（`Cow::Borrowed`）
 pub fn reorder_ok_json(body: &str) -> Cow<'_, str> {
     match serde_json::from_str::<serde_json::Value>(body) {
         Ok(serde_json::Value::Object(map)) if map.contains_key("ok") => {
-            let normalized = normalize::normalize(serde_json::Value::Object(map));
+            let normalized = normalize::reorder_ok_fields(serde_json::Value::Object(map));
             match serde_json::to_string(&normalized) {
                 Ok(s) => Cow::Owned(s),
                 Err(_) => Cow::Borrowed(body),

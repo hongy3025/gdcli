@@ -29,21 +29,81 @@ cargo build -p gdapi
 # 一键开发环境搭建（构建 + 符号链接 addon 到 fixture_project）
 python scripts/setup-dev.py          # 跨平台
 
-# 运行所有测试（单元测试 + 集成测试，不需要 Godot）
+# Lint 和格式检查（无专用配置，使用默认规则）
+cargo clippy --workspace
+cargo fmt --check
+```
+
+### 测试集分类
+
+测试集分为三类，日常开发迭代**只跑单元测试集**，E2E 和预算测试仅在显式提及时才启动。
+
+#### 1. 单元测试集（日常开发）
+
+Rust 单元测试 + 集成测试，不需要 Godot，速度快。
+
+```bash
+# 运行所有单元测试
 cargo test --workspace
 
 # 运行单个 crate 的测试
 cargo test -p gdcli
 cargo test -p gdapi
+```
 
-# Lint 和格式检查（无专用配置，使用默认规则）
-cargo clippy --workspace
-cargo fmt --check
+#### 2. E2E 测试集（需要 Godot）
 
-# E2E 测试（需要 Godot，用 uv 管理 Python venv）
-uv run pytest tests/e2e/ -v              # 运行所有 E2E
-uv run pytest tests/e2e/ -v -m e2e       # 仅运行 e2e 标记的测试
-uv run pytest tests/e2e/ -v -m "not e2e" # 跳过 e2e 测试
+pytest E2E 测试，需要 Godot 编辑器运行（用 uv 管理 Python venv）。预算测试默认排除。
+
+```bash
+# 运行核心 E2E 套件（排除预算测试）
+uv run pytest tests/e2e/ -v
+
+# 仅运行 e2e 标记的测试
+uv run pytest tests/e2e/ -v -m e2e
+```
+
+#### 3. 预算测试集（需要 Godot，耗时约 6 分钟）
+
+全套件 walltime 验收测试，嵌套运行核心 E2E 套件并检查耗时不超过 360 秒。
+
+```bash
+# 运行预算验收测试
+uv run pytest tests/e2e/test_full_suite_budget.py -m budget -v
+```
+
+## GDScript 格式化与 lint 强制门禁
+
+在开始任何单元测试前，必须先处理本次修改过的全部 `.gd` 文件：
+
+1. 必须使用 `gdformat` 统一格式化。仓库提供的 `scripts/format-gd.py` 会扫描并格式化仓库内所有适用的 GDScript 文件；执行：
+
+   ```bash
+   python scripts/format-gd.py
+   python scripts/format-gd.py --check
+   ```
+
+2. 必须使用 `gdlint` 检查所有本次修改过的 `.gd` 文件。若 `gdformat` 或 `gdlint` 任一命令不存在，必须先自动安装：
+
+   ```bash
+   uv tool install gdtoolkit
+   ```
+
+   安装后重新确认 `gdformat` 和 `gdlint` 均可用；安装失败时不得开始单元测试。
+
+3. `gdlint` 检查失败时不得跳过、降级或带错误运行测试，必须先修复 GDScript 或明确记录经过批准的例外。格式化和 lint 必须覆盖所有已修改 `.gd` 文件，包括新增文件；未修改的 `.gd` 文件也会被 `scripts/format-gd.py` 一并规范化。
+
+Windows PowerShell 可使用以下命令获取修改文件并执行 lint：
+
+```powershell
+if (-not (Get-Command gdformat -ErrorAction SilentlyContinue) -or
+    -not (Get-Command gdlint -ErrorAction SilentlyContinue)) {
+    uv tool install gdtoolkit
+}
+python scripts/format-gd.py
+python scripts/format-gd.py --check
+$gdFiles = @(git diff --name-only --diff-filter=ACMR | Where-Object { $_ -like '*.gd' })
+if ($gdFiles.Count -gt 0) { gdlint $gdFiles }
 ```
 
 ## 关键架构细节
@@ -107,7 +167,6 @@ gdapi/addon/routes/
 | `route_doc.gd` | `runtime/route_doc.gd` | 路由文档描述 |
 | `builtin_ping.gd` | `runtime/builtin_ping.gd` | 内置 ping 路由 |
 | `builtin_routes.gd` | `runtime/builtin_routes.gd` | 内置路由列表 |
-| `builtin_help.gd` | `runtime/builtin_help.gd` | 内置帮助路由 |
 | `builtin_commands.gd` | `runtime/builtin_commands.gd` | 内置命令列表 |
 | `builtin_command_help.gd` | `runtime/builtin_command_help.gd` | 内置命令帮助 |
 
@@ -147,6 +206,7 @@ gdapi/addon/routes/
 
 ## 注意事项
 
+- 本机 Godot 路径：`GODOT_BIN=D:\app\devel\Godot\v4.7.2\godot_console.exe`（当前验证基线为 4.7.2；仍支持 4.7.x）
 - 版本号统一在 workspace `Cargo.toml` 的 `workspace.package.version` 管理
 - `plugin.cfg` 和 `gdapi.gdextension` 中的版本号需要手动同步
 - 行列号参数是 1-based（与编辑器一致），内部转换为 0-based

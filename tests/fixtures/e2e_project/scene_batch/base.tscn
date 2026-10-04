@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://dcsbatchbase"]
+
+[node name="Shared" type="Node2D"]
+
+[node name="Nested" type="Node2D" parent="."]
+position = Vector2(3, 4)

@@ -168,7 +168,7 @@ pub fn try_write_response(
     let total_bytes = checked_response_len(header_bytes, body.len())?;
     let mut out = Vec::new();
     out.try_reserve_exact(total_bytes)
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "response allocation failed"))?;
+        .map_err(|_| io::Error::other("response allocation failed"))?;
 
     write!(&mut out, "HTTP/1.1 {} {}\r\n", status, reason)?;
     for (k, v) in headers {
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn max_header_bytes_is_smaller_than_max_body() {
         assert_eq!(MAX_HEADER_BYTES, 32 * 1024);
-        assert!(MAX_HEADER_BYTES < MAX_BODY);
+        const _: () = assert!(MAX_HEADER_BYTES < MAX_BODY);
     }
 
     #[test]

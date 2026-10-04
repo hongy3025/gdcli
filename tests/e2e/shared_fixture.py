@@ -1,0 +1,875 @@
+"""Shared E2E lifecycle: one Godot editor per pytest session.
+
+This module owns the canonical session-scoped fixture (`e2e_editor`) and the
+helpers every module uses to reach it:
+
+* `e2e_editor` — session-scoped; the only fixture that creates a
+  `subprocess.Popen`, copies the unified project, installs the addon, and
+  waits for gdapi readiness.
+* `reset_shared_state` — deterministic per-test reset that stops games,
+  clears runtime transport, clears the audit log, and restores the
+  selection.
+
+Legacy module fixtures (`m2_editor`, `m3_editor`, `m4_env`, `m5_editor`,
+`m6_editor*`) are session-scoped aliases that all resolve to the same
+`e2e_editor` environment.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import traceback
+from pathlib import Path
+from typing import Any, Iterator
+
+import pytest
+
+from .timing import positive_seconds, successful_wait
+
+from .m2.helpers import (
+    gdcli_bin,
+    repo_root,
+    require_godot_47,
+    resolve_godot_bin,
+    wait_for_godot_ready,
+    wait_for_metadata,
+)
+
+
+E2E_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "e2e_project"
+E2E_RUNTIME_ROOT_NAME = "gdapi_runtime"
+E2E_BASELINE_SCENE = "res://scenes/main.tscn"
+E2E_SCENE_SWITCH_TIMEOUT_SECONDS = 5.0
+
+E2E_DEADLOCK_TIMEOUT_SECONDS = 180
+
+# A class-level counter records how many times the session-scoped fixture
+# actually started a Godot process. The full-suite acceptance test inspects
+# this counter through `EDITOR_START_COUNTER["starts"]`.
+EDITOR_START_COUNTER: dict[str, Any] = {"starts": 0, "pids": set(), "callers": [], "events": []}
+
+
+def _caller_summary() -> str:
+    frames = traceback.extract_stack()[:-1]
+    return " <- ".join(
+        f"{Path(frame.filename).name}:{frame.lineno}:{frame.name}" for frame in frames[-4:]
+    )
+
+
+def _record_editor_event(event: str, *, pid: int | None = None, project: Path | None = None) -> None:
+    EDITOR_START_COUNTER.setdefault("events", []).append(
+        f"{event} pid={pid} project={project.name if project is not None else '?'}"
+    )
+
+
+def _record_editor_start(pid: int, project: Path) -> None:
+    EDITOR_START_COUNTER["starts"] += 1
+    EDITOR_START_COUNTER["pids"].add(pid)
+    callers = EDITOR_START_COUNTER.setdefault("callers", [])
+    callers.append(_caller_summary())
+    del callers[:-5]
+    _record_editor_event("start", pid=pid, project=project)
+
+
+# ── gdcli wrappers ──────────────────────────────────────────────────────
+
+
+def _gdcli_exec_raw(env: dict[str, Any], *args: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(env["gdcli"]), "--json", *args],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+
+
+def gdcli_call(env: dict[str, Any], route: str, data: dict | None = None) -> dict[str, Any]:
+    """Run a gdcli exec route, returning the parsed JSON body or raising."""
+    args = ["exec", route, "--project", str(env["project"])]
+    if data is not None:
+        args += ["--data", json.dumps(data)]
+    result = _gdcli_exec_raw(env, *args)
+    if result.returncode != 0:
+        raise AssertionError(
+            f"gdcli {route} failed (exit {result.returncode}):\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+    payload = json.loads(result.stdout) if result.stdout else {}
+    if not isinstance(payload, dict):
+        raise AssertionError(f"gdcli {route} returned non-dict payload: {payload!r}")
+    return payload
+
+
+def gdcli_expect_failure(env: dict[str, Any], route: str, data: dict | None = None) -> dict[str, Any]:
+    """Run a gdcli exec route that MUST return non-zero; return the parsed payload."""
+    args = ["exec", route, "--project", str(env["project"])]
+    if data is not None:
+        args += ["--data", json.dumps(data)]
+    result = _gdcli_exec_raw(env, *args)
+    payload: dict[str, Any] = {}
+    for raw in (result.stdout, result.stderr):
+        if not raw:
+            continue
+        try:
+            candidate = json.loads(raw.strip())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict):
+            payload = candidate
+            break
+    payload.setdefault("exit_code", result.returncode)
+    payload.setdefault("stdout", result.stdout)
+    payload.setdefault("stderr", result.stderr)
+    return payload
+
+
+# ── metadata and log helpers ───────────────────────────────────────────
+
+
+def _read_log_tail(path: Path, lines: int = 80) -> str:
+    try:
+        return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+    except OSError as exc:
+        return f"<unable to read {path}: {exc}>"
+
+
+def _gdcli_ping(env: dict[str, Any]) -> bool:
+    try:
+        result = subprocess.run(
+            [str(env["gdcli"]), "--json",
+             "exec", "gdapi/health/ping",
+             "--project", str(env["project"])],
+            capture_output=True, encoding="utf-8", errors="replace",
+            timeout=5.0,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+# ── fixture source and install ─────────────────────────────────────────
+
+
+def _apply_transport_override(project: Path) -> None:
+    """`GDAPI_E2E_TRANSPORT=engine_debugger` 时去掉 fixture 的强制 file transport。
+
+    fixture 默认写死 `runtime_force_file_transport=true` 以保证测试确定性；
+    需要验收 EngineDebugger 数据面时用它把整套 E2E 切到 debugger 通道。
+    """
+    if os.environ.get("GDAPI_E2E_TRANSPORT", "file").lower() != "engine_debugger":
+        return
+    config_path = project / "project.godot"
+    if not config_path.is_file():
+        return
+    kept = [
+        line
+        for line in config_path.read_text(encoding="utf-8").splitlines()
+        if "runtime_force_file_transport" not in line
+    ]
+    config_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def _copy_unified_project(source: Path, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    for entry in source.iterdir():
+        destination = target / entry.name
+        if entry.is_dir():
+            if destination.exists():
+                shutil.rmtree(destination)
+            shutil.copytree(entry, destination)
+        else:
+            shutil.copy2(entry, destination)
+
+def _copy_native_library(env: dict[str, Any]) -> None:
+    """Install the freshly built extension for the actual host platform."""
+    platform, filename = (
+        ("windows", "gdapi.dll") if sys.platform == "win32"
+        else ("macos", "libgdapi.dylib") if sys.platform == "darwin"
+        else ("linux", "libgdapi.so")
+    )
+    library = repo_root() / "target" / "debug" / filename
+    if not library.exists():
+        return
+    destination_dir = env["project"] / "addons" / "gdapi" / "bin" / platform
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(library, destination_dir / library.name)
+
+
+# ── editor startup ────────────────────────────────────────────────────
+
+
+def build_editor_command(godot_bin: str, project: Path) -> list[str]:
+    command = [godot_bin, "--editor"]
+    if os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless") == "gui":
+        command.extend(["--rendering-method", "gl_compatibility"])
+    else:
+        command.append("--headless")
+    command.extend(["--audio-driver", "Dummy", "--path", str(project)])
+    return command
+
+
+def build_editor_environment(project: Path) -> dict[str, str]:
+    appdata = project / ".godot" / "appdata"
+    local_appdata = project / ".godot" / "localappdata"
+    appdata.mkdir(parents=True, exist_ok=True)
+    local_appdata.mkdir(parents=True, exist_ok=True)
+    editor_env = os.environ.copy()
+    editor_env.update(
+        {
+            "APPDATA": str(appdata),
+            "LOCALAPPDATA": str(local_appdata),
+        }
+    )
+    return editor_env
+
+
+def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
+    log_path = env["project"] / ".godot" / "godot.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = log_path.open("w", encoding="utf-8")
+    env["godot_log_path"] = log_path
+    env["godot_log"] = log_handle
+
+    process = subprocess.Popen(
+        build_editor_command(env["godot_bin"], env["project"]),
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=build_editor_environment(env["project"]),
+    )
+    env["editor_pid"] = process.pid
+    env["godot"] = process
+
+    try:
+        meta = wait_for_metadata(env["project"])
+    except BaseException:
+        _terminate_editor_process(process)
+        raise
+
+    started = time.monotonic()
+    ping_timeout = positive_seconds("GDAPI_E2E_PING_TIMEOUT_SECONDS")
+    deadline = started + ping_timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            log_handle.close()
+            raise RuntimeError(
+                f"godot exited prematurely with code {process.returncode}; "
+                f"log tail:\n{_read_log_tail(log_path)}"
+            )
+        if _gdcli_ping(env):
+            break
+        time.sleep(0.5)
+    else:
+        _terminate_editor_process(process)
+        log_handle.close()
+        raise RuntimeError(
+            f"gdapi ping never succeeded within {ping_timeout:g}s; log tail:\n{_read_log_tail(log_path)}"
+        )
+
+    from .timing import TIMINGS
+    TIMINGS.record("editor_ping", time.monotonic() - started)
+    try:
+        wait_for_godot_ready(env["project"])
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
+        log_handle.close()
+        raise
+    env["meta"] = meta
+    return process
+
+
+def _remove_tree(path: Path, *, attempts: int = 5, delay: float = 0.2) -> None:
+    """删除目录树；Windows 上进程刚退出时句柄可能短暂未释放，因此重试后再报错。"""
+    last_error: OSError | None = None
+    for _attempt in range(attempts):
+        if not path.exists():
+            return
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(delay)
+    raise AssertionError(f"could not remove {path}: {last_error}")
+
+
+def _terminate_editor_process(process: subprocess.Popen) -> None:
+    """终止编辑器进程及其后代。
+
+    Windows 的 `godot_console.exe` 会以子进程方式启动真正的 `godot.exe`：只 terminate
+    Popen 句柄会留下编辑器进程，它继续占用内存/端口并锁住项目目录，使后续运行 OOM 或
+    文件基线恢复失败。POSIX 上直接使用 terminate/kill。
+    """
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
+def _stop_editor(env: dict[str, Any]) -> None:
+    process = env.get("godot")
+    if process is not None and process.poll() is None:
+        _terminate_editor_process(process)
+    log_handle = env.get("godot_log")
+    if log_handle is not None and not log_handle.closed:
+        log_handle.close()
+    runtime_root = _runtime_root(env["project"])
+    if runtime_root.exists():
+        _remove_tree(runtime_root)
+
+
+# ── runtime transport helpers ──────────────────────────────────────────
+
+
+def _runtime_root(project: Path) -> Path:
+    godot_dir = (project / ".godot").resolve()
+    if godot_dir.parent != project.resolve() or godot_dir.name != ".godot":
+        raise RuntimeError(f"unexpected metadata root: {godot_dir}")
+    runtime_root = (godot_dir / E2E_RUNTIME_ROOT_NAME).resolve()
+    if runtime_root.parent != godot_dir or runtime_root.name != E2E_RUNTIME_ROOT_NAME:
+        raise RuntimeError(f"unexpected runtime root: {runtime_root}")
+    return runtime_root
+
+
+# ── reset contract ────────────────────────────────────────────────────
+
+
+RESTORE_ATTEMPTS = 6
+RESTORE_RETRY_DELAY_SECONDS = 0.1
+
+# Godot 自身维护的项目文件：编辑器会在 AudioServer 变化后自行写出或删除
+# （实测 default_bus_layout.tres 会在测试前后反复出现/消失），因此与 `.godot/`
+# 一样不纳入基线固定；路由写出的资源仍受基线约束。
+UNPINNED_PROJECT_FILES = {"default_bus_layout.tres"}
+
+
+def is_tracked_project_file(relative: str) -> bool:
+    """Whether a project-relative path is pinned by the file baseline.
+
+    例外（有意排除）：
+    - `.godot/`、`addons/gdapi/`：生成物与安装产物；
+    - `project.godot` 及 Godot 写入时生成的临时文件：由设置保存管理；
+    - `UNPINNED_PROJECT_FILES`：Godot 自身维护的文件。
+    """
+    if relative in UNPINNED_PROJECT_FILES:
+        return False
+    if relative.startswith("project.godot") and relative.endswith(".tmp"):
+        suffix = relative[len("project.godot") : -len(".tmp")]
+        if suffix.isdigit():
+            return False
+    return not (
+        relative.startswith(".godot/")
+        or relative.startswith("addons/gdapi/")
+        or relative == "project.godot"
+    )
+
+
+def tracked_project_files(project: Path) -> dict[str, Path]:
+    """Enumerate pinned files without traversing generated or installed trees."""
+    files: dict[str, Path] = {}
+    for directory, subdirectories, names in os.walk(project):
+        base = Path(directory)
+        relative = base.relative_to(project)
+        subdirectories[:] = [
+            name for name in subdirectories
+            if is_tracked_project_file((relative / name).as_posix() + "/")
+        ]
+        for name in names:
+            rel = (relative / name).as_posix()
+            if is_tracked_project_file(rel):
+                path = base / name
+                if path.is_file():
+                    files[rel] = path
+    return files
+
+
+def _baseline_mismatches(project: Path, baseline: dict[str, bytes]) -> list[str]:
+    mismatched: list[str] = []
+    for rel, data in sorted(baseline.items()):
+        path = project / rel
+        try:
+            if not path.is_file() or path.read_bytes() != data:
+                mismatched.append(rel)
+        except OSError:
+            mismatched.append(rel)
+    return mismatched
+
+
+def restore_file_state(env: dict[str, Any], baseline: dict[str, bytes]) -> None:
+    """Restore every file that differs from the captured baseline.
+
+    Godot 可能在恢复期间异步重写项目文件（例如 AudioServer 重新保存
+    `default_bus_layout.tres`），因此写回后要校验并重试；仍不一致时报错，
+    不能静默吞掉失败（否则隔离缺陷会伪装成偶发断言失败）。
+    """
+    project = env["project"]
+    mismatched: list[str] = []
+    for _attempt in range(RESTORE_ATTEMPTS):
+        current_files = tracked_project_files(project)
+        for rel, path in current_files.items():
+            if rel not in baseline:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+        for rel, data in baseline.items():
+            destination = project / rel
+            if rel in current_files and current_files[rel].read_bytes() == data:
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                destination.write_bytes(data)
+            except OSError:
+                pass
+        mismatched = _baseline_mismatches(project, baseline)
+        if not mismatched:
+            return
+        time.sleep(RESTORE_RETRY_DELAY_SECONDS)
+    raise AssertionError(f"file baseline could not be restored: {mismatched}")
+
+
+def snapshot_files(env: dict[str, Any]) -> dict[str, bytes]:
+    """Snapshot every non-generated file in the project for later restore."""
+    project = env["project"]
+    return {rel: path.read_bytes() for rel, path in tracked_project_files(project).items()}
+
+
+def _current_scene_path(env: dict[str, Any]) -> str:
+    try:
+        payload = gdcli_call(env, "scene/current")
+    except BaseException:
+        return ""
+    if isinstance(payload, dict):
+        return str(payload.get("path", ""))
+    return ""
+
+
+@successful_wait("scene_switch")
+def wait_for_scene(
+    env: dict[str, Any],
+    expected: str,
+    timeout: float = E2E_SCENE_SWITCH_TIMEOUT_SECONDS,
+) -> bool:
+    """等编辑器真正切到目标场景。
+
+    `scene/open` 由编辑器延迟生效：如果下一次 mutation 抢在切换完成之前，
+    UndoRedo 会绑到旧场景的 history，表现为 `history.undo()` 偶发返回 false。
+    """
+    timeout = positive_seconds("GDAPI_E2E_SCENE_TIMEOUT_SECONDS", timeout)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _current_scene_path(env) == expected:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def reset_shared_state(env: dict[str, Any], *, reason: str) -> None:
+    """Deterministically restore the shared editor to a known baseline.
+
+    Always called between tests; failure raises `AssertionError` with the
+    phase name, command, runtime status, and Godot log tail so the test
+    output can drive a fix.
+    """
+    project = env["project"]
+    failures: list[str] = []
+
+    def _run(phase: str, route: str, data: dict | None = None) -> bool:
+        try:
+            gdcli_call(env, route, data)
+            return True
+        except BaseException as exc:
+            failures.append(
+                f"[{phase}] {route}: {exc}\n"
+                f"godot log tail:\n{_read_log_tail(env.get('godot_log_path', project / '.godot' / 'godot.log'))}"
+            )
+            return False
+
+    # M2/M4/M5 only run the game through lifecycle helpers that maintain this
+    # flag. Avoid an unnecessary stop RPC when those helpers prove it detached;
+    # environments without the flag retain the conservative stop behavior.
+    if env.get("game_attached") is not False:
+        if _run("project/stop", "project/stop", None):
+            env["game_attached"] = False
+    # Close and re-open the M2 baseline scene so signal connections and
+    # other in-memory mutations from a previous test do not survive.
+    try:
+        gdcli_call(env, "scene/close", None)
+    except BaseException:
+        pass
+    _run("scene/open", "scene/open", {"path": E2E_BASELINE_SCENE})
+    if not wait_for_scene(env, E2E_BASELINE_SCENE):
+        failures.append(
+            f"[scene/open] editor never switched to {E2E_BASELINE_SCENE} "
+            f"(current={_current_scene_path(env) or '<none>'})"
+        )
+    _run("editor/selection/set", "editor/selection/set", {"nodes": []})
+    _run("gdapi/audit/clear", "gdapi/audit/clear", {})
+
+    if failures:
+        raise AssertionError(
+            f"reset_shared_state failed (reason={reason}):\n" + "\n".join(failures)
+        )
+
+
+# ── environment construction (pure function) ──────────────────────────
+
+
+def build_environment(
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    godot_bin: str | None = None,
+) -> dict[str, Any]:
+    """Create the shared environment; pure logic behind `e2e_editor`.
+
+    Tests can call this directly (without invoking the pytest fixture
+    machinery) to verify the start-up contract.
+    """
+    godot_bin = godot_bin or resolve_godot_bin()
+    godot_version = require_godot_47(godot_bin)
+    root = repo_root()
+    project = tmp_path_factory.mktemp("e2e") / "project"
+
+    build = subprocess.run(
+        ["cargo", "build", "--workspace"],
+        cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+    )
+    if build.returncode != 0:
+        raise RuntimeError(f"cargo build failed:\n{build.stderr}")
+
+    _copy_unified_project(E2E_FIXTURE_SOURCE, project)
+    _apply_transport_override(project)
+
+    install = subprocess.run(
+        [str(gdcli_bin()), "install", "--project", str(project), "--force"],
+        capture_output=True, encoding="utf-8", errors="replace",
+    )
+    if install.returncode != 0:
+        raise RuntimeError(f"gdcli install failed:\n{install.stderr}")
+
+    env: dict[str, Any] = {
+        "root": root,
+        "project": project,
+        "fixture": project,
+        "fixture_root": E2E_FIXTURE_SOURCE,
+        "godot_bin": godot_bin,
+        "godot_version": godot_version,
+        "gdcli": gdcli_bin(),
+        "game_attached": False,
+        # M3 harness counters and recovery state — initialised here so
+        # the M3 tests can read/write them through the shared env.
+        "build_count": 1,
+        "install_count": 1,
+        "editor_start_count": 1,
+        "game_run_count": 0,
+        "game_stop_count": 0,
+        "fixture_reset_count": 0,
+        "fixture_reset_restarts": 0,
+        "recovery_markers": [],
+        "recovery_events": [],
+        "setup_events": ["build", "install", "editor_start"],
+        "pre_attach_stale_removed": True,
+        "editor_pids": set(),
+    }
+
+    _copy_native_library(env)
+    process = _start_editor(env)
+    _record_editor_start(process.pid, env["project"])
+    env.setdefault("editor_pids", set()).add(process.pid)
+    env["file_baseline"] = snapshot_files(env)
+    # Open the M2 baseline scene so editor-state assertions like
+    # `test_editor_starts_with_main_scene` see the same root scene the
+    # M2 fixture used to provide.
+    try:
+        gdcli_call(env, "scene/open", {"path": E2E_BASELINE_SCENE})
+        wait_for_scene(env, E2E_BASELINE_SCENE)
+    except AssertionError:
+        pass
+    return env
+
+
+def teardown_environment(env: dict[str, Any], *, reset: bool = True) -> None:
+    """Stop the editor and clear the runtime transport; mirrors fixture finally.
+
+    重置失败不再静默丢弃：先确保编辑器已停止，再把失败暴露为会话级错误。
+    `reset=False` 供 mock 环境的单元用例使用（没有真实编辑器可重置）。
+    """
+    failure: BaseException | None = None
+    if reset:
+        try:
+            reset_shared_state(env, reason="session teardown")
+        except BaseException as exc:
+            failure = exc
+    _stop_editor(env)
+    if failure is not None:
+        raise AssertionError(f"session teardown reset failed: {failure}") from failure
+
+
+def assert_single_editor_session() -> None:
+    """单编辑器契约：整个 pytest 会话只允许启动一个 Godot 编辑器进程。"""
+    starts = int(EDITOR_START_COUNTER["starts"])
+    pids = set(EDITOR_START_COUNTER["pids"])
+    print(f"\nGODOT_EDITOR_STARTS={starts}")
+    assert starts == 1, (
+        f"expected exactly one editor start, got {starts}; "
+        f"pids={sorted(pids)}; events={EDITOR_START_COUNTER.get('events', [])}; "
+        f"callers={EDITOR_START_COUNTER.get('callers', [])}"
+    )
+    assert len(pids) == 1, f"expected exactly one editor pid, got {sorted(pids)}"
+
+
+# ── session-scoped fixture ────────────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def e2e_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    """Single Godot editor and unified project for the whole pytest session."""
+    try:
+        env = build_environment(tmp_path_factory)
+    except FileNotFoundError as exc:
+        # 只有「环境里没有 cargo」才是可跳过的，构建失败必须暴露为失败。
+        pytest.skip(f"cargo is required to build the E2E fixture: {exc}")
+    except RuntimeError as exc:
+        pytest.fail(str(exc), pytrace=False)
+
+    try:
+        yield env
+    finally:
+        from .timing import TIMINGS
+        TIMINGS.enabled = True
+        _record_editor_event("teardown", pid=int(env.get("editor_pid", -1)), project=env.get("project"))
+        teardown_environment(env)
+        assert_single_editor_session()
+
+
+
+
+
+# ── collection-order buckets ─────────────────────────────────────────
+#
+# The hook in `tests/e2e/conftest.py` calls `bucketize` to reorder
+# collected tests so fast contract / lightweight tests fire first and
+# long-tail export / process / runtime-lifecycle tests sit at the back.
+# The reshuffle is deterministic and only changes execution order; the
+# set of tests and every assertion is preserved.
+
+# (file path substring, test function name) → bucket index
+_BUCKET_RULES: tuple[tuple[str, str | None, int], ...] = (
+    # Bucket 0: repository/fixture lifecycle checks that run first
+    ("test_unified_fixture_contract.py", None, 0),
+    ("test_shared_editor_lifecycle.py", None, 0),
+    ("test_shared_editor_contract.py", None, 0),
+    ("test_collection_order.py", None, 0),
+    # Bucket 4: slow paths — collected last
+    ("m5/test_export.py", None, 4),
+    ("m6/test_process_run.py", None, 4),
+    ("m6/test_bulk_files.py", None, 4),
+    ("m6/test_network_request.py", None, 4),
+    ("m6/test_runtime_eval.py", None, 4),
+    ("m6/test_eval.py", None, 4),
+    ("m3/test_audit_concurrency.py", None, 3),
+    # Bucket 3: m3 runtime tests that need m3_running
+    ("m3/test_runtime_input.py", None, 3),
+    ("m3/test_runtime_nodes.py", None, 3),
+    ("m3/test_runtime_assert_signal.py", None, 3),
+    ("m3/test_runtime_capture.py", None, 3),
+    ("m3/test_runtime_observability.py", None, 3),
+    ("m3/test_runtime_extensions.py", None, 3),
+    ("m3/test_engine_transport.py", None, 3),
+    ("m3/test_runtime_status.py", None, 3),
+    # Bucket 2: m2 / m4 / m3 contract / m5 lightweight (default fallback)
+)
+
+
+def bucketize(items) -> list:
+    """Return a reordered list of pytest `Item`s by collection bucket.
+
+    Within a bucket, items keep their original relative order. Tests that
+    do not match any rule land in bucket 2 (the middle).
+    """
+    buckets: list[list] = [[], [], [], [], []]
+    for item in items:
+        path = str(getattr(item, "fspath", "") or getattr(item, "path", ""))
+        bucket = _classify(path)
+        buckets[bucket].append(item)
+    return [item for bucket in buckets for item in bucket]
+
+
+def _classify(path: str) -> int:
+    posix_path = path.replace("\\", "/")
+    for substring, _name, bucket in _BUCKET_RULES:
+        if substring in posix_path:
+            return bucket
+    return 2
+
+
+# ── module-scoped alias fixtures ──────────────────────────────────────
+#
+# Each of these returns the same `e2e_editor` env so the existing
+# per-module test files can keep their original fixture names. They are
+# `module`-scoped (not `session`) so that the autouse per-test reset
+# fixture in each module's conftest.py still fires once per test, but
+# no extra process is ever started.
+
+
+@pytest.fixture(scope="session")
+def m2_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M2 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m3_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M3 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="package")
+def m3_running(m3_editor) -> Any:
+    """Share one runtime game across M3 data-plane modules."""
+    from e2e.m3.conftest import attach_game, detach_game
+    if not m3_editor.get("game_attached"):
+        attach_game(m3_editor)
+    try:
+        yield m3_editor
+    finally:
+        if m3_editor.get("game_attached"):
+            detach_game(m3_editor)
+
+
+@pytest.fixture(scope="session")
+def m3_lifecycle(e2e_editor) -> dict[str, Any]:
+    """Run the single status lifecycle scenario: initial stopped, then run/stop twice.
+
+    Returns a dict with `initial` and `cycles` keys matching the original
+    M3 fixture contract. Failures abort the scenario and the env is left
+    in a stopped state; pytest will surface the diagnostic.
+    """
+    from e2e.m3.conftest import (  # late import to avoid cycles
+        exec_ok, project_run, _runtime_root, _runtime_entries,
+        wait_for_connected, wait_for_editor_playing, detach_game, reset_fixture,
+    )
+
+    if e2e_editor.get("game_attached"):
+        detach_game(e2e_editor)
+    initial = exec_ok(e2e_editor, "runtime/status")
+    cycles: list[dict[str, Any]] = []
+    scenario_error: BaseException | None = None
+    try:
+        for cycle_index in range(2):
+            started = project_run(e2e_editor)
+            wait_for_editor_playing(e2e_editor)
+            connected = wait_for_connected(e2e_editor, timeout=60.0)
+            active = exec_ok(e2e_editor, "runtime/status")
+            stale = (
+                _runtime_root(e2e_editor)
+                / f"stale-lifecycle-{cycle_index}"
+                / "reply.json"
+            )
+            stale.parent.mkdir(parents=True, exist_ok=True)
+            stale.write_text("stale", encoding="utf-8")
+            stopped_status = detach_game(e2e_editor)
+            stopped = {"ok": True, "runtime_state": stopped_status["state"]}
+            cycles.append({
+                "cycle": cycle_index,
+                "started": started,
+                "connected": connected,
+                "active": active,
+                "stopped": stopped,
+                "stopped_status": stopped_status,
+                "runtime_entries": _runtime_entries(e2e_editor),
+                "stale_removed": not stale.exists(),
+            })
+    except BaseException as exc:
+        scenario_error = exc
+        raise
+    finally:
+        try:
+            if e2e_editor.get("game_attached"):
+                detach_game(e2e_editor)
+            else:
+                reset_fixture(e2e_editor)
+        except BaseException:
+            if scenario_error is None:
+                raise
+    return {"initial": initial, "cycles": cycles}
+
+
+@pytest.fixture(scope="session")
+def m4_env(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M4 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m5_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M5 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias of `e2e_editor` for M6 tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor_process(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 process tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor_eval(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 eval tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor_bulk(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 bulk tests."""
+    return e2e_editor
+
+
+@pytest.fixture(scope="session")
+def m6_editor_network(e2e_editor) -> dict[str, Any]:
+    """Module-scoped alias used by M6 network tests."""
+    return e2e_editor
+
+
+__all__ = [
+    "E2E_DEADLOCK_TIMEOUT_SECONDS",
+    "E2E_FIXTURE_SOURCE",
+    "E2E_RUNTIME_ROOT_NAME",
+    "EDITOR_START_COUNTER",
+    "bucketize",
+    "build_environment",
+    "e2e_editor",
+    "gdcli_call",
+    "gdcli_expect_failure",
+    "reset_shared_state",
+    "restore_file_state",
+    "snapshot_files",
+    "teardown_environment",
+]

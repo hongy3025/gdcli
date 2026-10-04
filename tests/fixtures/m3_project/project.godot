@@ -1,0 +1,31 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="gdcli_m3_fixture"
+run/main_scene="res://scenes/runtime_main.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+GdApiRuntimeProbe="*uid://bkkn7w1cus0gi"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdapi/plugin.cfg")
+
+[gdapi]
+
+runtime_probe_hello_delay_ms=250
+
+[rendering]
+
+renderer/rendering_method="mobile"

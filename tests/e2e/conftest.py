@@ -1,6 +1,17 @@
-"""E2E test fixtures — Godot editor lifecycle management."""
+"""E2E test fixtures — Godot editor lifecycle management.
+
+The single Godot editor and unified project are owned by
+`tests/e2e/shared_fixture.py`. The session-scoped `e2e_editor` fixture and
+its module-scoped aliases (`m2_editor`, `m3_editor`, `m4_env`,
+`m5_editor`, `m6_editor*`) are re-exported here so any test in the
+`tests/e2e/` tree can request them by name.
+"""
+
+from __future__ import annotations
+
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -8,6 +19,112 @@ import time
 from pathlib import Path
 
 import pytest
+
+import sys as _sys
+from pathlib import Path as _P
+_THIS_DIR = _P(__file__).resolve().parent
+if str(_THIS_DIR.parent) not in _sys.path:
+    _sys.path.insert(0, str(_THIS_DIR.parent))
+
+from e2e.shared_fixture import (  # noqa: E402,F401 — re-export
+    E2E_DEADLOCK_TIMEOUT_SECONDS,
+    EDITOR_START_COUNTER,
+    build_editor_environment,
+    build_environment,
+    e2e_editor,
+    gdcli_call,
+    gdcli_expect_failure,
+    m2_editor,
+    m3_editor,
+    m3_lifecycle,
+    m3_running,
+    m4_env,
+    m5_editor,
+    m6_editor,
+    m6_editor_bulk,
+    m6_editor_eval,
+    m6_editor_network,
+    m6_editor_process,
+    reset_shared_state,
+    teardown_environment,
+)
+from e2e.timing import TIMINGS, positive_seconds, validate_configuration, write_report
+
+
+def pytest_configure(config):
+    try:
+        validate_configuration()
+    except ValueError as exc:
+        raise pytest.UsageError(str(exc)) from exc
+    TIMINGS.samples.clear()
+    TIMINGS.enabled = False
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    # Unit/mocked harness tests coexist with real E2E tests in the file session.
+    # Only the actual shared-editor fixture closure supplies measured samples.
+    TIMINGS.enabled = "e2e_editor" in item.fixturenames
+
+
+def pytest_sessionfinish(session, exitstatus):
+    path = Path(os.environ.get("GDAPI_E2E_TIMING_JSON", ".pytest-artifacts/wait-timings.json"))
+    if not path.is_absolute():
+        path = Path(session.config.rootpath) / path
+    write_report(path, exitstatus=int(exitstatus), editor_starts=int(EDITOR_START_COUNTER["starts"]))
+
+
+def pytest_terminal_summary(terminalreporter):
+    terminalreporter.section("Successful wait timings (seconds; recommendations only)")
+    for group, row in TIMINGS.summary().items():
+        terminalreporter.write_line(
+            f"{group}: count={row['count']} P50={row['p50_seconds']:.4f} "
+            f"P95={row['p95_seconds']:.4f} P99={row['p99_seconds']:.4f} "
+            f"max={row['max_seconds']:.4f} P99*3={row['recommended_timeout_seconds']:.4f}"
+        )
+    terminalreporter.write_line(
+        "JSON: " + os.environ.get("GDAPI_E2E_TIMING_JSON", ".pytest-artifacts/wait-timings.json")
+    )
+
+
+def pytest_collection_modifyitems(items):
+    """Bound deadlocks and reorder collected tests by wall-time bucket."""
+    timeout_marker = pytest.mark.timeout(positive_seconds("GDAPI_E2E_DEADLOCK_TIMEOUT_SECONDS"))
+    for item in items:
+        if item.get_closest_marker("budget") is None:
+            item.add_marker(timeout_marker)
+    # Reorder the items in place by wall-time bucket so fast contract /
+    # lightweight tests fire first and slow paths sit at the back. See
+    # `tests/e2e/test_collection_order.py` for the contract.
+    from e2e.shared_fixture import bucketize
+    reordered = bucketize(list(items))
+    items[:] = reordered
+
+
+def parse_godot_version(output: str) -> tuple[int, int, int]:
+    match = re.search(r"(?:v)?(\d+)\.(\d+)(?:\.(\d+))?", output)
+    if match is None:
+        raise RuntimeError(f"Godot 4.7.x is required; cannot parse version: {output!r}")
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+
+
+def require_godot_47(godot_bin: str) -> tuple[int, int, int]:
+    try:
+        result = subprocess.run(
+            [godot_bin, "--version"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"Godot 4.7.x is required: {exc}") from exc
+    version = parse_godot_version(result.stdout or result.stderr)
+    if version[:2] != (4, 7):
+        raise RuntimeError(
+            f"Godot 4.7.x is required; found {version[0]}.{version[1]}.{version[2]}"
+        )
+    return version
 
 
 def _repo_root() -> Path:
@@ -26,88 +143,37 @@ def _run_gdcli(*args: str) -> subprocess.CompletedProcess:
     )
 
 
-@pytest.fixture(scope="session")
-def godot_env():
-    """Build, install addon, start Godot headless, yield metadata, stop Godot.
+def _fixture_runtime_root(fixture: Path) -> Path:
+    fixture = fixture.resolve()
+    godot_dir = (fixture / ".godot").resolve()
+    if godot_dir.parent != fixture or godot_dir.name != ".godot":
+        raise RuntimeError(f"unexpected fixture metadata root: {godot_dir}")
+    runtime_root = (godot_dir / "gdapi_runtime").resolve()
+    if runtime_root.parent != godot_dir or runtime_root.name != "gdapi_runtime":
+        raise RuntimeError(f"unexpected fixture runtime root: {runtime_root}")
+    return runtime_root
 
-    Skips the entire test session if GODOT_BIN is not available or build fails.
-    """
-    godot_bin = os.environ.get("GODOT_BIN", "godot")
-    root = _repo_root()
-    fixture = root / "tests" / "fixture_project"
-    meta = fixture / ".godot" / "gdapi.json"
-    addon_bin = fixture / "addons" / "gdapi" / "bin"
-    gdapi_lib = root / "target" / "debug" / (
-        "gdapi.dll" if sys.platform == "win32" else "libgdapi.so"
-    )
 
-    # Build workspace
-    build = subprocess.run(
-        ["cargo", "build", "--workspace"],
-        cwd=root, capture_output=True, encoding="utf-8", errors="replace",
-    )
-    if build.returncode != 0:
-        pytest.skip(f"cargo build failed:\n{build.stderr}")
+def _cleanup_fixture_runtime(fixture: Path) -> None:
+    runtime_root = _fixture_runtime_root(fixture)
+    if runtime_root.exists():
+        shutil.rmtree(runtime_root)
 
-    # Install addon
-    install = _run_gdcli("install", "--project", str(fixture), "--force")
-    if install.returncode != 0:
-        pytest.skip(f"gdcli install failed:\n{install.stderr}")
 
-    # Setup bin links + link addon to fixture
-    subprocess.run(
-        [sys.executable, str(root / "scripts" / "setup-dev.py"), "--no-build"],
-        capture_output=True,
-    )
-
-    # Copy GDExtension lib on Windows
-    if sys.platform == "win32" and gdapi_lib.exists():
-        dest_dir = addon_bin / "windows"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(gdapi_lib, dest_dir / gdapi_lib.name)
-
-    # Remove stale meta
-    meta.unlink(missing_ok=True)
-
-    # Start Godot
+def _teardown_godot_fixture(godot: subprocess.Popen, fixture: Path) -> None:
     try:
-        godot = subprocess.Popen(
-            [godot_bin, "--editor", "--headless", "--path", str(fixture)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        pytest.skip(f"Godot not found: {godot_bin}")
-
-    # Wait for meta
-    ready = False
-    for _ in range(45):
-        if meta.exists():
-            ready = True
-            break
-        time.sleep(1)
-
-    if not ready:
         godot.terminate()
-        godot.wait(timeout=10)
-        pytest.skip("gdapi.json never appeared within 45s")
-
-    meta_data = json.loads(meta.read_text(encoding="utf-8"))
-
-    yield {
-        "godot_bin": godot_bin,
-        "root": root,
-        "fixture": fixture,
-        "meta": meta_data,
-        "gdcli": _gdcli_bin(),
-    }
-
-    godot.terminate()
-    godot.wait(timeout=10)
+        try:
+            godot.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            godot.kill()
+            godot.wait(timeout=10)
+    finally:
+        _cleanup_fixture_runtime(fixture)
 
 
 def gdcli_json(env: dict, *args: str) -> dict:
-    """Run gdcli --json and return parsed response."""
+    """Run gdcli --json and return parsed response (legacy helper)."""
     result = subprocess.run(
         [str(env["gdcli"]), "--json", *args],
         capture_output=True, encoding="utf-8", errors="replace",
@@ -127,3 +193,30 @@ def gdcli_expect_fail(env: dict, *args: str) -> int:
     )
     assert result.returncode != 0, f"expected nonzero exit: {args}\n{result.stdout}"
     return result.returncode
+
+
+def run_godot_script(
+    env: dict,
+    script: str,
+    *,
+    editor: bool = False,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a Godot GDScript test through --headless --script."""
+    command = [env["godot_bin"], "--headless", "--path", str(env["project"])]
+    if editor:
+        command.append("--editor")
+    command += ["--script", script]
+    # Use isolated APPDATA/LOCALAPPDATA (same as the live editor) so that
+    # Godot can write app_userdata without crashing (SIGSEGV on dir-creation
+    # failure in headless mode).
+    process_env = build_editor_environment(env["project"])
+    process_env.update(extra_env or {})
+    return subprocess.run(
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=process_env,
+        timeout=45,
+    )
