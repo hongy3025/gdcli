@@ -21,6 +21,7 @@ __pycache__/
 *.pyc
 *.uid
 .pi-subagents/
+.superpowers/
 .pi/tasks
 /pi-session*
 *.TMP
