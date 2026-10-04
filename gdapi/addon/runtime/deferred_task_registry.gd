@@ -75,9 +75,12 @@ func _has_timed_out(task: Dictionary, now_ms: int) -> bool:
 
 func _fail_and_remove(index: int, reason: String, code: String, message: String) -> void:
 	var task: Dictionary = _tasks[index]
+	var response = task["response"]
 	var cancel: Callable = task["cancel"]
 	cancel.call(reason)
 	_fail_task(task, code, message)
+	if response.has_method("complete_audit_failure"):
+		response.complete_audit_failure(message, code, ErrorCodes.http_status(code))
 	_emit_terminal(task, {"ok": false, "code": code, "summary": message})
 	_tasks.remove_at(index)
 

@@ -22,6 +22,11 @@
 - 修复 R03 与 Unix 任务生命周期：保持生产默认 30 秒期限，用请求级绝对期限/取消原因协调 HTTP、实际进程和审计；超时、断连、shutdown、drop 先清理后返回失败。Unix 原子创建独立进程组，Windows 保留 Job Object；自然退出也清理持有管道的后代，输出线程可停止并有界排空。
 - 修复 R04/R05：场景另存前检查可写性，读取实际磁盘场景并比较解码后的 SceneState，而非不稳定的 PackedScene 内部索引；失败恢复路径/dirty 状态和目标字节。`scene/current.edited` 返回真实未保存状态；删除依赖扫描覆盖 GDScript preload/load 的资源、相对和 UID 路径，扫描不执行脚本。
 - 修复 R06/R07/R08：UID 修复使用统一写权限及全计划预检；InputMap 保存失败恢复真实的完整前态；资源赋值验证原生/自定义子类并确认实际属性值后提交 undo action，失败不破坏 undo/redo 历史。
+- 修复文本写入失败误报成功：`filesystem/write` 与脚本创建/写入/patch 现在检查写入、关闭和 rename 结果，失败清理临时文件且不记成功审计；Windows `PathGuard` 同时按大小写不敏感保护受限目录别名。
+- `node/meta/set` 与 `node/call` 在 Variant 解码前递归拒绝嵌套 Object/Resource 标签，避免拒绝请求仍加载资源；场景依赖扫描继续保持静态，不执行脚本。
+- 收紧网络审计与重定向：拒绝的凭据 URL 不再记录原文；query-only/相对路径保留 URI-reference 语义，等价压缩/展开 IPv6 地址视为同一 origin；拒绝空 host/非法端口，空响应体也能返回正确 SHA-256/base64。
+- 修复 save-as 后未保存场景状态按编辑器 tab/root 对齐（包括空场景 tab），并从磁盘核验场景外部依赖；UID 批量失败回滚资源/sidecar 字节及 UID 注册映射，InputMap 恢复按键/鼠标修饰键。
+- 请求响应仅在 HTTP 响应入队被原子接受后完成审计；TCP half-close 仍可收到响应，RST/读错误才取消请求。Windows 子进程在 Job Object 归属前保持挂起，避免快速派生的后代逃逸。
 - `gdcli --json` 只把 `ok` 前置，不再套用 TOON 有损压缩：空数组保持 `[]`、单元素数组保持数组（此前 `--json` 会把表格行里的 `[]` 写成 `""`）。
 - `scene/current.edited` 按场景索引对齐编辑器的未保存记录（`save-as` 之后编辑器内部的场景条目路径仍指向旧文件），另存为之后再改动仍报告未保存；写权限探测不再创建会被编辑器扫描到的空 `.tscn`。
 - `network/http_request` 为 `http://host?query` 这类缺少路径的 URL 补上 `/`，避免 Godot `HTTPRequest` 直接拒绝请求（此前报 `HTTP request could not start`）。
@@ -30,9 +35,9 @@
 - 修复 runtime file transport 的 hello 发布状态：此前一次文件 open/rename 失败也会提前标记为“已发送”，导致 probe 永久停在 `connecting / transport=none`；现在只有 `hello.json` 原子发布成功才标记为已发送，否则在原定延迟到期后继续完成发布，不重启游戏、不扩大 harness 超时或重试次数。新增真实文件系统故障回归，覆盖立即写入失败、延迟 rename 失败及已断开端点不复活。
 - 修复 `export/run` 在编辑器内必然失败的问题：`GdApiExportService` 现在在子进程运行期间持续排空 stdout/stderr（Godot 管道缓冲仅约 4 KiB，写满会阻塞子进程，直到超时被杀），并用 `--editor --headless --recovery-mode` 启动导出子进程，避免它重复加载 gdapi 插件后覆盖并删除父编辑器正在使用的 `.godot/gdapi.json`。
 - `export/run` 超时改为返回 `timeout` 并删除半成品产物；响应 `messages` 已去除 ANSI 转义与控制字符，可被严格 JSON 解析器读取。
-- `project/input_map/*` 与 `project/autoload/*` 变更现在会写回 `project.godot`（此前只改内存 InputMap，重载后丢失）；保存失败时回滚内存状态并记录失败审计。
+- `project/input_map/*` 与 `project/autoload/*` 变更现在会写回 `project.godot`（此前只改内存 InputMap，重载后丢失）；新增动作会先导入项目已保存的 deadzone/按键和鼠标事件；保存失败时回滚内存状态并记录失败审计。
 - 批量文件操作失败时给出 `details.rollback_failures`：replace/delete 的回滚与 recover 的中途失败都会检查每一步结果，并回滚已应用/已恢复项；`plan_hash` 现在绑定 `root`/`find`/`replace`（此前只绑定文件哈希与替换计数）。
-- `network/http_request` 与 `process/run` 的失败/超时按真实终态写入审计（deferred registry 不再以「响应已发送」推断成功）；Windows 下 `process/run` 通过 Job Object 管理子进程树，超时/取消时清理后代，避免其继承的 stdout/stderr 管道延迟终态响应。进程 spawn 失败与任务注册失败也会入审计。
+- `network/http_request` 与 `process/run` 的失败/超时/断连均按真实终态写入审计，即使客户端断开导致响应无法入队也不会漏审计（deferred registry 不再以「响应已发送」推断成功）；Windows 下 `process/run` 通过 Job Object 管理子进程树，超时/取消时清理后代，避免其继承的 stdout/stderr 管道延迟终态响应。进程 spawn 失败与任务注册失败也会入审计。
 - `audio/player/create` 返回 `/root/<场景根>/...`（此前返回编辑器内部路径，无法再被其它路由使用）；`physics/*` 的 `node_path` 同时接受绝对路径、场景根相对路径与裸节点名，并回传规范化绝对路径。
 - 修复 `uid/repair` 失败响应的类型错误：此前把 `changes`(Array) 当作 `res.error()` 的第 4 个参数（要求 Dictionary），失败路径会在 GDScript 抛类型错误、响应永远发不出去（CLI 只能等到超时）；现在返回带 `changes` 与失败详情的 `details`。
 - 项目设置/InputMap/Autoload/`uid/repair` 现在会**回读校验落盘结果**：Godot 在目标文件不可写时会返回 OK 却什么都没写（临时文件 rename 失败被吞），此前会误报成功；现在改为回滚内存状态并返回 `godot_error`，`uid/repair` 还会回滚已写入的 UID 并在 `details` 给出 `expected_uid`/`written_uid`/`rollback_failures`。
@@ -45,6 +50,7 @@
 - CLI 的同步 HTTP/install 路径不再创建 Tokio 多线程池，LSP 按需创建单线程运行时；E2E 文件隔离在遍历前剪枝 `.godot` 和安装目录，保留相同文件基线与实际字节核验。
 - 完整门禁的 file/budget 共用同一次新鲜父进程计时，移除重复全套运行；独立 budget 命令仍执行完整套件。E2E 不再覆盖生产 handler 期限；格式/lint 合并有命令行长度上限的批次，去重 junction 的同一物理源码，不减少检查覆盖。
 - 修正 E2E 隔离：`default_bus_layout.tres` 由 Godot 自身维护，不再纳入文件基线（此前导致 M2/M4 隔离断言间歇失败）；`restore_file_state` 写回后校验并在失败时重试，仍不一致则报错而不是静默吞掉。
+- E2E 项目基线排除 Godot 保存 `project.godot` 时生成的瞬态 `.tmp` 文件，避免快照读取到已被重命名的中间文件。
 - E2E harness 收口：会话级断言「只允许启动一个编辑器」（并打印 pid/时间线/调用栈），修掉测试模块导入 fixture 函数导致的重复定义（实测会真的启动两个编辑器）；`scene/open` 之后等待场景切换完成（避免 UndoRedo 绑到旧场景）；M6 增加每测试文件恢复；`teardown_environment` 不再吞掉重置失败；只有缺少 cargo 才 skip；undo 桥等待放宽到 10s（m2/m4 两份）、`wait_for` 默认与 m3 输入等待放宽；budget 测试默认排除（`pyproject.toml` 与文档一致）；`attach_game` 握手失败时打印 status/运行期目录/编辑器 console 诊断。
 - undo/redo 文件桥改为带 `request_id` 的幂等协议：插件对同一 id 只执行一次并重发结果，harness 超时后重投命令即可覆盖「命令在编辑器读取前被上一帧删除」的竞态与编辑器短暂卡顿，读取结果容忍 Windows rename 共享冲突；m5 InputMap 用例自建动作后自行清理，不再依赖文件基线回滚运行时状态。编辑器终止改为整棵进程树（Windows 的 `godot_console.exe` 会以子进程启动真正的 `godot.exe`，只终止 wrapper 会留下编辑器占用内存/端口/项目目录）。
 - 新增 `GDAPI_E2E_TRANSPORT=engine_debugger`：让整套 E2E 走 EngineDebugger 数据面（默认仍是确定性的 file transport），并补 [外部 godot-mcp 能力对比](docs/reports/2026-10-03-external-parity-comparison.md) 与 [遗留问题清单](docs/todos/2026-10-03-open-issues.md)。

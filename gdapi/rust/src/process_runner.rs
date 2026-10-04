@@ -117,6 +117,66 @@ impl ProcessTreeGuard {
 }
 
 #[cfg(windows)]
+fn resume_suspended_child(process_id: u32) -> std::io::Result<()> {
+    use std::mem::{size_of, zeroed};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+
+    #[repr(C)]
+    struct ThreadEntry32 {
+        size: u32,
+        usage: u32,
+        thread_id: u32,
+        owner_process_id: u32,
+        base_priority: i32,
+        delta_priority: i32,
+        flags: u32,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> HANDLE;
+        fn Thread32First(snapshot: HANDLE, entry: *mut ThreadEntry32) -> i32;
+        fn Thread32Next(snapshot: HANDLE, entry: *mut ThreadEntry32) -> i32;
+        fn OpenThread(access: u32, inherit: i32, thread_id: u32) -> HANDLE;
+        fn ResumeThread(thread: HANDLE) -> u32;
+    }
+
+    const TH32CS_SNAPTHREAD: u32 = 0x0000_0004;
+    const THREAD_SUSPEND_RESUME: u32 = 0x0002;
+    const INVALID_RESUME_COUNT: u32 = u32::MAX;
+
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut entry: ThreadEntry32 = zeroed();
+        entry.size = size_of::<ThreadEntry32>() as u32;
+        let mut found = None;
+        let mut has_entry = Thread32First(snapshot, &mut entry) != 0;
+        while has_entry {
+            if entry.owner_process_id == process_id {
+                let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.thread_id);
+                if !thread.is_null() {
+                    found = Some(thread);
+                    break;
+                }
+            }
+            has_entry = Thread32Next(snapshot, &mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+
+        let Some(thread) = found else {
+            return Err(std::io::Error::last_os_error());
+        };
+        let result = ResumeThread(thread);
+        let error = (result == INVALID_RESUME_COUNT).then(std::io::Error::last_os_error);
+        CloseHandle(thread);
+        error.map_or(Ok(()), Err)
+    }
+}
+
+#[cfg(windows)]
 impl Drop for ProcessTreeGuard {
     fn drop(&mut self) {
         use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -249,6 +309,13 @@ impl ProcessRunnerCore {
             use std::os::unix::process::CommandExt;
             command.process_group(0);
         }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // CREATE_SUSPENDED prevents user code (and descendants) from running
+            // until after Job Object assignment succeeds.
+            command.creation_flags(0x0000_0004);
+        }
         let mut child = command
             .spawn()
             .map_err(|err| format!("spawn failed: {err}"))?;
@@ -259,6 +326,11 @@ impl ProcessRunnerCore {
                 return Err(format!("failed to supervise process tree: {err}"));
             }
         };
+        #[cfg(windows)]
+        if let Err(err) = resume_suspended_child(child.id()) {
+            let _ = kill_and_wait(&mut child, Some(process_tree));
+            return Err(format!("failed to resume supervised process: {err}"));
+        }
 
         let output = Arc::new(Mutex::new(SharedOutput {
             remaining_bytes: max_output_bytes as usize,

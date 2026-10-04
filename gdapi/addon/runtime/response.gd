@@ -158,6 +158,11 @@ func cancellation_reason() -> String:
 	return String(request_control.cancellation_reason())
 
 
+## Record a deferred failure even when a disconnected client cannot receive the response.
+func complete_audit_failure(message: String, code: String, status: int) -> void:
+	AuditLog.complete_request(audit_context, {"error": message, "code": code}, status)
+
+
 ## 内部发送方法
 ##
 ## 实际发送响应到客户端，确保每个请求只发送一次响应。
@@ -175,13 +180,13 @@ func _send(body: PackedByteArray) -> void:
 		}
 		body = JSON.stringify(payload).to_utf8_buffer()
 	_sent = true
-	AuditLog.complete_request(audit_context, payload, _status)
 
 	var headers_dict: Dictionary[String, Variant] = {}
 	for key in _headers:
 		headers_dict[key] = _headers[key]
 
-	_server.send_response(_request_id, _status, headers_dict, body)
+	if _server.send_response(_request_id, _status, headers_dict, body):
+		AuditLog.complete_request(audit_context, payload, _status)
 
 
 ## 根据文件扩展名获取 MIME 类型

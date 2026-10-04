@@ -175,17 +175,17 @@ impl GdApiServer {
         status: i64,
         headers: Dictionary<GString, Variant>,
         body: PackedByteArray,
-    ) {
+    ) -> bool {
         if id < 0 {
             godot_error!("[gdapi] send_response rejected negative request id: {}", id);
-            return;
+            return false;
         }
         if !(100..=599).contains(&status) {
             godot_error!(
                 "[gdapi] send_response rejected invalid HTTP status: {}",
                 status
             );
-            return;
+            return false;
         }
         let mut hdrs: Vec<(String, String)> = Vec::new();
         for (k, v) in headers.iter_shared() {
@@ -193,17 +193,20 @@ impl GdApiServer {
             let vv: String = v.to_string();
             if let Err(e) = validate_response_header(&kk, &vv) {
                 godot_error!("[gdapi] send_response rejected invalid header: {}", e);
-                return;
+                return false;
             }
             hdrs.push((kk, vv));
         }
-        // 优化：使用 to_vec() 替代逐字节 push
         let body_vec = body.to_vec();
-        if let Err(e) = self
+        match self
             .core
             .send_response_raw(id as u64, status as u16, hdrs, body_vec)
         {
-            godot_error!("[gdapi] send_response failed: {}", e);
+            Ok(()) => true,
+            Err(error) => {
+                godot_error!("[gdapi] send_response failed: {}", error);
+                false
+            }
         }
     }
 }

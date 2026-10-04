@@ -235,11 +235,15 @@ static func _bounded_key(key: String) -> String:
 
 
 static func _redact_url_userinfo(text: String) -> String:
-	if not text.contains("://") or not text.contains("@"):
+	if not text.contains("@"):
 		return text
 	if _url_userinfo_regex == null:
 		_url_userinfo_regex = RegEx.new()
-		_url_userinfo_regex.compile("([A-Za-z][A-Za-z0-9+.-]*://)[^/?#]*@")
+		# Keep the URI introducer, but treat the entire pre-@ authority candidate as secret.
+		# This intentionally includes malformed userinfo containing '/', '?', or '#'.
+		_url_userinfo_regex.compile(
+			"((?:[A-Za-z][A-Za-z0-9+.-]*:)?//|[A-Za-z][A-Za-z0-9+.-]*:)[^@]*@"
+		)
 	return _url_userinfo_regex.sub(text, "$1" + REDACTED + "@", true)
 
 

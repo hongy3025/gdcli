@@ -602,6 +602,12 @@ static func metadata(
 		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "metadata does not exist"}
 	var value: Variant = null
 	if operation == "set":
+		if VariantCodec.contains_object_encoding(encoded):
+			return {
+				"ok": false,
+				"code": ErrorCodes.INVALID_PARAM,
+				"error": "metadata requires a non-null serializable value"
+			}
 		var decoded := VariantCodec.decode(encoded)
 		if not decoded.ok:
 			return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": decoded.error}
@@ -765,6 +771,12 @@ static func _call_checked(payload: Dictionary) -> Dictionary:
 		}
 	var args: Array = []
 	for i in raw_args.size():
+		if VariantCodec.contains_object_encoding(raw_args[i]):
+			return {
+				"ok": false,
+				"code": ErrorCodes.PERMISSION_DENIED,
+				"error": "object/callable/signal arguments are forbidden"
+			}
 		var decoded := VariantCodec.decode(raw_args[i])
 		if not decoded.ok:
 			return {"ok": false, "code": ErrorCodes.INVALID_PARAM, "error": decoded.error}

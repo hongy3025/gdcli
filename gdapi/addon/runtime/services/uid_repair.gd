@@ -51,12 +51,11 @@ static func repair(body: Dictionary) -> Dictionary:
 			changes.append({"path": path, "old_uid": old, "new_uid": "", "status": status})
 	var planned: Array = []
 	for change in changes:
-		var new_uid := str(ResourceUID.create_id())
-		change["new_uid"] = new_uid
+		change["new_uid"] = str(ResourceUID.create_id())
 		planned.append(change)
 	if not dry_run:
-		# Check every planned target before touching any UID, including missing UIDs
-		# which cannot be rolled back after ResourceSaver has created them.
+		# Snapshot every resource and sidecar before the first write. This also
+		# lets a failed set_uid restore its partially modified current target.
 		for change in planned:
 			var checked := PathGuard.validate(change.path, "write")
 			if not checked.ok:
@@ -71,33 +70,67 @@ static func repair(body: Dictionary) -> Dictionary:
 					"error": "UID target is not writable",
 					"details": {"failed_path": change.path, "applied": 0}
 				}
+			change["original_bytes"] = probe.get_buffer(probe.get_length())
 			probe.close()
-		var applied: Array = []
+			change["previous_uid_registered"] = false
+			change["previous_uid_path"] = ""
+			if change.old_uid.is_valid_int():
+				var previous_id := int(change.old_uid)
+				if ResourceUID.has_id(previous_id):
+					change["previous_uid_registered"] = true
+					change["previous_uid_path"] = ResourceUID.get_id_path(previous_id)
+			var uid_path: String = String(change.path) + ".uid"
+			change["uid_sidecar_existed"] = FileAccess.file_exists(uid_path)
+			change["uid_sidecar_bytes"] = (
+				FileAccess.get_file_as_bytes(uid_path)
+				if change.uid_sidecar_existed
+				else PackedByteArray()
+			)
+		var attempted: Array = []
 		for change in planned:
+			attempted.append(change)
 			var error := ResourceSaver.set_uid(change.path, int(change.new_uid))
 			var written_uid := int(ResourceLoader.get_resource_uid(change.path))
 			if error != OK or written_uid != int(change.new_uid):
-				# 回读校验：Godot 在目标不可写时可能返回 OK 却什么都没写，
-				# 必须当成失败，否则会留下「改了一半」的 UID。
-				var rollback_failures := _rollback_applied(applied)
+				var rollback_failures := _rollback_targets(attempted)
 				AuditLog.record(
 					"uid/repair", "dangerous", {"path": change.path}, false, ErrorCodes.GODOT_ERROR
 				)
+				var message := "failed to set UID"
+				if not rollback_failures.is_empty():
+					message += (
+						"; failed to restore original bytes for: " + ", ".join(rollback_failures)
+					)
+				var reported_changes: Array = []
+				for planned_change in planned:
+					reported_changes.append(
+						{
+							"path": planned_change.path,
+							"old_uid": planned_change.old_uid,
+							"new_uid": planned_change.new_uid,
+							"status": planned_change.status
+						}
+					)
 				return {
 					"ok": false,
 					"code": ErrorCodes.GODOT_ERROR,
-					"error": "failed to set UID",
-					"changes": planned,
+					"error": message,
+					"changes": reported_changes,
 					"details":
 					{
 						"failed_path": change.path,
 						"expected_uid": int(change.new_uid),
 						"written_uid": written_uid,
-						"applied": applied.size(),
+						"applied": attempted.size() - 1,
 						"rollback_failures": rollback_failures
 					}
 				}
-			applied.append(change)
+		for change in planned:
+			change.erase("original_bytes")
+			change.erase("uid_sidecar_existed")
+			change.erase("uid_sidecar_bytes")
+			change.erase("previous_uid_registered")
+			change.erase("previous_uid_path")
 	AuditLog.record(
 		"uid/repair",
 		"dangerous",
@@ -115,18 +148,40 @@ static func repair(body: Dictionary) -> Dictionary:
 	}
 
 
-## 回滚已写入的 UID。原值为空的条目（此前缺失 UID）无法还原，计入失败列表。
-static func _rollback_applied(applied: Array) -> Array:
+static func _rollback_targets(attempted: Array) -> Array:
 	var failures: Array = []
-	for raw_index in range(applied.size() - 1, -1, -1):
-		var change: Dictionary = applied[raw_index]
-		var previous := String(change.old_uid)
-		if previous.is_empty() or not previous.is_valid_int():
+	for raw_index in range(attempted.size() - 1, -1, -1):
+		var change: Dictionary = attempted[raw_index]
+		if not _restore_bytes(change.path, change.original_bytes):
 			failures.append(change.path)
-			continue
-		if ResourceSaver.set_uid(change.path, int(previous)) != OK:
-			failures.append(change.path)
+		var uid_path: String = String(change.path) + ".uid"
+		if change.uid_sidecar_existed:
+			if not _restore_bytes(uid_path, change.uid_sidecar_bytes):
+				failures.append(uid_path)
+		elif (
+			FileAccess.file_exists(uid_path)
+			and DirAccess.remove_absolute(ProjectSettings.globalize_path(uid_path)) != OK
+		):
+			failures.append(uid_path)
+		var new_id := int(change.new_uid)
+		if ResourceUID.has_id(new_id) and ResourceUID.get_id_path(new_id) == change.path:
+			ResourceUID.remove_id(new_id)
+		if change.previous_uid_registered:
+			var old_id := int(change.old_uid)
+			if ResourceUID.has_id(old_id):
+				ResourceUID.set_id(old_id, change.previous_uid_path)
+			else:
+				ResourceUID.add_id(old_id, change.previous_uid_path)
 	return failures
+
+
+static func _restore_bytes(path: String, bytes: PackedByteArray) -> bool:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		return FileAccess.get_file_as_bytes(path) == bytes
+	file.store_buffer(bytes)
+	file.close()
+	return FileAccess.get_file_as_bytes(path) == bytes
 
 
 static func _collect(path: String, result: Array) -> void:

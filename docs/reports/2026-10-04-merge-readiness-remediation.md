@@ -3,7 +3,7 @@
 本文件记录 [合并质量评价报告](2026-10-04-merge-readiness-review.md) 中 R01–R09 及第 3、4 节准入条件的整改内容与本地验证证据。报告本身保持评价结论不变，本文件只补充「整改后实际行为与门禁结果」。
 
 - 验证环境：Windows 10.0.26200，Godot 4.7.2-stable（`D:\app\devel\Godot\v4.7.2\godot_console.exe`），本地 GPU 为 AMD Radeon RX 7900 XTX。
-- 证据来源：`scripts/check.py` 门禁矩阵（原始等待样本与预算 JSON 位于 `.pytest-artifacts/remediation/`）、GDScript 单元套件（`tests/fixtures/e2e_project/tests/`）、gdapi Rust 集成测试。
+- 证据来源：上一轮原始等待样本与预算 JSON 位于 `.pytest-artifacts/remediation/`；本轮复测 JSON 位于 `.pytest-artifacts/`；另有 GDScript 单元套件（`tests/fixtures/e2e_project/tests/`）及 gdapi Rust 测试结果。
 
 ## 1. R01–R09 整改映射
 
@@ -28,19 +28,19 @@
 
 ## 3. 门禁矩阵（本地实测）
 
-`uv run python scripts/check.py --gate format --gate clippy --gate unit --gate file --gate engine --gate render --gate budget`，产物在 `.pytest-artifacts/remediation/`。
+本轮复测命令：`uv run python scripts/check.py --gate format`、`cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace -j 1`、`uv run python scripts/check.py --gate file --gate budget`；JSON 产物位于 `.pytest-artifacts/`。
 
 | 门禁 | 结果 |
 |---|---|
-| format | `cargo fmt --all -- --check` 通过；`gdformat`/`gdlint` 412 个 GDScript 文件通过 |
+| format | `cargo fmt --all -- --check` 通过；`gdformat`/`gdlint` 414 个 GDScript 文件通过 |
 | clippy | `cargo clippy --workspace --all-targets -- -D warnings` 通过 |
-| unit | `cargo test --workspace` 212 passed（10 套件）；`tests/e2e/test_gate_timing.py` 25 passed |
-| file | 595 selected（4 deselected）→ **595 passed**，326.75 秒；会话证据 `editor_starts=1`、`transport=file`、`editor_mode=headless` |
-| engine | 1 passed，25.63 秒；`transport=engine_debugger`，`editor_starts=1` |
-| render | 2 passed，21.41 秒；`editor_mode=gui`（本机真实 OpenGL），`editor_starts=1` |
-| budget | parent wall **327.532 秒 / 360 秒**（余量 32.5 秒，约 9%）；`budget.json` 记录 `parent_wall_clock_seconds=327.5323`，子报告为同一次 file 会话的 `file-waits.json` |
+| unit | `cargo test --workspace -j 1` 219 passed（10 套件）；`tests/e2e/test_gate_timing.py` 25 passed |
+| file | 626 selected（4 deselected）→ **625 passed、1 skipped**，347.70 秒；`editor_starts=1`、`transport=file`、`editor_mode=headless` |
+| engine | 上一轮本地验证 1 passed，25.63 秒；`transport=engine_debugger`、`editor_starts=1`（本轮未复跑） |
+| render | 上一轮本地验证 2 passed，21.41 秒；`editor_mode=gui`、`editor_starts=1`（本轮未复跑） |
+| budget | parent wall **348.761 秒 / 360 秒**（余量 11.239 秒，约 3.1%）；与本轮 file gate 共用同一会话 |
 
-file 会话成功等待分布（P50/P95/P99/max，秒）：`editor_metadata` 13.18/13.18/13.18/13.18、`scene_switch` 0.0174/0.0230/0.0252/0.0290、`undo_bridge` 0.0215/0.0285/0.0418/0.2378（99 次）。
+file 会话成功等待分布（P50/P95/P99/max，秒）：`editor_metadata` 13.0671/13.0671/13.0671/13.0671、`scene_switch` 0.0155/0.0214/0.0247/0.0309、`undo_bridge` 0.0214/0.0292/0.0461/0.2455（99 次）。
 
 ## 4. 本轮额外发现并修复
 
@@ -55,3 +55,14 @@ file 会话成功等待分布（P50/P95/P99/max，秒）：`editor_metadata` 13.
 - 未运行远端 CI（§4.2）。
 - Linux/macOS 未运行完整 E2E，仅运行 gdapi Rust 集成测试。
 - 真实渲染门禁依赖本机 AMD 7900 XTX + OpenGL；CI 使用 Mesa llvmpipe，两者结果不互相替代。
+
+## 6. 本轮补充整改与最终复测
+
+- 网络重定向相对路径构造修正格式化占位符错误；零字节响应不再向 Godot 的哈希/Base64 API 传空 buffer，仍返回标准空内容 SHA-256 与 Base64。
+- 网络目标校验拒绝空 host、非法或越界 port；延期任务失败即使客户端断开、响应无法入队，也完成一次失败审计。真实断连回归使用 RST，保留 half-close 继续收取响应的语义。
+- `project/input_map/action/add` 导入 project.godot 中预配置的 deadzone 与按键/鼠标修饰键；E2E 快照跳过 Godot 保存 `project.godot` 时生成的瞬态 `.tmp`。
+- CI 上传包含隐藏目录的 gate JSON，并增加 Ubuntu/macOS Rust workspace 测试矩阵。
+- 本轮全 file gate：`625 passed, 1 skipped, 4 deselected`；单次编辑器会话 347.70 秒，parent wall 348.761 秒。IPv6 字面地址网络请求在当前 Godot Windows 构建中无法启动而跳过 E2E；同一/扩展 IPv6 origin 规范化由 GDScript 单元测试验证。
+- 额外定向验证：GDScript guard/响应审计单元 3 passed；空响应重定向及相对 URI-reference 4 passed；场景取消、InputMap 导入、HTTP/进程断连和生产 30 秒 handler deadline 回归均通过。
+- 远端 CI 未运行；engine/render 仍引用第 3 节标注的上一轮本机结果，本轮未复跑。
+

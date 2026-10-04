@@ -2,8 +2,8 @@
 extends RefCounted
 
 
-# A lexical scan, not a GDScript parser: strings are opaque tokens and comments
-# are discarded. Only literal paths and self/local declarations are resolved.
+## A lexical scan, not a GDScript parser: strings are opaque tokens and comments
+## are discarded. Only literal paths and self/local declarations are resolved.
 static func scan(path: String) -> Dictionary:
 	var source := FileAccess.get_file_as_string(path)
 	var tokens := _tokens(source)
@@ -36,7 +36,7 @@ static func scan(path: String) -> Dictionary:
 			var ref := _ref(path, token.line, "extends", value, "resolved")
 			ref["target_kind"] = "file" if next.get("kind") == "string" else "class"
 			if ref.target_kind == "file":
-				ref.target = _resource_path(path, value)
+				ref.target = _preload_path(path, value)
 			references.append(ref)
 			continue
 		if name == "class_name" and following != "":
@@ -47,11 +47,14 @@ static func scan(path: String) -> Dictionary:
 		var args := _arguments(tokens, i + 1)
 		if name in ["load", "preload"] and previous != ".":
 			var literal := _literal(args, 0)
+			var resource_target := (
+				_preload_path(path, literal) if name == "preload" else _load_path(literal)
+			)
 			var ref := _ref(
 				path,
 				token.line,
 				name,
-				_resource_path(path, literal),
+				resource_target,
 				"resolved" if not literal.is_empty() else "unknown"
 			)
 			if literal.is_empty():
@@ -196,7 +199,7 @@ static func _literal(args: Array, index: int) -> String:
 	return ""
 
 
-static func _resource_path(script_path: String, value: String) -> String:
+static func _preload_path(script_path: String, value: String) -> String:
 	if (
 		value.is_empty()
 		or value.begins_with("res://")
@@ -205,6 +208,17 @@ static func _resource_path(script_path: String, value: String) -> String:
 	):
 		return value
 	return script_path.get_base_dir().path_join(value).simplify_path()
+
+
+static func _load_path(value: String) -> String:
+	if (
+		value.is_empty()
+		or value.begins_with("res://")
+		or value.begins_with("user://")
+		or value.begins_with("uid://")
+	):
+		return value
+	return ("res://" + value).simplify_path()
 
 
 static func _ref(
@@ -241,6 +255,14 @@ static func _tokens(source: String) -> Array:
 		if c == "&" and i + 1 < source.length() and source[i + 1] in ['"', "'"]:
 			i += 1
 			continue
+		var raw := false
+		if c in ["r", "R"] and i + 1 < source.length() and source[i + 1] in ['"', "'"]:
+			raw = true
+			i += 1
+			c = source[i]
+		if c == "&" and i + 1 < source.length() and source[i + 1] in ['"', "'"]:
+			i += 1
+			c = source[i]
 		if c in ['"', "'"]:
 			var start_line := line
 			var triple := source.substr(i, 3) == c + c + c
@@ -248,10 +270,17 @@ static func _tokens(source: String) -> Array:
 			i += delimiter.length()
 			var value := ""
 			while i < source.length() and source.substr(i, delimiter.length()) != delimiter:
-				if source[i] == "\\" and i + 1 < source.length():
+				if not raw and source[i] == "\\" and i + 1 < source.length():
 					i += 1
 					var escaped := source[i]
-					value += {"n": "\n", "r": "\r", "t": "\t"}.get(escaped, escaped)
+					if escaped == "u" and i + 4 < source.length():
+						value += String.chr(source.substr(i + 1, 4).hex_to_int())
+						i += 4
+					elif escaped == "U" and i + 8 < source.length():
+						value += String.chr(source.substr(i + 1, 8).hex_to_int())
+						i += 8
+					else:
+						value += {"n": "\n", "r": "\r", "t": "\t"}.get(escaped, escaped)
 				else:
 					value += source[i]
 				if source[i] == "\n":

@@ -18,45 +18,95 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	if not checked.ok:
 		res.error(checked.error, checked.code, 400)
 		return
+	var result := await _open_validated_scene(checked.path, res)
+	if result.ok:
+		res.json(result)
+	else:
+		res.error(result.error, result.code, int(result.get("status", 400)))
+
+
+func _open_validated_scene(path: String, res: GdApiResponse) -> Dictionary:
 	var tree := Engine.get_main_loop() as SceneTree
 	var deadline := Time.get_ticks_usec() + 5_000_000
 	var file_system := EditorInterface.get_resource_filesystem()
+	var scan_result := await _wait_for_scan(tree, file_system, deadline, res)
+	if not scan_result.ok:
+		return scan_result
+	var scene_was_open := SceneEditor.list_open_scenes().has(path)
+	if not scene_was_open:
+		var resource := ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REPLACE)
+		if not resource is PackedScene or not resource.can_instantiate():
+			return {
+				"ok": false,
+				"code": ErrorCodes.GODOT_ERROR,
+				"status": 500,
+				"error": "cannot reload scene before opening",
+			}
+	var cancelled := _cancellation_error(res)
+	if not cancelled.is_empty():
+		return cancelled
+	var result := SceneEditor.open_scene(path)
+	if not result.ok:
+		return result
+	return await _wait_for_open(tree, result.path, deadline, res)
+
+
+func _wait_for_scan(tree: SceneTree, file_system, deadline: int, res: GdApiResponse) -> Dictionary:
 	# Filesystem scans are queued; let a pending scan start before testing its state.
 	await tree.process_frame
+	var cancelled := _cancellation_error(res)
+	if not cancelled.is_empty():
+		return cancelled
 	while file_system.is_scanning() and Time.get_ticks_usec() < deadline:
 		await tree.process_frame
+		cancelled = _cancellation_error(res)
+		if not cancelled.is_empty():
+			return cancelled
 	if file_system.is_scanning():
-		res.error("editor filesystem scan did not finish before timeout", ErrorCodes.TIMEOUT, 408)
-		return
-	var scene_was_open := SceneEditor.list_open_scenes().has(checked.path)
-	if not scene_was_open:
-		var resource := ResourceLoader.load(
-			checked.path, "PackedScene", ResourceLoader.CACHE_MODE_REPLACE
-		)
-		if not resource is PackedScene or not resource.can_instantiate():
-			res.error("cannot reload scene before opening", ErrorCodes.GODOT_ERROR, 500)
-			return
-	var result := SceneEditor.open_scene(checked.path)
-	if not result.ok:
-		res.error(result.error, result.code, 400)
-		return
-	while SceneEditor.current_path() != result.path and Time.get_ticks_usec() < deadline:
+		return {
+			"ok": false,
+			"code": ErrorCodes.TIMEOUT,
+			"status": 408,
+			"error": "editor filesystem scan did not finish before timeout",
+		}
+	return {"ok": true}
+
+
+func _wait_for_open(tree: SceneTree, path: String, deadline: int, res: GdApiResponse) -> Dictionary:
+	while SceneEditor.current_path() != path and Time.get_ticks_usec() < deadline:
 		await tree.process_frame
-	if SceneEditor.current_path() != result.path:
-		res.error("editor did not open scene before timeout", ErrorCodes.TIMEOUT, 408)
-		return
+		var cancelled := _cancellation_error(res)
+		if not cancelled.is_empty():
+			return cancelled
+	if SceneEditor.current_path() != path:
+		return {
+			"ok": false,
+			"code": ErrorCodes.TIMEOUT,
+			"status": 408,
+			"error": "editor did not open scene before timeout",
+		}
 	await tree.process_frame
-	(
-		res
-		. json(
-			{
-				"ok": true,
-				"changed": true,
-				"undoable": false,
-				"path": result.path,
-			}
-		)
-	)
+	var cancelled := _cancellation_error(res)
+	if not cancelled.is_empty():
+		return cancelled
+	return {
+		"ok": true,
+		"changed": true,
+		"undoable": false,
+		"path": path,
+	}
+
+
+func _cancellation_error(res: GdApiResponse) -> Dictionary:
+	var reason := res.cancellation_reason()
+	if reason.is_empty():
+		return {}
+	return {
+		"ok": false,
+		"error": "handler timeout" if reason == "timeout" else "request cancelled: " + reason,
+		"code": "timeout" if reason == "timeout" else "conflict",
+		"status": 504 if reason == "timeout" else 409,
+	}
 
 
 func doc() -> GdApiRouteDoc:

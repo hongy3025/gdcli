@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+import stat
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -128,6 +131,40 @@ def test_script_create_patch_validate_attach(m2_editor):
         "node_path": PLAYER, "path": path
     })
     assert attached["undoable"] is True
+
+@pytest.mark.skipif(sys.platform != "win32", reason="read-only replacement semantics are Windows-specific")
+@pytest.mark.parametrize("route,data", [
+    ("script/create", {"path": "res://scripts/read_only_create.gd", "content": "extends Node\nvar replacement := true\n"}),
+    ("script/write", {"path": "res://scripts/read_only_write.gd", "content": "extends Node\nvar replacement := true\n"}),
+    ("script/patch", {"path": "res://scripts/read_only_patch.gd", "start_line": 2, "end_line": 2, "text": "var value := 2"}),
+])
+def test_script_writes_read_only_targets_fail_cleanly(m2_editor, route, data):
+    path = data["path"]
+    target = Path(m2_editor["project"]) / path.removeprefix("res://")
+    exec_ok(m2_editor, "script/create", {
+        "path": path,
+        "content": "extends Node\nvar value := 1\n",
+    })
+    original = target.read_bytes()
+    target.chmod(stat.S_IREAD)
+    try:
+        exec_ok(m2_editor, "gdapi/audit/clear")
+        error = exec_error(m2_editor, route, data)
+        assert error["code"] == "godot_error", error
+        assert target.read_bytes() == original
+        assert not Path(str(target) + ".tmp").exists()
+        entries = [
+            entry for entry in exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
+            if entry.get("route") == route
+        ]
+        assert len(entries) == 1, entries
+        assert entries[0]["ok"] is False, entries
+        assert entries[0]["code"] == "godot_error", entries
+    finally:
+        target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+
 
 
 def test_invalid_script_returns_valid_false(m2_editor):

@@ -9,7 +9,9 @@ const ROUTE := "network/http_request"
 func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 	var checked := Service.validate(req.body)
 	if not checked.ok:
-		AuditLog.record(ROUTE, "dangerous", {"url": req.get_body("url", "")}, false, checked.code)
+		var rejected_url := String(req.get_body("url", ""))
+		var audit_url := "[REDACTED]" if rejected_url.contains("@") else rejected_url
+		AuditLog.record(ROUTE, "dangerous", {"url": audit_url}, false, checked.code)
 		res.error(checked.error, checked.code, ErrorCodes.http_status(checked.code))
 		return
 	res.audit_summary("dangerous", {"url": checked.url})
@@ -26,12 +28,12 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 				"response": res,
 				"deadline_ms": Time.get_ticks_msec() + checked.timeout_ms + 1000,
 				"tick": func(_now): return bool(started.state.done),
-				"cancel": func(_reason): started.state.node.cancel_request(),
+				"cancel": func(_reason): Service.cancel(started.state),
 				"state": started.state,
 			}
 		)
 	):
-		started.state.node.cancel_request()
+		Service.cancel(started.state)
 		AuditLog.record(ROUTE, "dangerous", {"url": checked.url}, false, ErrorCodes.GODOT_ERROR)
 		res.error("network task could not be registered", ErrorCodes.GODOT_ERROR, 500)
 

@@ -21,4 +21,5 @@ libc = "0.2"
 
 [dev-dependencies]
 ureq = { version = "2", default-features = false }
+socket2 = "0.5.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }

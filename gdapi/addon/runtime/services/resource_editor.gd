@@ -182,6 +182,10 @@ static func save_verified(resource: Resource, path: String, route: String) -> Di
 		if not restored:
 			message += "; disk rollback failed"
 		return _save_failure(route, path, message)
+	# Replace any pre-overwrite cached object only after disk read-back succeeds.
+	# Default-mode consumers (resource/assign, info and other editor callers) then
+	# resolve the persisted replacement rather than a stale cached instance.
+	ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REPLACE_DEEP)
 	AuditLog.record(route, "file", {"path": path}, true)
 	return {"ok": true, "changed": true, "saved": true, "undoable": false, "path": path}
 

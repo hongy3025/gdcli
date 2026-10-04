@@ -273,6 +273,19 @@ fn process_tree_cancel_cleans_descendants_holding_both_pipes() {
     fixture.assert_no_late_side_effect(ready_at);
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_suspended_spawn_contains_fast_descendant_on_timeout() {
+    let fixture = TreeFixture::new();
+    let mut runner = ProcessRunnerCore::new();
+    let id = fixture.start(&runner, "wait", 2000);
+    fixture.wait_ready();
+    let ready_at = Instant::now();
+    let result = wait_for_terminal(&mut runner, id, Duration::from_secs(3));
+    assert!(result.timed_out && !result.cancelled);
+    fixture.assert_no_late_side_effect(ready_at);
+}
+
 #[test]
 fn process_tree_drop_cleans_running_descendants_and_output_readers() {
     let fixture = TreeFixture::new();

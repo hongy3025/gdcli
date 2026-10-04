@@ -127,6 +127,35 @@ def test_resource_overwrite_without_force(m2_editor):
     assert overwritten["saved"] is True
 
 
+
+def test_resource_overwrite_refreshes_cache_for_assign_and_read(m2_editor):
+    path = "res://resources/overwrite_cache_material.tres"
+    exec_ok(m2_editor, "resource/create", {
+        "path": path,
+        "type": "CanvasItemMaterial",
+        "properties": {"resource_name": "BeforeOverwrite"},
+    })
+    assert exec_ok(m2_editor, "resource/info", {"path": path})["properties"][
+        "resource_name"
+    ] == "BeforeOverwrite"
+
+    overwritten = exec_ok(m2_editor, "resource/create", {
+        "path": path,
+        "type": "CanvasItemMaterial",
+        "properties": {"resource_name": "AfterOverwrite"},
+    })
+    assert overwritten["saved"] is True
+    assert exec_ok(m2_editor, "resource/info", {"path": path})["properties"][
+        "resource_name"
+    ] == "AfterOverwrite"
+
+    expected = {"type": "Resource", "value": path}
+    exec_ok(m2_editor, "resource/assign", {
+        "node_path": PLAYER, "property": "material", "path": path,
+    })
+    assert _get_property(m2_editor, PLAYER, "material") == expected
+    exec_ok(m2_editor, "resource/delete", {"path": path})
+
 def test_resource_create_assign_delete_round_trip(m2_editor):
     create_result = exec_ok(m2_editor, "resource/create", {
         "path": "res://resources/generated.tres",

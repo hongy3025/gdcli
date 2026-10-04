@@ -35,8 +35,27 @@ func handle(req: GdApiRequest, res: GdApiResponse) -> void:
 		res.error("cannot open temp file", ErrorCodes.GODOT_ERROR, 500)
 		return
 	f.store_string(content)
+	var write_error := f.get_error()
 	f.close()
-	DirAccess.rename_absolute(tmp, abs_path)
+	var close_error := f.get_error()
+	if write_error != OK or close_error != OK:
+		DirAccess.remove_absolute(tmp)
+		res.error(
+			(
+				"cannot write temp file: %s"
+				% error_string(write_error if write_error != OK else close_error)
+			),
+			ErrorCodes.GODOT_ERROR,
+			500
+		)
+		return
+	var rename_error := DirAccess.rename_absolute(tmp, abs_path)
+	if rename_error != OK:
+		DirAccess.remove_absolute(tmp)
+		res.error(
+			"cannot commit file: %s" % error_string(rename_error), ErrorCodes.GODOT_ERROR, 500
+		)
+		return
 	AuditLog.record(ROUTE, "file", {"path": checked.path}, true, "")
 	(
 		res

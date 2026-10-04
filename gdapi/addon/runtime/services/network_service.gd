@@ -31,6 +31,7 @@ static func validate(body: Dictionary) -> Dictionary:
 		"url": target.url,
 		"scheme": target.scheme,
 		"host": target.host,
+		"canonical_host": target.canonical_host,
 		"port": target.port,
 		"method": method,
 		"timeout_ms": timeout,
@@ -115,6 +116,7 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 				state.redirects += 1
 				state.visited[target.url] = true
 				state.current_url = target.url
+				# Reuse this node for the next hop; cancellation here is not task cancellation.
 				node.cancel_request()
 				var redirect_error := node.request(
 					target.url, state.headers, state.method, state.body
@@ -158,9 +160,10 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 					truncated = true
 				var context := HashingContext.new()
 				context.start(HashingContext.HASH_SHA256)
-				context.update(body)
+				if not body.is_empty():
+					context.update(body)
 				var digest := context.finish().hex_encode()
-				var encoded := Marshalls.raw_to_base64(body)
+				var encoded := "" if body.is_empty() else Marshalls.raw_to_base64(body)
 				response.json(
 					{
 						"ok": true,
@@ -186,9 +189,23 @@ static func start(spec: Dictionary, response: GdApiResponse) -> Dictionary:
 static func _same_origin(left: Dictionary, right: Dictionary) -> bool:
 	return (
 		left.scheme == right.scheme
-		and String(left.host).to_lower() == String(right.host).to_lower()
+		and (
+			String(left.get("canonical_host", left.host))
+			== String(right.get("canonical_host", right.host))
+		)
 		and left.port == right.port
 	)
+
+
+static func cancel(state: Dictionary) -> void:
+	if state.is_empty() or bool(state.get("done", false)):
+		return
+	var node: HTTPRequest = state.get("node")
+	state.clear()
+	state["done"] = true
+	if is_instance_valid(node):
+		node.cancel_request()
+		node.queue_free()
 
 
 static func _without_credentials(headers: PackedStringArray) -> PackedStringArray:
@@ -220,30 +237,68 @@ static func _resolve_redirect_url(current_url: String, location: String) -> Stri
 	var target := location.strip_edges()
 	if target.is_empty() or target.contains("#"):
 		return ""
-	if target.contains("://"):
+	if (
+		target.contains("://")
+		and target.find("://") > 0
+		and target.substr(0, target.find("://")).is_valid_identifier()
+	):
 		return target
-	current_url = current_url.get_slice("?", 0)
 	var scheme_end := current_url.find("://")
 	if scheme_end < 0:
 		return ""
 	var scheme := current_url.left(scheme_end)
 	var authority_start := scheme_end + 3
-	var path_start := current_url.find("/", authority_start)
-	var authority := (
-		current_url.substr(authority_start)
-		if path_start < 0
-		else current_url.substr(authority_start, path_start - authority_start)
-	)
+	var authority_end := current_url.length()
+	for delimiter in ["/", "?"]:
+		var found := current_url.find(delimiter, authority_start)
+		if found >= 0:
+			authority_end = mini(authority_end, found)
+	var authority := current_url.substr(authority_start, authority_end - authority_start)
 	if target.begins_with("//"):
 		return "%s:%s" % [scheme, target]
+	var base := current_url.substr(authority_end)
+	var query_index := base.find("?")
+	var base_path := base if query_index < 0 else base.left(query_index)
+	if base_path.is_empty():
+		base_path = "/"
+	var target_path := target
+	var target_query := ""
+	var target_query_index := target.find("?")
+	if target_query_index >= 0:
+		target_path = target.left(target_query_index)
+		target_query = target.substr(target_query_index)
+	if target.begins_with("?"):
+		return "%s://%s%s%s" % [scheme, authority, base_path, target]
 	if target.begins_with("/"):
-		return "%s://%s%s" % [scheme, authority, target]
-	var base_path := "/"
-	if path_start >= 0:
-		base_path = current_url.substr(path_start)
+		return "%s://%s%s%s" % [scheme, authority, _remove_dot_segments(target_path), target_query]
 	var directory_end := base_path.rfind("/")
 	var directory := "/" if directory_end < 0 else base_path.left(directory_end + 1)
-	return "%s://%s%s%s" % [scheme, authority, directory, target]
+	return (
+		"%s://%s%s%s"
+		% [scheme, authority, _remove_dot_segments(directory + target_path), target_query]
+	)
+
+
+static func _remove_dot_segments(path: String) -> String:
+	var absolute := path.begins_with("/")
+	var trailing := path.ends_with("/") or path.ends_with("/.") or path.ends_with("/..")
+	var segments: Array[String] = []
+	var path_segments := path.split("/", true)
+	for index in range(path_segments.size()):
+		var segment := path_segments[index]
+		if absolute and index == 0:
+			continue
+		if segment == ".":
+			continue
+		if segment == "..":
+			if not segments.is_empty():
+				segments.pop_back()
+		else:
+			segments.append(segment)
+	var normalized := ("/" if absolute else "") + "/".join(segments)
+	if trailing and not normalized.ends_with("/"):
+		normalized += "/"
+	return normalized if not normalized.is_empty() else "/"
 
 
 static func _error(code: String, message: String) -> Dictionary:

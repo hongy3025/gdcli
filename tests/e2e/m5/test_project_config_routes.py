@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -81,6 +82,77 @@ def test_input_map_and_autoload_are_persisted_to_project_file(m5_editor):
     restore_snapshot(m5_editor)
     assert_snapshot_restored(m5_editor, before)
 
+
+
+def test_input_map_add_imports_preexisting_project_action(m5_editor, input_action):
+    """Adding a project-defined but not-yet-live action imports its exact state."""
+    action = "m5_preexisting_input_action"
+    key_modifiers = (1 << 25) | (1 << 27)
+    mouse_modifiers = 1 << 26
+    stored_events = [
+        {"type": "InputEventKey", "keycode": 65, "modifiers": key_modifiers},
+        {"type": "InputEventMouseButton", "button_index": 1, "modifiers": mouse_modifiers},
+    ]
+    exec_ok(m5_editor, "project/settings/set", {
+        "name": "input/" + action,
+        "value": {"deadzone": 0.73, "events": stored_events},
+    })
+
+    input_action(action, deadzone=0.2)
+
+    runtime = exec_ok(
+        m5_editor, "project/input_map/list", {"filter": action}
+    )["items"]
+    assert len(runtime) == 1
+    assert runtime[0]["deadzone"] == pytest.approx(0.73)
+    assert runtime[0]["events"] == [
+        {
+            "type": "InputEventKey",
+            "keycode": 65,
+            "physical_keycode": 0,
+            "unicode": 0,
+            "modifiers": key_modifiers,
+        },
+        {
+            "type": "InputEventMouseButton",
+            "button_index": 1,
+            "modifiers": mouse_modifiers,
+        },
+    ]
+    persisted = exec_ok(m5_editor, "project/settings/get", {"name": "input/" + action})
+    assert persisted["value"]["deadzone"] == pytest.approx(0.73)
+    assert len(persisted["value"]["events"]) == 2
+    project_text = (Path(m5_editor["project"]) / "project.godot").read_text(encoding="utf-8")
+    assert re.search(r'"deadzone"\s*:\s*0\.73', project_text)
+    assert re.search(r"(?m)^" + re.escape(action) + r"\s*=\{", project_text)
+    assert re.search(r'"keycode"\s*:\s*65', project_text)
+    assert re.search(r'"button_index"\s*:\s*1', project_text)
+    assert re.search(r'"shift_pressed"\s*:\s*true', project_text)
+    assert re.search(r'"meta_pressed"\s*:\s*true', project_text)
+    assert re.search(r'"alt_pressed"\s*:\s*true', project_text)
+
+
+def test_input_map_add_rejects_unsupported_stored_event_without_mutation(m5_editor):
+    action = "m5_unsupported_project_action"
+    setting = {"deadzone": 0.41, "events": [{"type": "InputEventGesture"}]}
+    exec_ok(m5_editor, "project/settings/set", {
+        "name": "input/" + action, "value": setting,
+    })
+    project_file = Path(m5_editor["project"]) / "project.godot"
+    before = project_file.read_bytes()
+
+    error = exec_error(m5_editor, "project/input_map/action/add", {
+        "action": action, "deadzone": 0.2,
+    })
+
+    assert error["code"] == "invalid_param", error
+    assert exec_ok(
+        m5_editor, "project/input_map/list", {"filter": action}
+    )["items"] == []
+    assert exec_ok(
+        m5_editor, "project/settings/get", {"name": "input/" + action}
+    )["value"] == setting
+    assert project_file.read_bytes() == before
 
 def test_unwritable_project_file_fails_and_rolls_back(m5_editor, read_only_project_file):
     """project.godot 不可写时：必须报错、回滚内存状态、文件保持不变。

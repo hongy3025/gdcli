@@ -23,8 +23,17 @@ static func validate(path: String, mode: String = "read") -> Dictionary:
 	if not normalized.begins_with("res://") and not normalized.begins_with("user://"):
 		return _err("only res:// and user:// paths are allowed", ErrorCodes.INVALID_PATH)
 	if mode == "write" or mode == "delete":
+		var path_for_comparison := normalized
+		if OS.get_name() == "Windows":
+			path_for_comparison = path_for_comparison.to_lower()
 		for prefix in BLOCKED_WRITE_PREFIXES:
-			if normalized == prefix.trim_suffix("/") or normalized.begins_with(prefix):
+			var prefix_for_comparison: String = (
+				prefix.to_lower() if OS.get_name() == "Windows" else prefix
+			)
+			if (
+				path_for_comparison == prefix_for_comparison.trim_suffix("/")
+				or path_for_comparison.begins_with(prefix_for_comparison)
+			):
 				return _err("path is protected: " + normalized, ErrorCodes.PERMISSION_DENIED, 403)
 	return {"ok": true, "path": normalized}
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from .helpers import editor_redo, editor_undo, exec_error, exec_ok, tree_digest
@@ -108,6 +110,85 @@ def test_node_set_rejects_invalid_property_before_mutation(m2_editor):
         "node_path": "/root/Main/H", "property": "position"
     })
     assert after == before
+
+
+def _write_static_init_resource(editor: dict, token: str) -> tuple[str, Path]:
+    """Create a first-load user:// script whose static initializer leaves evidence."""
+    project = Path(editor["project"])
+    user_dir = (
+        project / ".godot" / "appdata" / "Godot" / "app_userdata" / "gdcli_e2e_fixture"
+    )
+    user_dir.mkdir(parents=True, exist_ok=True)
+    script_name = f"gdapi_forbidden_{token}.gd"
+    marker_name = f"gdapi_forbidden_{token}.marker"
+    (user_dir / script_name).write_text(
+        "extends RefCounted\n"
+        "static func _static_init() -> void:\n"
+        f'\tvar marker := FileAccess.open("user://{marker_name}", FileAccess.WRITE)\n'
+        '\tmarker.store_string("loaded")\n'
+        "\tmarker.close()\n",
+        encoding="utf-8",
+    )
+    return f"user://{script_name}", user_dir / marker_name
+
+
+def test_node_metadata_rejects_resource_before_first_load(m2_editor):
+    import uuid
+
+    resource, marker = _write_static_init_resource(m2_editor, uuid.uuid4().hex)
+    assert not marker.exists()
+    error = exec_error(m2_editor, "node/meta/set", {
+        "node_path": "/root/Main",
+        "key": "unsafe",
+        "value": {"type": "Resource", "value": resource},
+    })
+    assert error["code"] == "invalid_param"
+    assert error["error"] == "metadata requires a non-null serializable value"
+    assert not marker.exists()
+
+
+def test_node_call_rejects_resource_before_first_load(m2_editor):
+    import uuid
+
+    resource, marker = _write_static_init_resource(m2_editor, uuid.uuid4().hex)
+    assert not marker.exists()
+    error = exec_error(m2_editor, "node/call", {
+        "node_path": "/root/Main",
+        "method": "is_in_group",
+        "args": [{"type": "Resource", "value": resource}],
+    })
+    assert error["code"] == "permission_denied"
+    assert error["error"] == "object/callable/signal arguments are forbidden"
+    assert not marker.exists()
+
+
+def test_node_non_object_consumers_reject_nested_object_tags(m2_editor):
+    import uuid
+
+    resource, marker = _write_static_init_resource(m2_editor, uuid.uuid4().hex)
+    for tag in ("Resource", "Object"):
+        nested = {"items": [{"nested": {"type": tag, "value": resource}}]}
+        meta_error = exec_error(m2_editor, "node/meta/set", {
+            "node_path": "/root/Main", "key": f"unsafe_nested_{tag.lower()}", "value": nested,
+        })
+        call_error = exec_error(m2_editor, "node/call", {
+            "node_path": "/root/Main", "method": "is_in_group", "args": [nested],
+        })
+        assert meta_error["code"] == "invalid_param"
+        assert meta_error["error"] == "metadata requires a non-null serializable value"
+        assert call_error["code"] == "permission_denied"
+        assert call_error["error"] == "object/callable/signal arguments are forbidden"
+    assert not marker.exists()
+
+def test_node_non_object_consumers_keep_valid_values(m2_editor):
+    result = exec_ok(m2_editor, "node/meta/set", {
+        "node_path": "/root/Main", "key": "safe_value", "value": {"answer": 42},
+    })
+    assert result["value"] == {"answer": 42}
+    called = exec_ok(m2_editor, "node/call", {
+        "node_path": "/root/Main", "method": "is_in_group", "args": ["unused_group"],
+    })
+    assert called["result"] is False
 
 
 def test_node_list_and_property_list(m2_editor):

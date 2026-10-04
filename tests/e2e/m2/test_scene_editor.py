@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
+import socket
 import stat
+import struct
+import time
 from pathlib import Path
+
 import pytest
 
 from .helpers import exec_error, exec_ok
@@ -38,6 +43,28 @@ def test_scene_open_rejects_missing_scene_without_state_change(m2_editor):
     error = exec_error(m2_editor, "scene/open", {"path": "res://missing.tscn"})
     assert error["code"] == "not_found"
     assert exec_ok(m2_editor, "scene/current") == before
+
+
+def test_cancelled_scene_open_does_not_switch_editor_scene(m2_editor):
+    project = Path(m2_editor["project"])
+    meta = json.loads((project / ".godot" / "gdapi.json").read_text(encoding="utf-8"))
+    body = json.dumps({"path": "res://scenes/audio.tscn"}).encode("utf-8")
+    request = (
+        b"POST /scene/open HTTP/1.1\r\n"
+        + f"Host: 127.0.0.1:{meta['http_port']}\r\n".encode()
+        + f"Authorization: Bearer {meta['token']}\r\n".encode()
+        + b"Content-Type: application/json\r\nConnection: close\r\n"
+        + f"Content-Length: {len(body)}\r\n\r\n".encode()
+        + body
+    )
+    with socket.create_connection(("127.0.0.1", meta["http_port"]), timeout=5) as client:
+        client.sendall(request)
+        client.setsockopt(
+            socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("HH" if os.name == "nt" else "ii", 1, 0)
+        )
+    time.sleep(0.25)
+    assert exec_ok(m2_editor, "scene/current")["path"] == "res://scenes/main.tscn"
+    assert "res://scenes/audio.tscn" not in exec_ok(m2_editor, "scene/list_open")["paths"]
 
 
 def test_scene_current_save_persists_file_changes(m2_editor):
@@ -144,6 +171,47 @@ func _notification(what: int) -> void:
     exec_ok(m2_editor, "scene/close")
     exec_ok(m2_editor, "scene/open", {"path": target})
     assert exec_ok(m2_editor, "node/meta/get", request)["value"] == 1
+
+
+def test_scene_save_verification_reads_external_resource_from_disk(m2_editor):
+    project = Path(m2_editor["project"])
+    dependency_path = "res://resources/save_readback_material.tres"
+    dependency = project / "resources/save_readback_material.tres"
+    exec_ok(m2_editor, "resource/create", {
+        "path": dependency_path,
+        "type": "CanvasItemMaterial",
+        "properties": {"resource_name": "CachedBeforeDiskChange"},
+    })
+    exec_ok(m2_editor, "resource/assign", {
+        "node_path": "/root/Main/Player",
+        "property": "material",
+        "path": dependency_path,
+    })
+    original_scene = (project / "scenes/main.tscn").read_bytes()
+    dependency.write_text(
+        '[gd_resource type="CanvasItemMaterial" format=3]\n\n'
+        '[resource]\nresource_name = "ChangedOnDisk"\n',
+        encoding="utf-8",
+    )
+    target_path = "res://scenes/save_readback_target.tscn"
+    target = project / "scenes/save_readback_target.tscn"
+    readonly_enforced = os.name == "nt"
+    if readonly_enforced:
+        dependency.chmod(stat.S_IREAD)
+    try:
+        result = exec_error(m2_editor, "scene/current/save", {"path": target_path})
+        assert result["code"] == "godot_error"
+        assert not target.exists()
+        assert (project / "scenes/main.tscn").read_bytes() == original_scene
+        assert "ChangedOnDisk" in dependency.read_text(encoding="utf-8")
+        current = exec_ok(m2_editor, "scene/current")
+        assert current["path"] == "res://scenes/main.tscn" and current["edited"] is True
+        assert exec_ok(m2_editor, "node/property/get", {
+            "node_path": "/root/Main/Player", "property": "material"
+        })["value"] == {"type": "Resource", "value": dependency_path}
+    finally:
+        if readonly_enforced:
+            dependency.chmod(stat.S_IREAD | stat.S_IWRITE)
 
 
 def test_scene_close_then_current_is_not_found(m2_editor):

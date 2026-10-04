@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import stat
+import sys
+from pathlib import Path
+
 import pytest
 
 from .helpers import exec_error, exec_ok
@@ -51,6 +55,31 @@ def test_filesystem_write_atomic(m2_editor):
     assert write2["written"] is True
     after = exec_ok(m2_editor, "filesystem/read", {"path": target})
     assert after["content"] == "second"
+
+
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="read-only replacement semantics are Windows-specific")
+def test_filesystem_write_read_only_target_fails_cleanly(m2_editor):
+    path = "res://notes/read_only_write.md"
+    target = Path(m2_editor["project"]) / "notes" / "read_only_write.md"
+    exec_ok(m2_editor, "filesystem/write", {"path": path, "content": "original bytes"})
+    target.chmod(stat.S_IREAD)
+    try:
+        exec_ok(m2_editor, "gdapi/audit/clear")
+        error = exec_error(m2_editor, "filesystem/write", {"path": path, "content": "replacement"})
+        assert error["code"] == "godot_error", error
+        assert target.read_bytes() == b"original bytes"
+        assert not Path(str(target) + ".gdcli-tmp").exists()
+        entries = [
+            entry for entry in exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
+            if entry.get("route") == "filesystem/write"
+        ]
+        assert len(entries) == 1, entries
+        assert entries[0]["ok"] is False, entries
+        assert entries[0]["code"] == "godot_error", entries
+    finally:
+        target.chmod(stat.S_IREAD | stat.S_IWRITE)
 
 
 @pytest.mark.parametrize("route,data,code", [

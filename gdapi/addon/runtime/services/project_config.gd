@@ -99,7 +99,38 @@ static func add_action(name: String, deadzone: float) -> Dictionary:
 	if InputMap.has_action(name):
 		return _err(ErrorCodes.CONFLICT, "action already exists")
 	var previous := _snapshot_action(name)
-	InputMap.add_action(name, deadzone)
+	var key := "input/" + name
+	var stored: Variant = (
+		ProjectSettings.get_setting(key) if ProjectSettings.has_setting(key) else null
+	)
+	var deadzone_to_add := deadzone
+	var stored_events: Array = []
+	if ProjectSettings.has_setting(key) and not stored is Dictionary:
+		return _err(ErrorCodes.INVALID_PARAM, "project action setting has an unsupported format")
+	if stored is Dictionary:
+		deadzone_to_add = float(stored.get("deadzone", deadzone))
+		var configured: Variant = stored.get("events", [])
+		if not configured is Array:
+			return _err(
+				ErrorCodes.INVALID_PARAM, "project action events have an unsupported format"
+			)
+		stored_events = configured
+	var imported_events: Array[InputEvent] = []
+	for event in stored_events:
+		var imported: InputEvent = null
+		if event is InputEvent:
+			imported = event
+		elif event is Dictionary:
+			imported = _event(event)
+		if imported == null:
+			return _err(
+				ErrorCodes.INVALID_PARAM,
+				"project action contains an unsupported stored input event"
+			)
+		imported_events.append(imported)
+	InputMap.add_action(name, deadzone_to_add)
+	for event in imported_events:
+		InputMap.action_add_event(name, event)
 	_persist_action(name)
 	return _save_input(name, true, func(): _restore_action(name, previous))
 
@@ -319,10 +350,20 @@ static func _event(data: Dictionary) -> InputEvent:
 			key.keycode = int(data.get("keycode", 0))
 			key.physical_keycode = int(data.get("physical_keycode", 0))
 			key.unicode = int(data.get("unicode", 0))
+			var key_modifiers := int(data.get("modifiers", 0))
+			key.shift_pressed = (key_modifiers & KEY_MASK_SHIFT) != 0
+			key.alt_pressed = (key_modifiers & KEY_MASK_ALT) != 0
+			key.ctrl_pressed = (key_modifiers & KEY_MASK_CTRL) != 0
+			key.meta_pressed = (key_modifiers & KEY_MASK_META) != 0
 			event = key
 		"InputEventMouseButton":
 			var mouse := InputEventMouseButton.new()
 			mouse.button_index = int(data.get("button_index", 0))
+			var mouse_modifiers := int(data.get("modifiers", 0))
+			mouse.shift_pressed = (mouse_modifiers & KEY_MASK_SHIFT) != 0
+			mouse.alt_pressed = (mouse_modifiers & KEY_MASK_ALT) != 0
+			mouse.ctrl_pressed = (mouse_modifiers & KEY_MASK_CTRL) != 0
+			mouse.meta_pressed = (mouse_modifiers & KEY_MASK_META) != 0
 			event = mouse
 		"InputEventJoypadButton":
 			var button := InputEventJoypadButton.new()

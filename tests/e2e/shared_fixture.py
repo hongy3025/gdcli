@@ -369,11 +369,15 @@ def is_tracked_project_file(relative: str) -> bool:
 
     例外（有意排除）：
     - `.godot/`、`addons/gdapi/`：生成物与安装产物；
-    - `project.godot`：由各模块自己的快照/恢复（如 m5）负责，避免与编辑器保存竞争；
+    - `project.godot` 及 Godot 写入时生成的临时文件：由设置保存管理；
     - `UNPINNED_PROJECT_FILES`：Godot 自身维护的文件。
     """
     if relative in UNPINNED_PROJECT_FILES:
         return False
+    if relative.startswith("project.godot") and relative.endswith(".tmp"):
+        suffix = relative[len("project.godot") : -len(".tmp")]
+        if suffix.isdigit():
+            return False
     return not (
         relative.startswith(".godot/")
         or relative.startswith("addons/gdapi/")

@@ -103,7 +103,7 @@ def test_scene_delete_dry_run_protection_and_open_conflict(m2_editor):
     assert not (Path(m2_editor["project"]) / "scenes/controls_linked.tscn").exists()
 
 
-@pytest.mark.parametrize("reference_form", ["res", "relative", "uid"])
+@pytest.mark.parametrize("reference_form", ["res", "relative", "uid", "raw", "escaped", "load_relative"])
 def test_scene_delete_rejects_script_preload_without_executing_script(m2_editor, reference_form):
     project = Path(m2_editor["project"])
     target_path = write_scene(m2_editor, "res://scenes/delete_preload_target.tscn")
@@ -116,10 +116,16 @@ def test_scene_delete_rejects_script_preload_without_executing_script(m2_editor,
         match = re.search(r'uid="([^"]+)"', before.decode("utf-8"))
         assert match is not None, "saved Godot scene must have a UID"
         literal = match[1]
-    elif reference_form == "relative":
+    elif reference_form in ["relative", "raw"]:
         literal = "../scenes/delete_preload_target.tscn"
+    elif reference_form == "escaped":
+        literal = r"..\u002fscenes/delete_preload_target.tscn"
+    elif reference_form == "load_relative":
+        literal = "scenes/delete_preload_target.tscn"
     else:
         literal = target_path
+    operation = "load" if reference_form == "load_relative" else "preload"
+    path_expression = f'r"{literal}"' if reference_form == "raw" else f'"{literal}"'
     script_path = "res://scripts/delete_preload_consumer.gd"
     script = project / "scripts/delete_preload_consumer.gd"
     marker = project / "delete_preload_executed.txt"
@@ -127,8 +133,8 @@ def test_scene_delete_rejects_script_preload_without_executing_script(m2_editor,
     # previously unloaded consumer, including its real static-init side effect.
     script.write_text(f'''@tool
 extends RefCounted
-const TARGET = preload(
-    "{literal}"
+const TARGET = {operation}(
+    {path_expression}
 )
 static func _static_init() -> void:
     var file := FileAccess.open("res://delete_preload_executed.txt", FileAccess.WRITE)
@@ -216,6 +222,31 @@ def test_scene_delete_dry_run_and_real_delete_both_reject_unsaved_scene(m2_edito
     assert exec_ok(m2_editor, "scene/delete", {**request, "dry_run": True})["can_delete"] is True
     assert exec_ok(m2_editor, "scene/delete", request)["deleted"] is True
     assert not target.exists()
+
+
+def test_scene_delete_save_as_dirty_current_scene_is_refused(m2_editor):
+    project = Path(m2_editor["project"])
+    path = "res://scenes/delete_save_as_guard.tscn"
+    target = project / "scenes/delete_save_as_guard.tscn"
+    assert exec_ok(m2_editor, "scene/current/save", {"path": path})["saved"] is True
+    assert target.is_file()
+    request = {
+        "node_path": "/root/Main/Player",
+        "property": "position",
+        "value": {"type": "Vector2", "value": [73, 19]},
+    }
+    exec_ok(m2_editor, "node/property/set", request)
+    current = exec_ok(m2_editor, "scene/current")
+    assert current["path"] == path and current["edited"] is True
+    deletion = {"path": path, "close_open": True}
+    preview = exec_ok(m2_editor, "scene/delete", {**deletion, "dry_run": True})
+    assert preview["open"] is True and preview["can_delete"] is False
+    assert exec_error(m2_editor, "scene/delete", deletion)["code"] == "conflict"
+    assert target.is_file()
+    assert exec_ok(m2_editor, "scene/current") == current
+    assert exec_ok(m2_editor, "node/property/get", {
+        "node_path": "/root/Main/Player", "property": "position"
+    })["value"] == {"type": "Vector2", "value": [73, 19]}
 
 
 def test_node_call_executes_safe_native_and_validates_arguments(m2_editor):

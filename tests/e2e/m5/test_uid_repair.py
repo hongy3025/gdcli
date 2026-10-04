@@ -171,3 +171,30 @@ def test_uid_repair_read_only_missing_uid_does_not_partially_create_uids(m5_edit
         assert {path.name: path.read_bytes() for path in work.iterdir()} == before
     finally:
         blocked.chmod(mode)
+
+
+def test_uid_repair_restores_all_target_bytes_when_late_resource_is_invalid(m5_editor):
+    """A failed set_uid on a later target restores earlier and partially changed bytes."""
+    work = Path(m5_editor["project"]) / "fixtures" / "uid_invalid_batch"
+    work.mkdir(parents=True, exist_ok=True)
+    first = work / "a_valid.tres"
+    invalid = work / "z_invalid.tres"
+    first.write_bytes(b'[gd_resource type="Resource" format=3]\n\n[resource]\n')
+    invalid.write_bytes(b"not a Godot resource; preserve these exact bytes\n")
+    before = {path.name: path.read_bytes() for path in work.iterdir() if path.is_file()}
+
+    error = exec_error(m5_editor, "uid/repair", {
+        "roots": ["res://fixtures/uid_invalid_batch"], "dry_run": False,
+    })
+
+    assert error["code"] == "godot_error", error
+    assert error["details"]["failed_path"] == "res://fixtures/uid_invalid_batch/z_invalid.tres"
+    assert {path.name: path.read_bytes() for path in work.iterdir() if path.is_file()} == before
+    dry_run = exec_ok(m5_editor, "uid/repair", {
+        "roots": ["res://fixtures/uid_invalid_batch"], "dry_run": True,
+    })
+    assert [change["path"] for change in dry_run["changes"]] == [
+        "res://fixtures/uid_invalid_batch/a_valid.tres",
+        "res://fixtures/uid_invalid_batch/z_invalid.tres",
+    ]
+    assert all(change["status"] == "missing" for change in dry_run["changes"]), dry_run

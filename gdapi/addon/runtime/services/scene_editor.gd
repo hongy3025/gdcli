@@ -44,24 +44,76 @@ static func is_open(path: String) -> bool:
 
 ## 当前场景是否有未保存改动。以编辑器自身记录为准。
 ##
-## EditorInterface.get_unsaved_scenes() 返回的是 EditorData 里每个场景条目的 path，
-## 而 save-as 之后该 path 不会跟着更新（仍指向旧文件）；未保存标记本身是按场景索引
-## 记录的，因此这里按索引对齐 get_open_scenes() 与 get_unsaved_scenes() 比较。
+## 编辑器的 open/unsaved 路径在 save-as 后可能仍是旧路径；按 tab 索引读取
+## unsaved 标记，并用实际 scene root 识别当前场景。空路径的新场景也必须走相同映射。
 static func is_current_scene_unsaved() -> bool:
 	var root := current_root()
 	if root == null:
 		return false
-	if root.scene_file_path == "":
-		return true
-	var unsaved := EditorInterface.get_unsaved_scenes()
-	if unsaved.is_empty():
-		return false
-	var open_paths := EditorInterface.get_open_scenes()
-	var roots := EditorInterface.get_open_scene_roots()
-	for index in mini(open_paths.size(), roots.size()):
-		if roots[index] == root:
-			return open_paths[index] in unsaved
+	return _root_tab_is_unsaved(
+		root,
+		EditorInterface.get_open_scene_roots(),
+		EditorInterface.get_open_scenes(),
+		EditorInterface.get_unsaved_scenes()
+	)
+
+
+static func _root_tab_is_unsaved(
+	target_root: Node, roots: Array, open_paths: PackedStringArray, unsaved_paths: PackedStringArray
+) -> bool:
+	for root_index in roots.size():
+		if roots[root_index] != target_root:
+			continue
+		var open_index := _open_path_index_for_root(root_index, roots, open_paths)
+		return open_index >= 0 and open_paths[open_index] in unsaved_paths
 	return false
+
+
+## get_open_scene_roots() omits null roots, while get_open_scenes() preserves their empty paths.
+## Skip only unmatched empty tabs so subsequent root indexes retain their editor-tab mapping.
+static func _open_path_index_for_root(
+	root_index: int, roots: Array, open_paths: PackedStringArray
+) -> int:
+	if roots.size() == open_paths.size():
+		return root_index
+	var matched_roots := 0
+	for open_index in open_paths.size():
+		if (
+			open_paths[open_index].is_empty()
+			and matched_roots < roots.size()
+			and roots[matched_roots].scene_file_path != ""
+		):
+			continue
+		if matched_roots == root_index:
+			return open_index
+		matched_roots += 1
+	return -1
+
+
+static func _scene_tab_status(path: String) -> Dictionary:
+	return _scene_tab_status_for(
+		path,
+		EditorInterface.get_open_scene_roots(),
+		EditorInterface.get_open_scenes(),
+		EditorInterface.get_unsaved_scenes()
+	)
+
+
+static func _scene_tab_status_for(
+	path: String, roots: Array, open_paths: PackedStringArray, unsaved_paths: PackedStringArray
+) -> Dictionary:
+	var opened := false
+	var unsaved := false
+	for root_index in roots.size():
+		var root: Node = roots[root_index]
+		if root == null or root.scene_file_path != path:
+			continue
+		var open_index := _open_path_index_for_root(root_index, roots, open_paths)
+		if open_index < 0:
+			continue
+		opened = true
+		unsaved = open_paths[open_index] in unsaved_paths
+	return {"open": opened, "unsaved": unsaved}
 
 
 ## 解析 res:// 路径到磁盘绝对路径,失败返回空字符串
@@ -148,7 +200,9 @@ static func save_scene(path: String) -> Dictionary:
 	# Avoid preview generation, which can yield into unrelated editor work.
 	EditorInterface.save_scene_as(target, false)
 	editor_plugin.disconnect("scene_saved", capture)
-	var persisted := ResourceLoader.load(target, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE)
+	var persisted := ResourceLoader.load(
+		target, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE_DEEP
+	)
 	if (
 		verification.pack_error != OK
 		or not persisted is PackedScene
@@ -402,8 +456,9 @@ static func delete_scene(path: String, dry_run: bool, close_open: bool) -> Dicti
 		references.append("project.godot:application/run/main_scene")
 	for root in EditorInterface.get_open_scene_roots():
 		_live_scene_references(root, path, references)
-	var opened := path in EditorInterface.get_open_scenes()
-	var unsaved := opened and path in EditorInterface.get_unsaved_scenes()
+	var tab_status := _scene_tab_status(path)
+	var opened: bool = tab_status.open
+	var unsaved: bool = tab_status.unsaved
 	if dry_run:
 		AuditLog.record(
 			"scene/delete",

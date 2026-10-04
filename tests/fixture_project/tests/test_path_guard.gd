@@ -30,6 +30,38 @@ func _init() -> void:
 		ErrorCodes.PERMISSION_DENIED,
 		"addon protected"
 	)
+	var windows_case_insensitive := OS.get_name() == "Windows"
+	for protected_path in [
+		"res://addons/gdapi",
+		"res://addons/gdapi/plugin.gd",
+		"res://addons/GDAPI",
+		"res://addons/GDAPI/plugin.gd",
+		"res://ADDONS/GdApi",
+		"res://ADDONS/GdApi/plugin.gd",
+	]:
+		var is_protected_case: bool = (
+			windows_case_insensitive
+			or protected_path == "res://addons/gdapi"
+			or protected_path == "res://addons/gdapi/plugin.gd"
+		)
+		for mode in ["write", "delete"]:
+			var result := PathGuard.validate(protected_path, mode)
+			if is_protected_case:
+				assert_eq(
+					result.code,
+					ErrorCodes.PERMISSION_DENIED,
+					"protected casing: " + mode + " " + protected_path
+				)
+			else:
+				assert_true(result.ok, "case-sensitive distinct path: " + protected_path)
+	assert_true(
+		PathGuard.validate("res://addons/gdapi_backup/plugin.gd", "write").ok,
+		"protected segment-prefix neighbor"
+	)
+	assert_true(
+		PathGuard.validate("user://addons/GDAPI/plugin.gd", "write").ok,
+		"user path is not a res:// alias"
+	)
 	assert_eq(
 		PathGuard.validate("res://.godot/gdapi.json", "delete").code,
 		ErrorCodes.PERMISSION_DENIED,

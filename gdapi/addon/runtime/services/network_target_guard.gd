@@ -36,14 +36,100 @@ static func authorize(url: String) -> Dictionary:
 			return _error(ErrorCodes.INVALID_PARAM, "invalid IPv6 host")
 		host = authority.substr(1, close - 1)
 		if close + 1 < authority.length():
-			port = int(authority.substr(close + 2))
+			if authority[close + 1] != ":":
+				return _error(ErrorCodes.INVALID_PARAM, "invalid URL port")
+			var port_text := authority.substr(close + 2)
+			if not port_text.is_valid_int():
+				return _error(ErrorCodes.INVALID_PARAM, "invalid URL port")
+			port = int(port_text)
 	elif authority.count(":") == 1:
 		var fields := authority.rsplit(":", true, 1)
 		host = fields[0]
+		if not fields[1].is_valid_int():
+			return _error(ErrorCodes.INVALID_PARAM, "invalid URL port")
 		port = int(fields[1])
-	if host.is_empty() or port < 1 or port > 65535:
-		return _error(ErrorCodes.INVALID_PARAM, "invalid host or port")
-	return {"ok": true, "url": normalized, "scheme": scheme, "host": host, "port": port}
+	if host.is_empty():
+		return _error(ErrorCodes.INVALID_PARAM, "URL host is required")
+	if port <= 0 or port > 65535:
+		return _error(ErrorCodes.INVALID_PARAM, "URL port must be in 1..65535")
+	if host.contains(":"):
+		var canonical_host := _canonical_ipv6(host)
+		if canonical_host.is_empty():
+			return _error(ErrorCodes.INVALID_PARAM, "invalid IPv6 host")
+		return {
+			"ok": true,
+			"url": normalized,
+			"scheme": scheme,
+			"host": host,
+			"canonical_host": canonical_host,
+			"port": port
+		}
+	return {
+		"ok": true,
+		"url": normalized,
+		"scheme": scheme,
+		"host": host,
+		"canonical_host": host.to_lower(),
+		"port": port
+	}
+
+
+static func _canonical_ipv6(host: String) -> String:
+	host = host.to_lower()
+	if host.contains("."):
+		var last_colon := host.rfind(":")
+		if last_colon < 0:
+			return ""
+		var octets := host.substr(last_colon + 1).split(".")
+		if octets.size() != 4:
+			return ""
+		var bytes: Array[int] = []
+		for octet in octets:
+			if not octet.is_valid_int():
+				return ""
+			var value := int(octet)
+			if value < 0 or value > 255:
+				return ""
+			bytes.append(value)
+		var first_word := (bytes[0] << 8) | bytes[1]
+		var second_word := (bytes[2] << 8) | bytes[3]
+		host = (
+			host.left(last_colon + 1)
+			+ String.num_int64(first_word, 16)
+			+ ":"
+			+ String.num_int64(second_word, 16)
+		)
+	var halves := host.split("::", true, 1)
+	if halves.size() > 2:
+		return ""
+	var left: Array = [] if halves[0].is_empty() else halves[0].split(":")
+	var right: Array = [] if halves.size() == 1 or halves[1].is_empty() else halves[1].split(":")
+	var groups: Array = []
+	for part in left + right:
+		if part.is_empty() or part.length() > 4:
+			return ""
+		for character in part:
+			if not "0123456789abcdef".contains(character):
+				return ""
+		groups.append(part.hex_to_int())
+	if (halves.size() == 1 and groups.size() != 8) or (halves.size() == 2 and groups.size() >= 8):
+		return ""
+	var expanded: Array = []
+	for part in left:
+		expanded.append(part.hex_to_int())
+	if halves.size() == 2:
+		for _index in range(8 - groups.size()):
+			expanded.append(0)
+	for part in right:
+		expanded.append(part.hex_to_int())
+	if expanded.size() != 8:
+		return ""
+	var canonical := ""
+	for group in expanded:
+		if not canonical.is_empty():
+			canonical += ":"
+		canonical += String.num_int64(group, 16)
+	return canonical
 
 
 static func _error(code: String, message: String) -> Dictionary:

@@ -650,6 +650,7 @@ dependencies = [
  "godot",
  "httparse",
  "libc",
+ "socket2 0.5.10",
  "tokio",
  "ureq",
  "windows-sys 0.61.2",

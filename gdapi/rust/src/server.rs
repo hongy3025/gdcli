@@ -222,14 +222,22 @@ impl ServerCore {
         for (k, v) in &headers {
             validate_response_header(k, v).map_err(|e| e.to_string())?;
         }
-        if let Some(tx) = self.pending.take(id) {
-            let _ = tx.send(HttpResponse {
+        let control = self
+            .pending
+            .control(id)
+            .ok_or_else(|| "request expired or cancelled before response send".to_string())?;
+        let tx = self
+            .pending
+            .take(id)
+            .ok_or_else(|| "request expired or cancelled before response send".to_string())?;
+        control.claim_response(|| {
+            tx.send(HttpResponse {
                 status,
                 headers,
                 body,
-            });
-        }
-        Ok(())
+            })
+            .map_err(|_| "request expired or cancelled before response send".to_string())
+        })
     }
 
     /// 供 GdApiServer 调用：poll 并把 resp_tx 转入 pending map，返回不含 resp_tx 的视图。
@@ -276,6 +284,24 @@ impl Drop for ConnectionRequestGuard {
     fn drop(&mut self) {
         if !self.completed {
             self.control.cancel(CancelReason::Disconnected);
+        }
+    }
+}
+
+fn response_after_timeout(
+    control: &RequestControl,
+    response_rx: &mut oneshot::Receiver<HttpResponse>,
+) -> HttpResponse {
+    control.cancel(CancelReason::Timeout);
+    if control.response_claimed() {
+        response_rx
+            .try_recv()
+            .expect("claimed response must already be queued")
+    } else {
+        HttpResponse {
+            status: 504,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: br#"{"error":"handler timeout","code":"timeout"}"#.to_vec(),
         }
     }
 }
@@ -502,36 +528,47 @@ async fn handle_connection(
         }
     }
 
-    // Cancellation owns actual work cleanup, not just the HTTP wait.
+    // EOF closes only the peer's write half; it must not cancel a complete
+    // request because the peer may still be waiting to read our response.
+    let mut peer_write_closed = false;
     let mut disconnect_byte = [0u8; 1];
-    let resp = tokio::select! {
-        biased;
-        _ = tokio::time::sleep_until(tokio::time::Instant::from_std(control.deadline)) => {
-            control.cancel(CancelReason::Timeout);
-            HttpResponse {
-                status: 504,
-                headers: vec![("content-type".into(), "application/json".into())],
-                body: br#"{"error":"handler timeout","code":"timeout"}"#.to_vec(),
+    let mut resp_rx = resp_rx;
+    let resp = loop {
+        let deadline_elapsed = tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(control.deadline)) => true,
+            response = &mut resp_rx => {
+                break match response {
+                    Ok(response) => response,
+                    Err(_) => {
+                        let timed_out = control.reason() == Some(CancelReason::Timeout);
+                        HttpResponse {
+                            status: if timed_out { 504 } else { 503 },
+                            headers: vec![("content-type".into(), "application/json".into())],
+                            body: if timed_out {
+                                br#"{"error":"handler timeout","code":"timeout"}"#.to_vec()
+                            } else {
+                                br#"{"error":"server dropped","code":"conflict"}"#.to_vec()
+                            },
+                        }
+                    }
+                };
             }
-        }
-        response = resp_rx => match response {
-            Ok(response) => response,
-            Err(_) => {
-                let timed_out = control.reason() == Some(CancelReason::Timeout);
-                HttpResponse {
-                    status: if timed_out { 504 } else { 503 },
-                    headers: vec![("content-type".into(), "application/json".into())],
-                    body: if timed_out {
-                        br#"{"error":"handler timeout","code":"timeout"}"#.to_vec()
-                    } else {
-                        br#"{"error":"server dropped","code":"conflict"}"#.to_vec()
-                    },
+            read = stream.read(&mut disconnect_byte), if !peer_write_closed => {
+                match read {
+                    Ok(0) => {
+                        peer_write_closed = true;
+                        false
+                    }
+                    Ok(_) | Err(_) => {
+                        control.cancel(CancelReason::Disconnected);
+                        return;
+                    }
                 }
             }
-        },
-        _ = stream.read(&mut disconnect_byte) => {
-            control.cancel(CancelReason::Disconnected);
-            return;
+        };
+        if deadline_elapsed {
+            break response_after_timeout(&control, &mut resp_rx);
         }
     };
     guard.completed = true;
@@ -586,6 +623,61 @@ mod tests {
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("header value contains CR/LF"));
+    }
+
+    #[test]
+    fn send_response_raw_rejects_expired_pending_request() {
+        let mut server = ServerCore::new();
+        let (tx, _rx) = oneshot::channel();
+        server.pending.insert(
+            17,
+            tx,
+            RequestControl::new(Instant::now() - Duration::from_millis(1)),
+        );
+
+        let error = server
+            .send_response_raw(17, 200, vec![], b"late".to_vec())
+            .expect_err("expired response must be rejected");
+        assert!(error.contains("expired or cancelled"));
+        assert_eq!(server.pending.len(), 0);
+    }
+
+    #[test]
+    fn send_response_raw_rejects_cancelled_pending_request() {
+        let mut server = ServerCore::new();
+        let (tx, _rx) = oneshot::channel();
+        let control = RequestControl::new(Instant::now() + Duration::from_secs(5));
+        control.cancel(CancelReason::Disconnected);
+        server.pending.insert(18, tx, control);
+
+        let error = server
+            .send_response_raw(18, 200, vec![], b"late".to_vec())
+            .expect_err("cancelled response must be rejected");
+        assert!(error.contains("expired or cancelled"));
+        assert_eq!(server.pending.len(), 0);
+    }
+
+    #[test]
+    fn claimed_response_wins_timeout_selection_after_deadline() {
+        let deadline = Instant::now() + Duration::from_millis(100);
+        let control = RequestControl::new(deadline);
+        let (tx, mut rx) = oneshot::channel();
+        control
+            .claim_response(|| {
+                tx.send(HttpResponse {
+                    status: 200,
+                    headers: vec![],
+                    body: b"claimed".to_vec(),
+                })
+                .map_err(|_| "receiver closed".to_string())
+            })
+            .expect("on-time response claim");
+        std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+
+        let selected = response_after_timeout(&control, &mut rx);
+        assert_eq!(selected.status, 200);
+        assert_eq!(selected.body, b"claimed");
+        assert_eq!(control.reason(), None);
     }
 
     #[test]

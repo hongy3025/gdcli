@@ -62,6 +62,40 @@ fn server_accepts_request_and_routes_to_poll_send() {
 }
 
 #[test]
+fn server_half_closed_request_still_receives_response() {
+    let mut server = ServerCore::new();
+    let port = server.start(17970, None).expect("start should succeed");
+    let mut client = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("set read timeout");
+    client
+        .write_all(b"POST /half-close HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n")
+        .expect("write complete request");
+    client
+        .shutdown(std::net::Shutdown::Write)
+        .expect("half-close request stream");
+
+    let request = poll_view(&mut server);
+    assert_eq!(request.path, "/half-close");
+    server
+        .send_response_raw(
+            request.id,
+            200,
+            vec![("content-type".into(), "text/plain".into())],
+            b"received".to_vec(),
+        )
+        .expect("send response");
+
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).expect("read response");
+    let response = String::from_utf8(response).expect("HTTP response is UTF-8");
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.ends_with("received"), "{response}");
+    server.stop();
+}
+
+#[test]
 fn server_port_probing_skips_occupied() {
     let mut a = ServerCore::new();
     let _guard = ENV_LOCK.lock().expect("env lock poisoned");
@@ -331,6 +365,9 @@ fn client_disconnect_cancels_real_request_process() {
     let runner = ProcessRunnerCore::new();
     let id = fixture.start(&runner, &request);
     let ready_at = fixture.wait_ready();
+    socket2::SockRef::from(&client)
+        .set_linger(Some(Duration::ZERO))
+        .expect("set reset-on-close linger");
     drop(client);
     let deadline = Instant::now() + Duration::from_secs(1);
     let result = loop {

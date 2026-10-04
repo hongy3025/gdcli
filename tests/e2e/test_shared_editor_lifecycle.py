@@ -64,6 +64,13 @@ def _fake_env(project: Path) -> dict[str, Any]:
     }
 
 
+def test_project_settings_save_temporary_file_is_not_tracked() -> None:
+    assert not shared_fixture.is_tracked_project_file("project.godot61736153.tmp")
+    assert not shared_fixture.is_tracked_project_file("project.godot")
+    assert shared_fixture.is_tracked_project_file("scenes/project.godot61736153.tmp")
+    assert shared_fixture.is_tracked_project_file("scenes/main.tscn")
+
+
 def test_reset_skips_stop_when_game_is_known_detached(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

@@ -6,7 +6,7 @@
 //! - `PendingMap`: 待响应请求的映射表，用于异步等待响应
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::oneshot;
@@ -25,6 +25,7 @@ type CancelHook = Box<dyn FnOnce(CancelReason) + Send>;
 pub struct RequestControl {
     pub deadline: Instant,
     reason: AtomicU8,
+    response_claimed: AtomicBool,
     hook: Mutex<Option<CancelHook>>,
 }
 
@@ -42,8 +43,47 @@ impl RequestControl {
         Arc::new(Self {
             deadline,
             reason: AtomicU8::new(0),
+            response_claimed: AtomicBool::new(false),
             hook: Mutex::new(None),
         })
+    }
+
+    /// Atomically enqueue a response before its deadline/cancellation can win.
+    /// The enqueue closure runs while holding the same lock used by cancel().
+    pub fn claim_response<T>(
+        &self,
+        enqueue: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut slot = self
+            .hook
+            .lock()
+            .expect("request cancellation lock poisoned");
+        if self.reason().is_some() {
+            return Err("request expired or cancelled before response send".to_string());
+        }
+        if self.deadline <= Instant::now() {
+            self.cancel_while_locked(&mut slot, CancelReason::Timeout);
+            return Err("request expired or cancelled before response send".to_string());
+        }
+        let value = enqueue()?;
+        self.response_claimed.store(true, Ordering::Release);
+        Ok(value)
+    }
+
+    pub fn response_claimed(&self) -> bool {
+        self.response_claimed.load(Ordering::Acquire)
+    }
+
+    fn cancel_while_locked(&self, slot: &mut Option<CancelHook>, reason: CancelReason) {
+        if self
+            .reason
+            .compare_exchange(0, reason as u8, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            if let Some(hook) = slot.take() {
+                hook(reason);
+            }
+        }
     }
 
     pub fn reason(&self) -> Option<CancelReason> {
@@ -56,12 +96,15 @@ impl RequestControl {
     }
 
     pub fn cancel(&self, reason: CancelReason) {
-        // Serialize cleanup as well as registration: a competing HTTP timeout
-        // must not return before an earlier cancellation has reaped its work.
+        // Serialize cleanup, response delivery, and registration: whichever
+        // acquires this lock first owns the terminal outcome.
         let mut slot = self
             .hook
             .lock()
             .expect("request cancellation lock poisoned");
+        if self.response_claimed.load(Ordering::Acquire) {
+            return;
+        }
         if self
             .reason
             .compare_exchange(0, reason as u8, Ordering::AcqRel, Ordering::Acquire)
@@ -222,6 +265,8 @@ impl PendingMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Barrier;
+    use std::thread;
     use std::time::Duration;
 
     #[test]
@@ -278,5 +323,57 @@ mod tests {
         assert_eq!(map.len(), 1);
         assert!(map.take(1).is_none());
         assert!(map.take(2).is_some());
+    }
+
+    #[test]
+    fn response_claim_wins_when_deadline_passes_while_enqueuing() {
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let control = RequestControl::new(deadline);
+        let entered_enqueue = Arc::new(Barrier::new(2));
+        let release_enqueue = Arc::new(Barrier::new(2));
+        let claim_control = Arc::clone(&control);
+        let claim_entered = Arc::clone(&entered_enqueue);
+        let claim_release = Arc::clone(&release_enqueue);
+        let claim = thread::spawn(move || {
+            claim_control.claim_response(|| {
+                claim_entered.wait();
+                claim_release.wait();
+                Ok(())
+            })
+        });
+
+        entered_enqueue.wait();
+        thread::sleep(
+            deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(5),
+        );
+        let cancel_control = Arc::clone(&control);
+        let cancel_started = Arc::new(Barrier::new(2));
+        let cancel_started_thread = Arc::clone(&cancel_started);
+        let cancel = thread::spawn(move || {
+            cancel_started_thread.wait();
+            cancel_control.cancel(CancelReason::Timeout);
+        });
+        cancel_started.wait();
+        release_enqueue.wait();
+
+        claim.join().expect("claim thread").expect("claim wins");
+        cancel.join().expect("timeout thread");
+        assert!(control.response_claimed());
+        assert_eq!(control.reason(), None);
+    }
+
+    #[test]
+    fn response_claim_rejects_request_already_past_deadline() {
+        let control = RequestControl::new(Instant::now() - Duration::from_millis(1));
+        let enqueued = AtomicBool::new(false);
+        let result = control.claim_response(|| {
+            enqueued.store(true, Ordering::Release);
+            Ok(())
+        });
+
+        assert!(result.is_err());
+        assert!(!enqueued.load(Ordering::Acquire));
+        assert_eq!(control.reason(), Some(CancelReason::Timeout));
+        assert!(!control.response_claimed());
     }
 }

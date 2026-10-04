@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import struct
 import sys
 import time
 from pathlib import Path
@@ -94,6 +95,11 @@ def test_process_run_client_disconnect_cancels_and_audits_failure(
             assert time.monotonic() < deadline, "actual subprocess never started"
             time.sleep(0.01)
         ready_at = time.monotonic()
+        client.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_LINGER,
+            struct.pack("HH" if os.name == "nt" else "ii", 1, 0),
+        )
     deadline = time.monotonic() + 1
     events: list[dict[str, Any]] = []
     while time.monotonic() < deadline:

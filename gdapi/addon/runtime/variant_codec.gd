@@ -78,6 +78,24 @@ static func decode(value: Variant) -> Dictionary:
 	return decoded if typeof(decoded) == TYPE_DICTIONARY else {"ok": true, "value": decoded}
 
 
+## Detect object-bearing encoded values without decoding tags (Resource decoding loads files).
+static func contains_object_encoding(value: Variant) -> bool:
+	if typeof(value) == TYPE_DICTIONARY:
+		if value.get("type") in ["Resource", "Object"]:
+			return true
+		for key in value.keys():
+			if contains_object_encoding(key):
+				return true
+		for child in value.values():
+			if contains_object_encoding(child):
+				return true
+	elif typeof(value) == TYPE_ARRAY:
+		for child in value:
+			if contains_object_encoding(child):
+				return true
+	return false
+
+
 static func from_variant(value: Variant) -> Variant:
 	match typeof(value):
 		TYPE_VECTOR2:
