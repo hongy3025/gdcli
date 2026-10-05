@@ -1,5 +1,13 @@
 """Animation and AnimationTree M4 route contracts."""
 
+import json
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import pytest
+
 from .helpers import command_doc, editor_redo, editor_undo, exec_error, exec_ok, save_reopen
 
 
@@ -18,7 +26,7 @@ def test_animation_routes_are_discoverable_and_documented(m4_env):
         assert command_doc(m4_env, route)["summary"]
 
 
-def test_animation_create_delete_are_undoable(m4_env):
+def test_animation_create_delete_are_undoable(m4_env, monkeypatch):
     """Removing the UndoRedo action would leave a deleted animation unrecoverable."""
     exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
     created = exec_ok(
@@ -32,6 +40,29 @@ def test_animation_create_delete_are_undoable(m4_env):
         "animation/delete",
         {"player_path": "AnimationPlayer", "name": "idle"},
     )
+
+    command = Path(m4_env["project"]) / ".godot" / "gdapi-test-command.json"
+    write_text = Path.write_text
+
+    def interrupted_write(path, data, *args, **kwargs):
+        if path.parent != command.parent or not path.name.startswith("gdapi-test-command"):
+            return write_text(path, data, *args, **kwargs)
+        with path.open("w", encoding="utf-8") as stream:
+            halfway = len(data) // 2
+            stream.write(data[:halfway])
+            stream.flush()
+            # Observe the same path as the editor while the producer is mid-write.
+            # No command is fine; a visible command must already be complete JSON.
+            try:
+                visible = command.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                pass
+            else:
+                assert isinstance(json.loads(visible), dict)
+            stream.write(data[halfway:])
+        return len(data)
+
+    monkeypatch.setattr(Path, "write_text", interrupted_write)
 
     editor_undo(m4_env)
     duplicate = exec_error(
@@ -47,6 +78,38 @@ def test_animation_create_delete_are_undoable(m4_env):
         {"player_path": "AnimationPlayer", "name": "idle"},
     )
     assert recreated["name"] == "idle"
+
+
+def test_history_result_recovers_after_reader_releases_file(m4_env):
+    """A temporary Windows reader lock must not force a ten-second command retransmit."""
+    if sys.platform != "win32":
+        pytest.skip("Windows result-file sharing violation")
+    exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
+    params = {"player_path": "AnimationPlayer", "name": "locked_a"}
+    other = params | {"name": "locked_b"}
+    for data in (params, other):
+        exec_ok(m4_env, "animation/create", data)
+    for data in (params, other):
+        exec_ok(m4_env, "animation/delete", data)
+    editor_undo(m4_env)
+
+    result = Path(m4_env["project"]) / ".godot" / "gdapi-test-result.json"
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with result.open("rb"):
+            future = executor.submit(editor_undo, m4_env)
+            deadline = time.monotonic() + 3
+            while not result.with_suffix(".tmp").exists() and time.monotonic() < deadline:
+                time.sleep(.005)
+            assert result.with_suffix(".tmp").exists(), "Editor did not stage the new result"
+            # Keep the read handle open across the publisher's attempted rename.
+            time.sleep(.1)
+        future.result(timeout=3)
+    # Publishing the deferred result must not execute Undo a second time.
+    for data in (params, other):
+        assert exec_error(m4_env, "animation/create", data)["code"] == "conflict"
+    editor_redo(m4_env)
+    assert exec_ok(m4_env, "animation/create", params)["name"] == params["name"]
+    assert exec_error(m4_env, "animation/create", other)["code"] == "conflict"
 
 
 def test_animation_tree_state_and_transition_are_undoable(m4_env):

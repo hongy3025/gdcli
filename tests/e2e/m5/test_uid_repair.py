@@ -108,6 +108,7 @@ def test_uid_repair_dry_run_apply_is_idempotent(m5_editor):
     "res://addons/gdapi", "res://addons/gdapi/",
     "res://addons/gdapi/runtime", "res://addons/gdapi/runtime/protected.tres",
     "res://.godot", "res://.godot/",
+    "res://./addons/gdapi", "res://./.godot",
 ])
 @pytest.mark.parametrize("dry_run", [True, False])
 def test_uid_repair_rejects_protected_roots_atomically(m5_editor, root, dry_run):
@@ -129,10 +130,17 @@ def test_uid_repair_broad_scan_skips_protected_files_and_deduplicates_roots(m5_e
     protected = project / "addons" / "gdapi" / "uid_protected.tres"
     protected.write_text('[gd_resource type="Resource" format=3]\n\n[resource]\n', encoding="utf-8")
     protected_before = protected.read_bytes()
+    target_path = "res://fixtures/root_scan_target.tres"
+    target = project / "fixtures" / "root_scan_target.tres"
+    original = b'[gd_resource type="Resource" format=3]\n\n[resource]\n'
+    target.write_bytes(original)
     try:
-        single = exec_ok(m5_editor, "uid/repair", {"roots": ["res://"], "dry_run": True})
+        single = exec_ok(m5_editor, "uid/repair", {"dry_run": True})
+        target_changes = [item for item in single["changes"] if item["path"] == target_path]
+        assert [item["status"] for item in target_changes] == ["missing"]
+        assert target.read_bytes() == original
         repeated = exec_ok(m5_editor, "uid/repair", {
-            "roots": ["res://fixtures", "res://", "res://fixtures/", "res://"],
+            "roots": ["res://fixtures", "res://", "res://fixtures/", "res://.", "res:////"],
             "dry_run": True,
         })
         assert repeated["scanned"] == single["scanned"]
@@ -144,7 +152,11 @@ def test_uid_repair_broad_scan_skips_protected_files_and_deduplicates_roots(m5_e
             not item["path"].startswith(("res://addons/gdapi/", "res://.godot/"))
             for item in repeated["changes"]
         )
-        exec_ok(m5_editor, "uid/repair", {"roots": ["res://"], "dry_run": False})
+        applied = exec_ok(m5_editor, "uid/repair", {"roots": ["res://"], "dry_run": False})
+        assert applied["changed"] is True
+        assert target.read_bytes() != original
+        after = exec_ok(m5_editor, "uid/repair", {"roots": ["res://"], "dry_run": True})
+        assert target_path not in [item["path"] for item in after["changes"]]
         assert protected.read_bytes() == protected_before
         assert not protected.with_suffix(".tres.uid").exists()
     finally:

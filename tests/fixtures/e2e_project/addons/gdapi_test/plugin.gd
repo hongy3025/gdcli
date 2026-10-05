@@ -13,6 +13,7 @@ const EDITOR_SLEEP_SETTINGS := [
 ## 最近一次已执行的请求：harness 重投同一 request_id 时只重发结果，不重复执行 undo/redo。
 var _last_request_id := ""
 var _last_result := ""
+var _result_pending := false
 var _original_sleep_settings: Dictionary = {}
 var _original_os_sleep_usec: int
 
@@ -36,6 +37,8 @@ func _exit_tree() -> void:
 
 
 func _process(_delta: float) -> void:
+	if _result_pending:
+		_publish_pending_result()
 	if not FileAccess.file_exists(COMMAND):
 		return
 	var body = JSON.parse_string(FileAccess.get_file_as_string(COMMAND))
@@ -44,7 +47,7 @@ func _process(_delta: float) -> void:
 		return
 	var request_id := String(body.get("request_id", ""))
 	if not request_id.is_empty() and request_id == _last_request_id and not _last_result.is_empty():
-		# 命令可能在编辑器读取前被删除（上一帧的 remove 竞态），harness 会重投同一 id。
+		# harness 超时后会重投同一 id；重发结果不再次执行历史操作。
 		_publish(_last_result)
 		return
 	var root := EditorInterface.get_edited_scene_root()
@@ -74,8 +77,15 @@ func _publish(payload: String) -> void:
 	var file := FileAccess.open(RESULT_TEMP, FileAccess.WRITE)
 	file.store_string(payload)
 	file.close()
-	if FileAccess.file_exists(RESULT):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(RESULT))
-	DirAccess.rename_absolute(
-		ProjectSettings.globalize_path(RESULT_TEMP), ProjectSettings.globalize_path(RESULT)
+	_result_pending = true
+	_publish_pending_result()
+
+
+func _publish_pending_result() -> void:
+	# Keep the staged result across Windows reader locks; retry publication, not Undo/Redo.
+	_result_pending = (
+		DirAccess.rename_absolute(
+			ProjectSettings.globalize_path(RESULT_TEMP), ProjectSettings.globalize_path(RESULT)
+		)
+		!= OK
 	)

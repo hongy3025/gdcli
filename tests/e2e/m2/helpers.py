@@ -236,27 +236,31 @@ def wait_for_test_result(env: dict, *, request_id: str = "", timeout: float = 10
 def history_action(env: dict, action: str) -> dict:
     """Run one editor undo/redo through the fixture plugin's file bridge.
 
-    命令携带 `request_id`；插件对同一 id 只执行一次（重投只重发结果），因此超时后重投
-    命令是安全的：既覆盖「命令在编辑器读取前被上一帧的 remove 删除」的竞态，也覆盖
-    编辑器短暂卡顿。
+    命令完整写入同目录临时文件并关闭后才原子发布，编辑器不会读取/删除半写命令。
+    命令携带 `request_id`；插件对同一 id 只执行一次（重投只重发结果），因此编辑器
+    短暂卡顿或结果发布失败后的超时重投不会重复执行历史操作。
     """
     command_path = Path(env["project"]) / ".godot" / "gdapi-test-command.json"
     request_id = uuid.uuid4().hex
     timeout = positive_seconds("GDAPI_E2E_UNDO_TIMEOUT_SECONDS", 10.0)
     last_error: RuntimeError | None = None
-    for _attempt in range(3):
-        try:
-            command_path.write_text(
-                json.dumps({"action": action, "request_id": request_id}), encoding="utf-8"
-            )
-        except OSError as exc:
-            last_error = RuntimeError(str(exc))
-            continue
-        try:
-            return wait_for_test_result(env, request_id=request_id, timeout=timeout)
-        except RuntimeError as exc:
-            last_error = exc
-    raise RuntimeError(f"gdapi_test plugin never completed {action}: {last_error}")
+    temporary_path = command_path.with_name(f"gdapi-test-command-{request_id}.tmp")
+    command = json.dumps({"action": action, "request_id": request_id})
+    try:
+        for _attempt in range(3):
+            try:
+                temporary_path.write_text(command, encoding="utf-8")
+                temporary_path.replace(command_path)
+            except OSError as exc:
+                last_error = RuntimeError(str(exc))
+                continue
+            try:
+                return wait_for_test_result(env, request_id=request_id, timeout=timeout)
+            except RuntimeError as exc:
+                last_error = exc
+        raise RuntimeError(f"gdapi_test plugin never completed {action}: {last_error}")
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def editor_undo(env: dict) -> None:

@@ -107,6 +107,8 @@ uv run python scripts/check.py
 
 E2E 的测试专用 `gdapi_test` 插件将编辑器聚焦/失焦时的帧间休眠统一设为 2ms，并在插件退出时恢复原值，避免默认 100ms 失焦休眠反复拖慢 HTTP 请求、场景切换与 Undo/Redo。保留正数休眠，不启用忙循环、不加速游戏时间；生产 addon 的帧调度、30 秒请求期限、每测试文件/场景隔离与测试选择均不变。大响应的 JSON 转义修正使用原生扫描与分段合并，避免逐字符字符串拼接卡住编辑器主线程。
 
+Undo/Redo 测试文件桥先将命令完整写入同目录的请求专属临时文件，关闭后原子替换正式命令文件，避免编辑器读到半写 JSON 后删掉命令、白等 10 秒再重投。结果文件遭遇 Windows 读句柄共享冲突时，插件保留已写好的临时结果并在后续帧继续发布，不重写内容、不重做历史操作。保留原有 10 秒等待、最多 3 次尝试和 `request_id` 幂等执行；命令临时文件在退出时清理。文件基线仅排除 Godot 自身维护的根目录音频布局及其数字后缀原生保存临时文件，嵌套同名文件与用户备份仍按原规则恢复和校验。
+
 通过 `GODOT_BIN` 环境变量可覆盖 Godot 路径；共享 E2E fixture 在 Windows 上默认使用 `D:\app\devel\Godot\v4.7.2\godot_console.exe`，其他平台默认使用 PATH 中的 `godot`。直接调用 `build_environment(godot_bin=...)` 时，显式参数优先于环境变量。
 
 E2E fixture 默认强制 file transport（保证确定性）；需要验收 EngineDebugger 数据面时：
@@ -447,7 +449,7 @@ M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项�
 
 `scene/current/save` 在保存前检查目标可写性，保存后从磁盘重新加载并核对实际场景内容；失败不报告 `saved:true`，保留原场景路径和未保存状态。`scene/current.edited` 来自编辑器真实的未保存场景列表（按场景索引对齐，`save-as` 之后同样准确）。`scene/delete` 的依赖检查包括 GDScript 中的 `preload`/`load`（资源路径、相对路径和 UID），不会为扫描而执行脚本。
 
-`uid/repair` 复用所有文件写入入口的保护路径策略，逐一预检计划目标后才执行写入；广根目录扫描跳过受保护目录。InputMap 保存失败恢复操作前完整事件、deadzone 和 ProjectSettings 状态。`resource/assign` 验证具体资源子类（含自定义脚本继承），并确认赋值生效后才提交 UndoRedo。
+`uid/repair` 复用所有文件写入入口的保护路径策略，逐一预检计划目标后才执行写入；省略 `roots` 时扫描整个 `res://`，扫描容器允许 `res://` / `user://` 根及其规范化别名，但根目录本身仍不是文件写入目标。广根目录扫描跳过受保护目录，显式传入受保护根仍整批拒绝。InputMap 保存失败恢复操作前完整事件、deadzone 和 ProjectSettings 状态。`resource/assign` 验证具体资源子类（含自定义脚本继承），并确认赋值生效后才提交 UndoRedo。
 
 审计 `list` 支持 `safety` 过滤（`mutation`/`runtime`/`file`/`dangerous`）及 `since` 游标分页。容量上限为 1000，普通 mutation 优先淘汰；危险/文件类记录在保护记录队列填满前不会被普通流量驱逐。
 

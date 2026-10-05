@@ -12,7 +12,7 @@ static func repair(body: Dictionary) -> Dictionary:
 	var dry_run := bool(body.get("dry_run", true))
 	var roots: Array[String] = []
 	for root in body.get("roots", ["res://"]):
-		var checked := PathGuard.validate(String(root), "write")
+		var checked := _validate_scan_path(String(root))
 		if not checked.ok:
 			return checked
 		var path := String(checked.path)
@@ -184,9 +184,18 @@ static func _restore_bytes(path: String, bytes: PackedByteArray) -> bool:
 	return FileAccess.get_file_as_bytes(path) == bytes
 
 
+## Scan containers may be scheme roots; resource writes still use the strict guard.
+## Explicit protected roots and protected descendants must remain excluded.
+static func _validate_scan_path(path: String) -> Dictionary:
+	var checked := PathGuard.validate(path, "read")
+	if not checked.ok or String(checked.path).ends_with("://"):
+		return checked
+	return PathGuard.validate(checked.path, "write")
+
+
 static func _collect(path: String, result: Array) -> void:
 	# A broad project scan must not enter any directory protected by filesystem/write.
-	if not PathGuard.validate(path, "write").ok:
+	if not _validate_scan_path(path).ok:
 		return
 	var absolute := ProjectSettings.globalize_path(path)
 	if FileAccess.file_exists(absolute):

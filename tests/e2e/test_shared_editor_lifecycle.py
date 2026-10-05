@@ -69,6 +69,10 @@ def test_project_settings_save_temporary_file_is_not_tracked() -> None:
     assert not shared_fixture.is_tracked_project_file("project.godot")
     assert shared_fixture.is_tracked_project_file("scenes/project.godot61736153.tmp")
     assert shared_fixture.is_tracked_project_file("scenes/main.tscn")
+    assert not shared_fixture.is_tracked_project_file("default_bus_layout.tres152465955.tmp")
+    assert not shared_fixture.is_tracked_project_file("default_bus_layout.tres")
+    assert shared_fixture.is_tracked_project_file("scenes/default_bus_layout.tres152465955.tmp")
+    assert shared_fixture.is_tracked_project_file("default_bus_layout.tres.backup.tmp")
 
 
 def test_reset_skips_stop_when_game_is_known_detached(
