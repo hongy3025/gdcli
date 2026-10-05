@@ -311,8 +311,6 @@ func _dispatch_async(op: String, payload: Dictionary) -> Dictionary:
 			result = InputOps.action(payload)
 		"runtime/input/sequence":
 			result = await InputOps.sequence(payload)
-		"runtime/fixture/reset":
-			result = _fixture_reset(payload)
 		"runtime/screenshot/viewport":
 			result = await CaptureOps.viewport(payload)
 		"runtime/screenshot/camera":
@@ -508,48 +506,6 @@ func _op_node_call(payload: Dictionary) -> Dictionary:
 		record_log("info", "known-info", {"source": "runtime-fixture"})
 		record_log("error", "known-error", {"source": "runtime-fixture"})
 	return result
-
-
-## Fixture-only fixed-semantics reset. This is intentionally not a public route:
-## file harness requests use the single internal op, while EngineDebugger harness
-## requests enter through ProbeTarget.reset_shared_fixture's explicit call allowlist.
-func reset_shared_fixture() -> Dictionary:
-	var root := get_tree().root.get_node_or_null("RuntimeMain")
-	if root == null or not root.has_method("reset_fixture"):
-		return {
-			"ok": false,
-			"changed": false,
-			"undoable": false,
-			"code": "not_supported",
-			"error": "fixture reset is unavailable",
-		}
-	var result: Variant = root.call("reset_fixture")
-	_sessions.reset()
-	_qa.reset()
-	var ring_result: Dictionary = _ring.clear()
-	if typeof(result) != TYPE_DICTIONARY:
-		result = {"changed": true, "undoable": false}
-	var normalized: Dictionary = result
-	normalized["ok"] = true
-	normalized["changed"] = bool(normalized.get("changed", true))
-	normalized["undoable"] = false
-	normalized["cleared_logs"] = int(ring_result.get("cleared", 0))
-	return normalized
-
-
-func _fixture_reset(payload: Dictionary) -> Dictionary:
-	if not payload.is_empty():
-		return {
-			"ok": false,
-			"code": "invalid_param",
-			"error": "fixture reset does not accept payload fields",
-		}
-	var result := reset_shared_fixture()
-	if not bool(result.get("ok", false)):
-		return result
-	var public_result := result.duplicate(true)
-	public_result.erase("ok")
-	return {"ok": true, "result": public_result}
 
 
 ## 实现 runtime/debug/performance

@@ -28,7 +28,7 @@ def reopen_main(env):
     exec_ok(env, "scene/open", {"path": "res://scenes/main.tscn"})
 
 
-def test_metadata_typed_undo_redo_remove_and_reopen(m2_editor):
+def test_metadata_typed_undo_redo_remove_and_reopen(m2_editor, m2_main):
     target = {"node_path": "/root/Main/Player", "key": "controls_origin"}
     value = {"type": "Vector2", "value": [21, 34]}
     changed = exec_ok(m2_editor, "node/meta/set", {**target, "value": value})
@@ -51,13 +51,13 @@ def test_metadata_typed_undo_redo_remove_and_reopen(m2_editor):
 
 
 @pytest.mark.parametrize("key", ["gdapi_callable_methods", "gdapi_runtime_dedicated", "_edit_lock_"])
-def test_metadata_cannot_grant_call_authority(m2_editor, key):
+def test_metadata_cannot_grant_call_authority(m2_editor, m2_main, key):
     data = {"node_path": "/root/Main/Player", "key": key, "value": ["free"]}
     assert exec_error(m2_editor, "node/meta/set", data)["code"] == "permission_denied"
     assert exec_error(m2_editor, "node/meta/remove", data)["code"] == "permission_denied"
 
 
-def test_scene_instance_link_ownership_undo_and_saved_reopen(m2_editor):
+def test_scene_instance_link_ownership_undo_and_saved_reopen(m2_editor, m2_main):
     source = write_scene(m2_editor)
     result = exec_ok(m2_editor, "scene/instantiate", {
         "path": source, "parent_path": "/root/Main", "name": "LinkedCopy",
@@ -224,7 +224,7 @@ def test_scene_delete_dry_run_and_real_delete_both_reject_unsaved_scene(m2_edito
     assert not target.exists()
 
 
-def test_scene_delete_save_as_dirty_current_scene_is_refused(m2_editor):
+def test_scene_delete_save_as_dirty_current_scene_is_refused(m2_editor, m2_main):
     project = Path(m2_editor["project"])
     path = "res://scenes/delete_save_as_guard.tscn"
     target = project / "scenes/delete_save_as_guard.tscn"
@@ -247,9 +247,19 @@ def test_scene_delete_save_as_dirty_current_scene_is_refused(m2_editor):
     assert exec_ok(m2_editor, "node/property/get", {
         "node_path": "/root/Main/Player", "property": "position"
     })["value"] == {"type": "Vector2", "value": [73, 19]}
+    # Keep this dirty branch alive while saving the original Main. Save-as tabs
+    # can retain the original editor path, but dirty state belongs to a scene root.
+    exec_ok(m2_editor, "scene/open", {"path": "res://scenes/main.tscn"})
+    assert exec_ok(m2_editor, "scene/current/save")["saved"] is True
+    assert exec_ok(m2_editor, "scene/current")["edited"] is False
+    exec_ok(m2_editor, "scene/open", {"path": path})
+    assert exec_ok(m2_editor, "scene/current") == current
+    assert exec_ok(m2_editor, "node/property/get", {
+        "node_path": "/root/Main/Player", "property": "position",
+    })["value"] == {"type": "Vector2", "value": [73, 19]}
 
 
-def test_node_call_executes_safe_native_and_validates_arguments(m2_editor):
+def test_node_call_executes_safe_native_and_validates_arguments(m2_editor, m2_main):
     path = "/root/Main/Player"
     expected = exec_ok(m2_editor, "node/property/get", {"node_path": path, "property": "position"})["value"]
     assert exec_ok(m2_editor, "node/call", {"node_path": path, "method": "get_position"})["result"] == expected
@@ -263,7 +273,7 @@ def test_node_call_executes_safe_native_and_validates_arguments(m2_editor):
 
 
 @pytest.mark.parametrize("method", ["free", "queue_free", "call", "callv", "set_script", "set_meta", "get_tree", "rpc", "add_child"])
-def test_node_call_rejects_native_escape_hatches_and_audits_failure(m2_editor, method):
+def test_node_call_rejects_native_escape_hatches_and_audits_failure(m2_editor, m2_main, method):
     before = exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
     seq = max((entry["seq"] for entry in before), default=0)
     assert exec_error(m2_editor, "node/call", {"node_path": "/root/Main/Player", "method": method})["code"] == "permission_denied"
@@ -274,7 +284,7 @@ def test_node_call_rejects_native_escape_hatches_and_audits_failure(m2_editor, m
     assert exec_ok(m2_editor, "node/get", {"node_path": "/root/Main/Player"})["name"] == "Player"
 
 
-def test_explicit_tool_method_is_a_real_consumer(m2_editor):
+def test_explicit_tool_method_is_a_real_consumer(m2_editor, m2_main):
     source = '''@tool
 extends Node2D
 func _init() -> void:
@@ -286,9 +296,9 @@ func undeclared() -> bool:
     return true
 '''
     exec_ok(m2_editor, "script/write", {"path": "res://scripts/controls_callable.gd", "content": source})
-    exec_ok(m2_editor, "node/create", {"parent_path": "/root/Main", "type": "Node2D", "name": "Consumer"})
-    exec_ok(m2_editor, "script/attach", {"node_path": "/root/Main/Consumer", "path": "res://scripts/controls_callable.gd"})
-    data = {"node_path": "/root/Main/Consumer", "method": "bump", "args": [6]}
+    exec_ok(m2_editor, "node/create", {"parent_path": "/root/Main", "type": "Node2D", "name": "DeclaredMethodConsumer"})
+    exec_ok(m2_editor, "script/attach", {"node_path": "/root/Main/DeclaredMethodConsumer", "path": "res://scripts/controls_callable.gd"})
+    data = {"node_path": "/root/Main/DeclaredMethodConsumer", "method": "bump", "args": [6]}
     assert exec_ok(m2_editor, "node/call", data)["result"] == {"type": "Vector2", "value": [6, 0]}
     assert exec_ok(m2_editor, "node/call", data)["result"]["value"] == [12, 0]
     assert exec_error(m2_editor, "node/call", {**data, "args": ["six"]})["code"] == "invalid_param"
@@ -296,7 +306,7 @@ func undeclared() -> bool:
     assert exec_error(m2_editor, "node/call", {"node_path": data["node_path"], "method": "queue_free"})["code"] == "permission_denied"
 
 
-def test_inspector_observes_real_node_and_resource(m2_editor):
+def test_inspector_observes_real_node_and_resource(m2_editor, m2_main):
     exec_ok(m2_editor, "editor/inspector/node", {"node_path": "/root/Main/Target"})
     assert exec_ok(m2_editor, "editor/inspector/get")["node_path"] == "/root/Main/Target"
     path = write_scene(m2_editor)
@@ -327,13 +337,14 @@ def test_editor_settings_persist_readback_and_restore(m2_editor):
 
 @pytest.mark.parametrize("operation", ["enable", "disable", "reload"])
 def test_api_provider_plugin_is_protected(m2_editor, operation):
+    before = exec_ok(m2_editor, "scene/current")
     assert exec_error(m2_editor, "editor/plugins/" + operation, {"plugin": "gdapi"})["code"] == "permission_denied"
     plugins = exec_ok(m2_editor, "editor/plugins/list")["plugins"]
     assert next(plugin for plugin in plugins if plugin["plugin"] == "gdapi")["enabled"] is True
-    assert exec_ok(m2_editor, "scene/current")["path"] == "res://scenes/main.tscn"
+    assert exec_ok(m2_editor, "scene/current") == before
 
 
-def test_plugin_lifecycle_reloads_a_real_editor_plugin(m2_editor):
+def test_plugin_lifecycle_reloads_a_real_editor_plugin(m2_editor, m2_main):
     script = '''@tool
 extends EditorPlugin
 func _enter_tree() -> void:
@@ -358,7 +369,7 @@ func _exit_tree() -> void:
     assert exec_ok(m2_editor, "node/meta/get", {**target, "key": "controls_plugin_exit"})["value"] == 2
 
 
-def test_camera_transform_round_trip_and_release(m2_editor):
+def test_camera_transform_round_trip_and_release(m2_editor, m2_main):
     value = {"type": "Transform2D", "value": [[2, 0], [0, 2], [120, 90]]}
     try:
         result = exec_ok(m2_editor, "editor/camera/set", {"dimension": "2d", "transform": value})
@@ -374,10 +385,12 @@ def test_camera_transform_round_trip_and_release(m2_editor):
     assert exec_error(m2_editor, "editor/camera/get", {"dimension": "4d"})["code"] == "invalid_param"
 
 
-def test_headless_screenshot_has_an_honest_error(m2_editor):
+def test_screenshot_captures_the_shared_editor_viewport(m2_editor, m2_main):
     path = Path(m2_editor["project"]) / "controls_viewport.png"
-    assert exec_error(m2_editor, "editor/screenshot/viewport", {"path": "res://controls_viewport.png"})["code"] == "not_supported"
-    assert not path.exists()
+    result = exec_ok(m2_editor, "editor/screenshot/viewport", {"path": "res://controls_viewport.png", "width": 64, "height": 48})
+    assert (result["width"], result["height"]) == (64, 48)
+    assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert result["bytes"] == path.stat().st_size
 
 
 def test_notification_validation_and_distraction_mode(m2_editor):

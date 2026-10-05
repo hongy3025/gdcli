@@ -47,9 +47,3 @@ func _bind_fixture_connection() -> void:
 				)
 		if not _target.is_connected("finished", _on_finished):
 			_target.connect("finished", _on_finished)
-
-
-func reset_fixture() -> void:
-	event_count = 0
-	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")
-	_bind_fixture_connection()

@@ -6,7 +6,7 @@ const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
-const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.gd")
+const NodePathResolver := preload("res://addons/gdapi/runtime/services/node_path_resolver.gd")
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_editor.gd")
 
@@ -102,16 +102,17 @@ static func duplicate_material(node_path: Variant, path: Variant) -> Dictionary:
 	return _save_resource(copy, path, "material/duplicate")
 
 
+## node_path 同时接受场景根相对路径与 node/* 回传的绝对用户路径。
 static func _node(node_path: Variant) -> Dictionary:
 	if typeof(node_path) != TYPE_STRING or String(node_path).strip_edges().is_empty():
 		return _error(ErrorCodes.MISSING_PARAM, "node_path is required")
-	var root := SceneEditor.current_root()
-	if root == null:
-		return _error(ErrorCodes.NOT_FOUND, "no scene is currently open")
-	var node := root.get_node_or_null(NodePath(node_path))
-	if node == null or not ("material" in node):
+	var found := NodePathResolver.resolve(node_path)
+	if not found.ok:
+		return _error(found.code, found.error)
+	var node: Node = found.node
+	if not ("material" in node):
 		return _error(ErrorCodes.NOT_FOUND, "node with material property not found")
-	return {"ok": true, "node": node, "node_path": String(node_path)}
+	return {"ok": true, "node": node, "node_path": found.path}
 
 
 static func _material(node_path: Variant) -> Dictionary:

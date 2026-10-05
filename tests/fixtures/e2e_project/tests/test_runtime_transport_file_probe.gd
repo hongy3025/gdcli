@@ -1,20 +1,21 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const Transport := preload("res://addons/gdapi/runtime/runtime_transport_file_probe.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
 var passed := 0
 var failed := 0
+var _tree: SceneTree
+var _test_root := ProjectSettings.globalize_path(
+	"res://.godot/gdapi_native_probe_%d" % Time.get_ticks_usec()
+)
 
 
-func _init() -> void:
+func run(tree: SceneTree) -> Dictionary:
+	_tree = tree
 	print("Running GdApiRuntimeTransportFileProbe tests...")
-	call_deferred("_run")
-
-
-func _run() -> void:
-	test_probe_id_is_unique_hex()
+	_test_probe_id_is_unique_hex()
 	test_root_dir_under_dot_godot()
 	test_start_writes_hello_file()
 	test_immediate_hello_recovers_after_write_failure()
@@ -34,10 +35,8 @@ func _run() -> void:
 	test_stop_recursively_removes_probe_directory()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	if failed > 0:
-		quit(1)
-	else:
-		quit(0)
+	_cleanup(_make_root())
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual, expected, context: String = "") -> void:
@@ -54,7 +53,7 @@ func assert_true(value: bool, context: String = "") -> void:
 
 
 func _make_root() -> String:
-	return ProjectSettings.globalize_path("res://.godot/gdapi_runtime_test")
+	return _test_root
 
 
 func _cleanup(root: String) -> void:
@@ -64,11 +63,7 @@ func _cleanup(root: String) -> void:
 	for name in dir.get_files():
 		dir.remove(name)
 	for sub in dir.get_directories():
-		var sub_dir := DirAccess.open(root.path_join(sub))
-		if sub_dir != null:
-			for n in sub_dir.get_files():
-				sub_dir.remove(n)
-			sub_dir.remove(sub)
+		_cleanup(root.path_join(sub))
 	DirAccess.remove_absolute(root)
 
 
@@ -98,7 +93,7 @@ func _read_reply(path: String) -> Dictionary:
 	return reply
 
 
-func test_probe_id_is_unique_hex() -> void:
+func _test_probe_id_is_unique_hex() -> void:
 	var a := Transport.new()
 	var b := Transport.new()
 	var ida := a.probe_id()
@@ -265,8 +260,8 @@ func test_suspended_request_claims_duplicate_id_and_finishes_once() -> void:
 	t.set_request_handler(
 		func(msg: Dictionary) -> Dictionary:
 			tracker.calls += 1
-			await process_frame
-			await process_frame
+			await _tree.process_frame
+			await _tree.process_frame
 			return {"ok": true, "result": {"echo": msg.get("id", -1)}}
 	)
 	t.start()
@@ -285,10 +280,10 @@ func test_suspended_request_claims_duplicate_id_and_finishes_once() -> void:
 	assert_true(t._inflight.has(42), "suspended request remains inflight")
 	var out_path := probe_dir.path_join("outbox/42.json")
 	assert_true(not FileAccess.file_exists(out_path), "no outbox before first resume")
-	await process_frame
+	await _tree.process_frame
 	t.tick(Time.get_ticks_msec())
 	assert_true(not FileAccess.file_exists(out_path), "no outbox before second resume")
-	await process_frame
+	await _tree.process_frame
 	t.tick(Time.get_ticks_msec())
 	assert_true(FileAccess.file_exists(out_path), "one outbox reply after handler resume")
 	var reply := _read_reply(out_path)
@@ -309,7 +304,7 @@ func test_suspended_request_times_out_once() -> void:
 	t.set_request_handler(
 		func(_msg: Dictionary) -> Dictionary:
 			tracker.calls += 1
-			await create_timer(60.0).timeout
+			await _tree.process_frame
 			return {"ok": true}
 	)
 	t.start()
@@ -335,6 +330,11 @@ func test_suspended_request_times_out_once() -> void:
 	_write_request(probe_dir.path_join("inbox/duplicate-45.json"), 45, t.generation())
 	t.tick(now + 102)
 	assert_eq(tracker.calls, 1, "timed out id never restarts")
+	await _tree.process_frame
+	t.tick(now + 103)
+	assert_eq(
+		JSON.stringify(_read_reply(out_path)), first_timeout_reply, "late completion keeps timeout"
+	)
 	t.stop()
 	_cleanup(root)
 
@@ -344,7 +344,7 @@ func test_request_payload_timeout_controls_handler_deadline() -> void:
 	var t := Transport.new(0, root)
 	t.set_request_handler(
 		func(_msg: Dictionary) -> Dictionary:
-			await create_timer(60.0).timeout
+			await _tree.process_frame
 			return {"ok": true}
 	)
 	t.start()
@@ -368,6 +368,7 @@ func test_request_payload_timeout_controls_handler_deadline() -> void:
 		"request longer than default 5s is still inflight"
 	)
 	t.stop()
+	await _tree.process_frame
 	_cleanup(root)
 
 
@@ -378,7 +379,7 @@ func test_completed_handler_after_disconnect_abandons_inflight_once() -> void:
 	t.set_request_handler(
 		func(_msg: Dictionary) -> Dictionary:
 			tracker.calls += 1
-			await process_frame
+			await _tree.process_frame
 			return {"ok": true, "result": {"late": true}}
 	)
 	t.start()
@@ -388,7 +389,7 @@ func test_completed_handler_after_disconnect_abandons_inflight_once() -> void:
 	assert_eq(tracker.calls, 1, "disconnect test starts one suspended handler")
 	assert_true(t._inflight.has(49), "disconnect test request is inflight before completion")
 	t._remove_tree(probe_dir, root)
-	await process_frame
+	await _tree.process_frame
 	assert_true(
 		not t._inflight.has(49), "handler completion after endpoint removal abandons inflight"
 	)

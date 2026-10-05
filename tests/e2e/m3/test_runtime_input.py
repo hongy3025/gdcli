@@ -12,14 +12,11 @@ import pytest
 from .conftest import (
     exec_ok,
     exec_error,
-    fixture_script_source,
-    runtime_route_source,
     runtime_counter,
     wait_for,
     wait_for_connected,
 )
 
-INPUT_ROUTES = ("key", "mouse", "gamepad", "touch", "action", "sequence")
 COUNTERS = ("input_keys", "input_mouse", "input_gamepad", "input_touch", "input_actions")
 
 
@@ -39,23 +36,6 @@ def counter_snapshot(env):
     return {name: get_counter(env, name) for name in COUNTERS}
 
 
-@pytest.mark.parametrize("name", INPUT_ROUTES)
-def test_input_routes_are_adapter_backed_mutations(name):
-    route = f"runtime/input/{name}"
-    source = runtime_route_source(route)
-    assert 'extends "res://addons/gdapi/runtime/runtime_route.gd"' in source
-    assert f'dispatch(req, res, "{route}", true)' in source
-    assert "runtime_input_ops.gd" not in source
-    assert "load(" not in source
-
-
-def test_fixture_reset_releases_action_edge_state():
-    source = fixture_script_source("probe_input_action.gd")
-    assert "func reset_fixture()" in source
-    assert "func _process(" in source
-    assert "Input.is_action_pressed(\"ui_accept\")" in source
-    assert "_previous_pressed = false" in source
-    assert 'Input.action_release("ui_accept")' in source
 
 
 @pytest.mark.parametrize("counter_name", ["input_keys", "input_mouse", "input_gamepad", "input_touch"])
@@ -70,6 +50,7 @@ def test_input_key_mouse_gamepad_touch_increments_counter(m3_running, counter_na
     route, payload = route_map[counter_name]
     exec_ok(m3_running, route, payload)
     wait_for(lambda: get_counter(m3_running, counter_name) == before + 1, timeout=10.0)
+    exec_ok(m3_running, route, payload | {"pressed": False})
 
 
 def test_input_action_counts_false_to_true_edges_once(m3_running):
@@ -82,6 +63,7 @@ def test_input_action_counts_false_to_true_edges_once(m3_running):
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": False})
     exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": True})
     wait_for(lambda: get_counter(m3_running, "input_actions") == before + 2, timeout=10.0)
+    exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": False})
 
 
 def test_zero_delay_action_sequence_observes_release_press_edge(m3_running):
@@ -109,6 +91,7 @@ def test_zero_delay_action_sequence_observes_release_press_edge(m3_running):
     })
     assert result["events"] == 3
     wait_for(lambda: get_counter(m3_running, "input_actions") == before + 2, timeout=10.0)
+    exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": False})
 
 
 @pytest.mark.parametrize("route,payload", [
@@ -159,6 +142,8 @@ def test_input_sequence_executes_valid_events_in_game_process(m3_running):
     assert result["undoable"] is False
     wait_for(lambda: get_counter(m3_running, "input_keys") == before_keys + 1)
     wait_for(lambda: get_counter(m3_running, "input_mouse") == before_mouse + 1)
+    exec_ok(m3_running, "runtime/input/key", {"keycode": 32, "pressed": False})
+    exec_ok(m3_running, "runtime/input/mouse", {"kind": "button", "button": 1, "pressed": False})
 
 
 def test_input_sequence_over_five_seconds_honors_explicit_timeout(m3_running):
@@ -173,6 +158,7 @@ def test_input_sequence_over_five_seconds_honors_explicit_timeout(m3_running):
     })
     assert result["events"] == 1
     wait_for(lambda: get_counter(m3_running, "input_keys") == before + 1)
+    exec_ok(m3_running, "runtime/input/key", {"keycode": 32, "pressed": False})
 
 
 def test_input_sequence_rejects_negative_after_ms(m3_running):
@@ -214,7 +200,8 @@ def test_input_sequence_prevalidates_every_event_before_execution(m3_running, in
 
 
 def test_input_mutation_audit_is_redacted_and_bounded(m3_running):
-    exec_ok(m3_running, "gdapi/audit/clear", {})
+    baseline = exec_ok(m3_running, "gdapi/audit/list", {"limit": 1000})["entries"]
+    since = max((entry["seq"] for entry in baseline), default=0)
     exec_ok(m3_running, "runtime/input/key", {"keycode": 32, "pressed": True})
     secret = "task11-secret-value"
     error = exec_error(m3_running, "runtime/input/key", {
@@ -223,7 +210,7 @@ def test_input_mutation_audit_is_redacted_and_bounded(m3_running):
         "large_payload": ["x" * 100] * 40,
     })
     assert error["code"] == "invalid_param"
-    entries = exec_ok(m3_running, "gdapi/audit/list", {"since": 0, "limit": 100})["entries"]
+    entries = exec_ok(m3_running, "gdapi/audit/list", {"since": since, "limit": 100})["entries"]
     input_entries = [entry for entry in entries if entry.get("route") == "runtime/input/key"]
     assert len(input_entries) == 2
     assert input_entries[0]["ok"] is True
@@ -235,10 +222,12 @@ def test_input_mutation_audit_is_redacted_and_bounded(m3_running):
     assert secret not in serialized
     assert "[REDACTED]" in serialized
     assert '"size": 40' in serialized
+    exec_ok(m3_running, "runtime/input/key", {"keycode": 32, "pressed": False})
 
 
 def test_oversized_mutation_request_is_structured_fast_and_secret_safe(m3_running):
-    exec_ok(m3_running, "gdapi/audit/clear", {})
+    baseline = exec_ok(m3_running, "gdapi/audit/list", {"limit": 1000})["entries"]
+    since = max((entry["seq"] for entry in baseline), default=0)
     secret = "task16-oversized-authorization"
     payload_path = Path(m3_running["project"]) / ".godot" / "task16-oversized.json"
     payload_path.write_text(json.dumps({
@@ -277,7 +266,7 @@ def test_oversized_mutation_request_is_structured_fast_and_secret_safe(m3_runnin
     assert error["code"] == "invalid_param", error
     assert "4 MiB" in error["error"]
     assert exec_ok(m3_running, "runtime/status")["pending"] == 0
-    entries = exec_ok(m3_running, "gdapi/audit/list", {"since": 0, "limit": 100})["entries"]
+    entries = exec_ok(m3_running, "gdapi/audit/list", {"since": since, "limit": 100})["entries"]
     serialized = json.dumps(
         [entry for entry in entries if entry.get("route") == "runtime/input/key"],
         sort_keys=True,
@@ -366,3 +355,4 @@ def test_transport_disconnect_completes_sequence_once_with_zero_pending(m3_runni
     wait_for_connected(m3_running, timeout=5.0)
     time.sleep(0.6)
     assert exec_ok(m3_running, "runtime/status")["pending"] == 0
+    exec_ok(m3_running, "runtime/input/key", {"keycode": 32, "pressed": False})

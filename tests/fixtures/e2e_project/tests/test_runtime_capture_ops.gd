@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
@@ -41,7 +41,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	print("Running GdApiRuntimeCaptureOps tests...\n")
 	test_frames_validation_is_strict_and_bounded()
 	test_camera_path_validation_is_strict()
@@ -51,7 +51,7 @@ func _init() -> void:
 	test_expiry_during_readback_never_returns_success()
 	test_frame_aggregate_expiry_never_returns_success()
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void:

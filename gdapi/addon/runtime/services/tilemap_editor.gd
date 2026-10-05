@@ -3,7 +3,7 @@ class_name GdApiTilemapEditor
 extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
-const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.gd")
+const NodePathResolver := preload("res://addons/gdapi/runtime/services/node_path_resolver.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 
@@ -11,14 +11,14 @@ const CELL_LIMIT := 32767
 const MAX_FILL_CELLS := 4096
 
 
+## layer_path 同时接受场景根相对路径与 node/* 回传的绝对用户路径。
 static func layer(path: String) -> Dictionary:
-	var root := SceneEditor.current_root()
-	if root == null:
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "no scene is currently open"}
-	var node := root.get_node_or_null(NodePath(path))
-	if not node is TileMapLayer:
+	var found := NodePathResolver.resolve(path)
+	if not found.ok:
+		return {"ok": false, "code": found.code, "error": found.error}
+	if not found.node is TileMapLayer:
 		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "TileMapLayer not found"}
-	return {"ok": true, "layer": node}
+	return {"ok": true, "layer": found.node}
 
 
 static func coordinate(raw: Variant) -> Dictionary:

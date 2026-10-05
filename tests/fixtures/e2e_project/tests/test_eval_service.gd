@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const EvalService := preload("res://addons/gdapi/runtime/services/eval_service.gd")
 
@@ -7,7 +7,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	var result := (
 		EvalService
 		. execute(
@@ -30,9 +30,9 @@ func _init() -> void:
 	assert_true(free_keys.get("ok", false), "arbitrary input keys are allowed")
 	for shape in range(4):
 		_test_rejection_does_not_load_script(shape)
-	_test_forbidden_native_values()
+	_test_forbidden_native_values(_tree)
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func _test_rejection_does_not_load_script(shape: int) -> void:
@@ -46,7 +46,7 @@ func _test_rejection_does_not_load_script(shape: int) -> void:
 	script_file.store_string(
 		(
 			(
-				"extends RefCounted\n\n"
+				"@tool\nextends RefCounted\n\n"
 				+ "static func _static_init() -> void:\n"
 				+ '\tvar marker := FileAccess.open("%s", FileAccess.WRITE)\n'
 				+ '\tmarker.store_string("executed")\n'
@@ -75,9 +75,9 @@ func _test_rejection_does_not_load_script(shape: int) -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(marker_path))
 
 
-func _test_forbidden_native_values() -> void:
+func _test_forbidden_native_values(tree: SceneTree) -> void:
 	var object := RefCounted.new()
-	for value in [object, RID(), Callable(self, "assert_true"), Signal(self, "tree_changed")]:
+	for value in [object, RID(), Callable(self, "assert_true"), Signal(tree, "tree_changed")]:
 		var rejected := EvalService.execute("1", {"input": {"nested": [value]}})
 		assert_eq(rejected.get("code"), "invalid_param", "native executable value is rejected")
 	var safe := EvalService.execute("input", {"input": [1, {"safe": true}, null]})

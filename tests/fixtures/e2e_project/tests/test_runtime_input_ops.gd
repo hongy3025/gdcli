@@ -1,33 +1,22 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const InputOps := preload("res://addons/gdapi/runtime/runtime_input_ops.gd")
 
 var passed := 0
 var failed := 0
+var _tree: SceneTree
 
 
-class InputCounter:
-	extends Node
-	var key_events := 0
-
-	func _input(event: InputEvent) -> void:
-		if event is InputEventKey:
-			key_events += 1
-
-
-func _init() -> void:
+func run(tree: SceneTree) -> Dictionary:
+	_tree = tree
 	print("Running GdApiRuntimeInputOps tests...")
-	call_deferred("_run")
-
-
-func _run() -> void:
 	await test_all_integer_fields_reject_non_integral_and_unsafe_numbers()
 	await test_sequence_duration_must_fit_operation_timeout()
 	await test_sequence_checks_deadline_after_timer_before_side_effect()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void:
@@ -108,9 +97,9 @@ func test_sequence_duration_must_fit_operation_timeout() -> void:
 
 
 func test_sequence_checks_deadline_after_timer_before_side_effect() -> void:
-	var counter := InputCounter.new()
-	get_root().add_child(counter)
-	process_frame.connect(func() -> void: OS.delay_msec(20), CONNECT_ONE_SHOT)
+	var keycode := KEY_F24
+	var originally_pressed := Input.is_key_pressed(keycode)
+	_tree.process_frame.connect(func() -> void: OS.delay_msec(20), CONNECT_ONE_SHOT)
 	var result: Dictionary = await (
 		InputOps
 		. sequence(
@@ -121,7 +110,7 @@ func test_sequence_checks_deadline_after_timer_before_side_effect() -> void:
 					{
 						"after_ms": 1,
 						"route": "runtime/input/key",
-						"data": {"keycode": 16777247, "pressed": true},
+						"data": {"keycode": keycode, "pressed": not originally_pressed},
 					}
 				],
 			}
@@ -129,5 +118,8 @@ func test_sequence_checks_deadline_after_timer_before_side_effect() -> void:
 	)
 	assert_eq(result.get("ok", true), false, "expired sequence fails")
 	assert_eq(result.get("code", ""), "timeout", "expired sequence code")
-	assert_eq(counter.key_events, 0, "expired sequence injects no child event")
-	counter.queue_free()
+	assert_eq(
+		Input.is_key_pressed(keycode), originally_pressed, "expired sequence injects no key change"
+	)
+	if Input.is_key_pressed(keycode) != originally_pressed:
+		InputOps.key({"keycode": keycode, "pressed": originally_pressed})

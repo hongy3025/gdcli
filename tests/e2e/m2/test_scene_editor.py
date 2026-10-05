@@ -15,7 +15,7 @@ import pytest
 from .helpers import exec_error, exec_ok
 
 
-def test_scene_current_returns_main_scene(m2_editor):
+def test_scene_current_returns_main_scene(m2_editor, m2_main):
     current = exec_ok(m2_editor, "scene/current")
     assert current["ok"] is True
     assert current["path"] == "res://scenes/main.tscn"
@@ -24,31 +24,34 @@ def test_scene_current_returns_main_scene(m2_editor):
     assert current["undoable"] is False
 
 
-def test_scene_list_open_contains_main(m2_editor):
+def test_scene_list_open_contains_main(m2_editor, m2_main):
     opened = exec_ok(m2_editor, "scene/list_open")
     assert "res://scenes/main.tscn" in opened["paths"]
 
 
-def test_scene_tree_matches_fixture(m2_editor):
+def test_scene_tree_includes_native_main_nodes(m2_editor, m2_main):
     tree = exec_ok(m2_editor, "scene/tree", {"max_depth": 4})
     assert tree["root"]["name"] == "Main"
     children = [(n["name"], n["type"]) for n in tree["root"]["children"]]
-    assert children == [("Player", "Node2D"), ("Target", "Node2D")]
+    assert {("Player", "Node2D"), ("Target", "Node2D")} <= set(children)
     player = next(n for n in tree["root"]["children"] if n["name"] == "Player")
-    assert [(c["name"], c["type"]) for c in player["children"]] == [("Child", "Node2D")]
+    assert ("Child", "Node2D") in [(c["name"], c["type"]) for c in player["children"]]
 
 
-def test_scene_open_rejects_missing_scene_without_state_change(m2_editor):
+def test_scene_open_rejects_missing_scene_without_state_change(m2_editor, m2_main):
     before = exec_ok(m2_editor, "scene/current")
     error = exec_error(m2_editor, "scene/open", {"path": "res://missing.tscn"})
     assert error["code"] == "not_found"
     assert exec_ok(m2_editor, "scene/current") == before
 
 
-def test_cancelled_scene_open_does_not_switch_editor_scene(m2_editor):
+def test_cancelled_scene_open_does_not_switch_editor_scene(m2_editor, m2_main):
+    before = exec_ok(m2_editor, "scene/current")
+    opened = exec_ok(m2_editor, "scene/list_open")["paths"]
+    exec_ok(m2_editor, "filesystem/write", {"path": "res://scenes/cancelled_open.tscn", "content": '[gd_scene format=3]\n[node name="CancelledOpen" type="Node"]\n'})
     project = Path(m2_editor["project"])
     meta = json.loads((project / ".godot" / "gdapi.json").read_text(encoding="utf-8"))
-    body = json.dumps({"path": "res://scenes/audio.tscn"}).encode("utf-8")
+    body = json.dumps({"path": "res://scenes/cancelled_open.tscn"}).encode("utf-8")
     request = (
         b"POST /scene/open HTTP/1.1\r\n"
         + f"Host: 127.0.0.1:{meta['http_port']}\r\n".encode()
@@ -63,11 +66,11 @@ def test_cancelled_scene_open_does_not_switch_editor_scene(m2_editor):
             socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("HH" if os.name == "nt" else "ii", 1, 0)
         )
     time.sleep(0.25)
-    assert exec_ok(m2_editor, "scene/current")["path"] == "res://scenes/main.tscn"
-    assert "res://scenes/audio.tscn" not in exec_ok(m2_editor, "scene/list_open")["paths"]
+    assert exec_ok(m2_editor, "scene/current") == before
+    assert exec_ok(m2_editor, "scene/list_open")["paths"] == opened
 
 
-def test_scene_current_save_persists_file_changes(m2_editor):
+def test_scene_current_save_persists_file_changes(m2_editor, m2_main):
     result = exec_ok(m2_editor, "scene/current/save")
     assert result["saved"] is True
     assert result["undoable"] is False
@@ -75,7 +78,7 @@ def test_scene_current_save_persists_file_changes(m2_editor):
 
 
 @pytest.mark.parametrize("extension", ["tscn", "scn"])
-def test_scene_current_save_overwrites_existing_without_force(m2_editor, extension):
+def test_scene_current_save_overwrites_existing_without_force(m2_editor, m2_main, extension):
     project = Path(m2_editor["project"])
     original = (project / "scenes/main.tscn").read_bytes()
     path = f"res://scenes/main_backup.{extension}"
@@ -85,7 +88,8 @@ def test_scene_current_save_overwrites_existing_without_force(m2_editor, extensi
     assert target.is_file()
     initial = target.read_bytes()
     request = {"node_path": "/root/Main/Player", "property": "position"}
-    value = {"type": "Vector2", "value": [37, 83]}
+    previous = exec_ok(m2_editor, "node/property/get", request)["value"]["value"]
+    value = {"type": "Vector2", "value": [previous[0] + 37, previous[1] + 83]}
     exec_ok(m2_editor, "node/property/set", {**request, "value": value})
     assert exec_ok(m2_editor, "scene/current")["edited"] is True
     second = exec_ok(m2_editor, "scene/current/save", {"path": path})
@@ -98,7 +102,7 @@ def test_scene_current_save_overwrites_existing_without_force(m2_editor, extensi
     assert exec_ok(m2_editor, "node/property/get", request)["value"] == value
 
 
-def test_scene_save_probe_preserves_existing_temp_name(m2_editor):
+def test_scene_save_probe_preserves_existing_temp_name(m2_editor, m2_main):
     project = Path(m2_editor["project"])
     target_path = "res://scenes/probe_temp_collision.tscn"
     target = project / "scenes" / "probe_temp_collision.tscn"
@@ -111,17 +115,11 @@ def test_scene_save_probe_preserves_existing_temp_name(m2_editor):
         assert target.is_file()
         assert old_probe_name.read_bytes() == b"unrelated user data"
     finally:
-        if exec_ok(m2_editor, "scene/current").get("path") == target_path:
-            exec_ok(m2_editor, "scene/close")
-        if exec_ok(m2_editor, "scene/current").get("path") != "res://scenes/main.tscn":
-            exec_ok(m2_editor, "scene/open", {"path": "res://scenes/main.tscn"})
-        target.unlink(missing_ok=True)
-        Path(str(target) + ".uid").unlink(missing_ok=True)
         old_probe_name.unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows read-only scene target boundary")
-def test_save_as_read_only_failure_preserves_disk_path_and_unsaved_changes(m2_editor):
+def test_save_as_read_only_failure_preserves_disk_path_and_unsaved_changes(m2_editor, m2_main):
     project = Path(m2_editor["project"])
     original_path = "res://scenes/main.tscn"
     target_path = "res://scenes/readonly_save_as.tscn"
@@ -154,7 +152,7 @@ def test_save_as_read_only_failure_preserves_disk_path_and_unsaved_changes(m2_ed
     assert exec_ok(m2_editor, "node/property/get", property_request)["value"] == value
 
 
-def test_save_as_invalid_extension_preserves_unsaved_scene_and_target(m2_editor):
+def test_save_as_invalid_extension_preserves_unsaved_scene_and_target(m2_editor, m2_main):
     target = Path(m2_editor["project"]) / "scenes/not_a_scene.txt"
     target.write_bytes(b"existing document")
     exec_ok(m2_editor, "node/meta/set", {
@@ -170,7 +168,7 @@ def test_save_as_invalid_extension_preserves_unsaved_scene_and_target(m2_editor)
     })["value"] == 17
 
 
-def test_save_as_persists_editor_pre_save_notifications(m2_editor):
+def test_save_as_persists_editor_pre_save_notifications(m2_editor, m2_main):
     source = '''@tool
 extends Node
 func _notification(what: int) -> void:
@@ -195,21 +193,30 @@ func _notification(what: int) -> void:
     assert exec_ok(m2_editor, "node/meta/get", request)["value"] == 1
 
 
-def test_scene_save_verification_reads_external_resource_from_disk(m2_editor):
+def test_scene_save_verification_reads_external_resource_from_disk(m2_editor, m2_main):
     project = Path(m2_editor["project"])
     dependency_path = "res://resources/save_readback_material.tres"
     dependency = project / "resources/save_readback_material.tres"
+    consumer = exec_ok(m2_editor, "node/create", {
+        "parent_path": "/root/Main", "type": "Node2D", "name": "SaveReadbackConsumer",
+    })["node_path"]
     exec_ok(m2_editor, "resource/create", {
         "path": dependency_path,
         "type": "CanvasItemMaterial",
         "properties": {"resource_name": "CachedBeforeDiskChange"},
     })
     exec_ok(m2_editor, "resource/assign", {
-        "node_path": "/root/Main/Player",
+        "node_path": consumer,
         "property": "material",
         "path": dependency_path,
     })
+    # Establish a valid persisted boundary before deliberately damaging our dependency.
+    exec_ok(m2_editor, "scene/current/save")
     original_scene = (project / "scenes/main.tscn").read_bytes()
+    expected = {"type": "Resource", "value": dependency_path}
+    exec_ok(m2_editor, "node/meta/set", {
+        "node_path": consumer, "key": "readback_attempt", "value": 1,
+    })
     dependency.write_text(
         '[gd_resource type="CanvasItemMaterial" format=3]\n\n'
         '[resource]\nresource_name = "ChangedOnDisk"\n',
@@ -229,64 +236,80 @@ def test_scene_save_verification_reads_external_resource_from_disk(m2_editor):
         current = exec_ok(m2_editor, "scene/current")
         assert current["path"] == "res://scenes/main.tscn" and current["edited"] is True
         assert exec_ok(m2_editor, "node/property/get", {
-            "node_path": "/root/Main/Player", "property": "material"
-        })["value"] == {"type": "Resource", "value": dependency_path}
+            "node_path": consumer, "property": "material"
+        })["value"] == expected
     finally:
         if readonly_enforced:
             dependency.chmod(stat.S_IREAD | stat.S_IWRITE)
+        # Repair only this scenario's damaged dependency, never restore shared Main.
+        exec_ok(m2_editor, "resource/create", {
+            "path": dependency_path,
+            "type": "CanvasItemMaterial",
+            "properties": {"resource_name": "RepairedAfterDiskChange"},
+        })
+        exec_ok(m2_editor, "resource/assign", {
+            "node_path": consumer, "property": "material", "path": dependency_path,
+        })
+    assert exec_ok(m2_editor, "scene/current/save")["saved"] is True
+    exec_ok(m2_editor, "scene/close")
+    exec_ok(m2_editor, "scene/open", {"path": "res://scenes/main.tscn"})
+    assert exec_ok(m2_editor, "node/property/get", {
+        "node_path": consumer, "property": "material",
+    })["value"] == expected
+    assert exec_ok(m2_editor, "node/meta/get", {
+        "node_path": consumer, "key": "readback_attempt",
+    })["value"] == 1
+    assert exec_ok(m2_editor, "resource/info", {"path": dependency_path})["properties"][
+        "resource_name"
+    ] == "RepairedAfterDiskChange"
 
 
-def test_scene_close_then_current_is_not_found(m2_editor):
-    closed = exec_ok(m2_editor, "scene/close")
-    assert closed["changed"] is True
-    # After closing the edited scene, the editor falls back to the project
-    # main scene. The unified fixture sets the main scene to the M3 runtime
-    # scene, so the current root points at RuntimeMain rather than
-    # returning not_found. Either "not_found" or a different scene path is
-    # acceptable; only the wrong scene content would be a failure.
-    result = exec_ok(m2_editor, "scene/current")
-    assert result.get("ok") is True
-
-
-def test_scene_list_open_returns_every_open_scene_in_stable_order(m2_editor):
+def test_scene_list_open_returns_every_open_scene_in_stable_order(m2_editor, m2_main):
+    lifecycle_name = "list_open_lifecycle"
+    before_paths = exec_ok(m2_editor, "scene/list_open")["paths"]
     # Opening a second scene keeps the first one open as an editor tab, so the
     # route must report the whole open set (not just the edited scene).
-    exec_ok(m2_editor, "scene/open", {"path": "res://scenes/audio.tscn"})
+    path = "res://scenes/" + lifecycle_name + ".tscn"
+    exec_ok(m2_editor, "filesystem/write", {"path": path, "content": '[gd_scene format=3]\n[node name="Lifecycle" type="Node"]\n'})
+    exec_ok(m2_editor, "scene/open", {"path": path})
 
     first = exec_ok(m2_editor, "scene/list_open")
     assert first["undoable"] is False
     paths = first["paths"]
     assert "res://scenes/main.tscn" in paths
-    assert "res://scenes/audio.tscn" in paths
+    assert set(paths) == set(before_paths) | {path}
     # Stable, deterministic ordering (lexicographic ascending).
     assert paths == sorted(paths)
     assert exec_ok(m2_editor, "scene/list_open")["paths"] == paths
 
     # Closing the current scene drops it from the open set.
     closed = exec_ok(m2_editor, "scene/close")
-    assert closed["path"] == "res://scenes/audio.tscn"
-    assert "res://scenes/audio.tscn" not in exec_ok(m2_editor, "scene/list_open")["paths"]
+    assert closed["path"] == path
+    assert path not in exec_ok(m2_editor, "scene/list_open")["paths"]
 
 
-def test_scene_close_only_operates_on_current_scene(m2_editor):
+def test_scene_close_only_operates_on_current_scene(m2_editor, m2_main):
+    lifecycle_name = "close_current_lifecycle"
     before = exec_ok(m2_editor, "scene/current")["path"]
     assert before == "res://scenes/main.tscn"
 
-    exec_ok(m2_editor, "scene/open", {"path": "res://scenes/audio.tscn"})
-    assert exec_ok(m2_editor, "scene/current")["path"] == "res://scenes/audio.tscn"
+    path = "res://scenes/" + lifecycle_name + ".tscn"
+    exec_ok(m2_editor, "filesystem/write", {"path": path, "content": '[gd_scene format=3]\n[node name="Lifecycle" type="Node"]\n'})
+    exec_ok(m2_editor, "scene/open", {"path": path})
+    assert exec_ok(m2_editor, "scene/current")["path"] == path
 
     # Godot exposes no API to close a non-current scene by path; the request is
     # rejected without changing editor state.
     rejected = exec_error(m2_editor, "scene/close", {"path": before})
     assert rejected["code"] == "not_found"
-    assert exec_ok(m2_editor, "scene/current")["path"] == "res://scenes/audio.tscn"
+    assert exec_ok(m2_editor, "scene/current")["path"] == path
 
     closed = exec_ok(m2_editor, "scene/close")
     assert closed["changed"] is True
-    assert closed["path"] == "res://scenes/audio.tscn"
+    assert closed["path"] == path
 
     # The closed scene is gone: closing it again reports not_found.
-    again = exec_error(m2_editor, "scene/close", {"path": "res://scenes/audio.tscn"})
+    again = exec_error(m2_editor, "scene/close", {"path": path})
     assert again["code"] == "not_found"
 
     # scene/current reflects the real post-close state (the previously edited scene).

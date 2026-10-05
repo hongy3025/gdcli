@@ -1,50 +1,18 @@
-"""M2 E2E fixtures — per-test project snapshot/reset on top of the shared editor.
+"""Explicit scene navigation within the persistent shared editor."""
 
-The single Godot editor and unified project live in `tests/e2e/shared_fixture.py`,
-re-exported through the root `tests/e2e/conftest.py` as `m2_editor` and friends.
-This module only defines the autouse per-test isolation hook and M2-specific
-reset helpers.
-"""
-
-from __future__ import annotations
-
-import hashlib
-from pathlib import Path
-from typing import Any
+import json
 
 import pytest
 
-from e2e.shared_fixture import tracked_project_files, reset_shared_state, restore_file_state
+from .helpers import exec_ok, gdcli_exec
 
 
-def project_snapshot(project: Path) -> str:
-    digest = hashlib.sha256()
-    for rel, path in sorted(tracked_project_files(project).items()):
-        digest.update(rel.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def reset_project_state(env: dict[str, Any]) -> None:
-    """Restore the file baseline and runtime state captured at fixture setup."""
-    baseline = env.get("file_baseline")
-    if baseline is not None:
-        restore_file_state(env, baseline)
-    reset_shared_state(env, reason="m2 autouse")
-
-
-@pytest.fixture(autouse=True)
-def isolated_test_state(m2_editor):
-    before = project_snapshot(Path(m2_editor["project"]))
-    yield
-    reset_project_state(m2_editor)
-    after = project_snapshot(Path(m2_editor["project"]))
-    assert after == before, "M2 project state changed after test"
-
-
-__all__ = [
-    "project_snapshot",
-    "reset_project_state",
-]
+@pytest.fixture
+def m2_main(m2_editor):
+    """Focus Main when a scenario needs it, preserving its live native state."""
+    result = gdcli_exec(m2_editor, "exec", "scene/current", "--project", str(m2_editor["project"]), check=False)
+    current = json.loads(result.stdout)
+    assert current.get("ok") is True or current.get("code") == "not_found", current
+    if current.get("path") != "res://scenes/main.tscn":
+        exec_ok(m2_editor, "scene/open", {"path": "res://scenes/main.tscn"})
+    return m2_editor

@@ -1,7 +1,6 @@
 extends Node2D
 
 const CaptureOps := preload("res://addons/gdapi/runtime/runtime_capture_ops.gd")
-const ParticlesScene := preload("res://scenes/particles.tscn")
 
 
 class CaptureBoundaryTexture:
@@ -34,27 +33,6 @@ class CaptureBoundaryTexture:
 ##
 ## 包含可观测子节点 ProbeTarget 与若干 Input 中继节点。
 ## 启动时直接放置到主场景树中。
-
-@onready var probe_target: Node = $ProbeTarget
-@onready var probe_input: Node = $ProbeInput
-@onready var probe_input_action: Node = $ProbeInputAction
-@onready var probe_finished_signal: Node = $ProbeFinishedSignal
-
-
-func reset_fixture() -> Dictionary:
-	_remove_runtime_children(self)
-	add_child(ParticlesScene.instantiate())
-	probe_target.reset_fixture()
-	return {"changed": true, "undoable": false}
-
-
-func emit_known_logs() -> Dictionary:
-	var runtime_probe := get_tree().root.get_node_or_null("GdApiRuntimeProbe")
-	if runtime_probe == null or not runtime_probe.has_method("record_log"):
-		return {"ok": false, "error": "runtime probe log recorder is unavailable"}
-	runtime_probe.call("record_log", "info", "known-info", {"source": "runtime-fixture"})
-	runtime_probe.call("record_log", "error", "known-error", {"source": "runtime-fixture"})
-	return {"ok": true}
 
 
 func prepare_capture_fixture(mode: String) -> Dictionary:
@@ -130,16 +108,3 @@ func _make_high_entropy_image() -> Image:
 		state &= 0xffffffff
 		bytes[i] = state & 0xff
 	return Image.create_from_data(WIDTH, HEIGHT, false, Image.FORMAT_RGB8, bytes)
-
-
-func _remove_runtime_children(parent: Node) -> void:
-	for child in parent.get_children():
-		if (
-			child == probe_target
-			or child == probe_input
-			or child == probe_input_action
-			or child == probe_finished_signal
-		):
-			_remove_runtime_children(child)
-		else:
-			child.free()

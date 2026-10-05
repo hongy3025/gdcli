@@ -4,7 +4,7 @@ extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
-const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.gd")
+const NodePathResolver := preload("res://addons/gdapi/runtime/services/node_path_resolver.gd")
 
 
 static func text_set(node_path: Variant, text: Variant) -> Dictionary:
@@ -65,22 +65,17 @@ static func build_layout(node_path: Variant, layout: Variant) -> Dictionary:
 	return set_anchor(node_path, anchors)
 
 
+## node_path 同时接受场景根相对路径与 node/* 回传的绝对用户路径。
 static func _control(node_path: Variant) -> Dictionary:
 	if typeof(node_path) != TYPE_STRING:
 		return _error(ErrorCodes.INVALID_PARAM, "node_path must be a string")
-	var root := SceneEditor.current_root()
-	if root == null:
-		return _error(ErrorCodes.NOT_FOUND, "no scene is currently open")
-	var node: Node = (
-		root
-		if String(node_path) == String(root.name)
-		else root.get_node_or_null(NodePath(node_path))
-	)
-	if node == null:
-		return _error(ErrorCodes.NOT_FOUND, "control not found")
+	var found := NodePathResolver.resolve(node_path)
+	if not found.ok:
+		return _error(found.code, found.error)
+	var node: Node = found.node
 	if not node is Control:
 		return _error(ErrorCodes.NOT_SUPPORTED, "node must be Control")
-	return {"ok": true, "node": node, "path": String(node_path)}
+	return {"ok": true, "node": node, "path": found.path}
 
 
 static func _property(

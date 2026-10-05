@@ -12,10 +12,9 @@ dev = ["gdtoolkit>=4.5"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-addopts = "-v -m 'not budget and not engine_transport and not real_renderer'"
+addopts = "-v"
 markers = [
-    "e2e: requires Godot editor running (only runs when '-m e2e' is passed)",
-    "budget: runs the nested full-suite walltime acceptance test (excluded by default; use '-m budget' to run)",
-    "engine_transport: independent EngineDebugger protocol-2 data-plane acceptance session (excluded by default)",
-    "real_renderer: requires a non-headless editor and working OpenGL renderer; run with 'scripts/check.py --gate render'",
+    "e2e: exercises the shared Godot editor",
+    "engine_transport: exercises EngineDebugger in the shared editor through explicit game lifecycle transitions",
+    "real_renderer: requires the shared GUI editor and working OpenGL renderer",
 ]

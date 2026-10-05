@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const GdApiPlugin := preload("res://addons/gdapi/plugin.gd")
 const AUDIT_CAPACITY := 1000
@@ -8,11 +8,11 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	test_protected_entries_survive_normal_traffic()
 	test_all_protected_buffer_evicts_oldest_entry()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func test_protected_entries_survive_normal_traffic() -> void:
@@ -46,6 +46,7 @@ func test_protected_entries_survive_normal_traffic() -> void:
 	sorted_sequences.sort()
 	assert_eq(sequences, sorted_sequences, "retained sequence order remains increasing")
 	assert_eq(entries.back().seq, 1102, "newest sequence is preserved")
+	plugin.free()
 
 
 func test_all_protected_buffer_evicts_oldest_entry() -> void:
@@ -77,6 +78,7 @@ func test_all_protected_buffer_evicts_oldest_entry() -> void:
 		AUDIT_CAPACITY,
 		"all retained protected failures remain unsuccessful",
 	)
+	plugin.free()
 
 
 func assert_eq(actual, expected, context: String) -> void:

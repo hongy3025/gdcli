@@ -4,16 +4,15 @@ extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
-const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.gd")
+const NodePathResolver := preload("res://addons/gdapi/runtime/services/node_path_resolver.gd")
 
 
+## player_path 同时接受场景根相对路径与 node/* 回传的绝对用户路径。
 static func player(path: String) -> Dictionary:
-	var root := SceneEditor.current_root()
-	if root == null:
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "no scene is currently open"}
-	var node := root.get_node_or_null(NodePath(path))
-	if node == null:
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "AnimationPlayer not found"}
+	var found := NodePathResolver.resolve(path)
+	if not found.ok:
+		return {"ok": false, "code": found.code, "error": found.error}
+	var node: Node = found.node
 	if not node is AnimationPlayer:
 		return {
 			"ok": false, "code": ErrorCodes.NOT_SUPPORTED, "error": "node must be AnimationPlayer"

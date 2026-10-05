@@ -1,9 +1,8 @@
-"""Independent, opt-in EngineDebugger session: never accept file fallback."""
+"""Switch to real EngineDebugger transport in the persistent editor session."""
 from __future__ import annotations
 
 import base64
 import hashlib
-import os
 import struct
 
 import pytest
@@ -18,12 +17,12 @@ TARGET = "/root/RuntimeMain/ProbeTarget"
 
 
 def test_engine_debugger_protocol_two_real_data_plane(m3_editor):
-    assert os.environ.get("GDAPI_E2E_TRANSPORT") == "engine_debugger", (
-        "Use python scripts/check.py --gate engine, or explicitly set "
-        "GDAPI_E2E_TRANSPORT=engine_debugger and pytest -m engine_transport"
-    )
-    attach_game(m3_editor, recovery_restarts=0)
+    detach_game(m3_editor)
+    setting = "gdapi/runtime_force_file_transport"
+    previous = exec_ok(m3_editor, "project/settings/get", {"name": setting})["value"]
+    exec_ok(m3_editor, "project/settings/set", {"name": setting, "value": False})
     try:
+        attach_game(m3_editor)
         status = wait_for_connected(m3_editor)
         assert status["transport"] == "engine_debugger", status
         assert status["protocol_version"] == 2, status
@@ -57,9 +56,11 @@ def test_engine_debugger_protocol_two_real_data_plane(m3_editor):
         assert active["transport"] == "engine_debugger"
         assert active["protocol_version"] == 2
         assert m3_editor["godot"].pid == pid
-        assert m3_editor["editor_start_count"] == 1
     finally:
-        stopped = detach_game(m3_editor)
+        try:
+            stopped = detach_game(m3_editor)
+        finally:
+            exec_ok(m3_editor, "project/settings/set", {"name": setting, "value": previous})
     assert stopped["state"] == "stopped"
     assert stopped["pending"] == 0
     assert stopped["editor_playing"] is False

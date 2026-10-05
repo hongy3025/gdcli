@@ -3,29 +3,46 @@ class_name GdApiParticleEditor
 extends RefCounted
 
 const Spatial := preload("res://addons/gdapi/runtime/services/scene_3d_editor.gd")
-const NodeEditor := preload("res://addons/gdapi/runtime/services/node_editor.gd")
+const NodePathResolver := preload("res://addons/gdapi/runtime/services/node_path_resolver.gd")
 const TYPES := ["GPUParticles2D", "GPUParticles3D"]
 
 
 static func create(payload: Dictionary) -> Dictionary:
 	if not payload.get("type") is String or payload.type not in TYPES:
 		return Spatial.error("type must be GPUParticles2D or GPUParticles3D")
-	return Spatial.edit(payload, true, TYPES)
+	return Spatial.edit(_resolved(payload, "parent_path"), true, TYPES)
 
 
 static func set_config(payload: Dictionary) -> Dictionary:
-	return Spatial.edit(payload, false, TYPES)
+	return Spatial.edit(_resolved(payload, "node_path"), false, TYPES)
 
 
+## node_path 同时接受场景根相对路径与 node/* 回传的绝对用户路径。
 static func info(payload: Dictionary) -> Dictionary:
 	if not payload.get("node_path", "") is String:
 		return Spatial.error("node_path must be a String")
-	var found := NodeEditor.find(payload.get("node_path", ""))
+	if String(payload.node_path).is_empty():
+		return Spatial.error("node_path is required", "missing_param")
+	var found := NodePathResolver.resolve(payload.get("node_path", ""))
 	if not found.ok:
-		return found
+		return Spatial.error(found.error, found.code)
 	if found.node.get_class() not in TYPES:
 		return Spatial.error("node must be GPUParticles2D or GPUParticles3D")
 	return Spatial.inspect(found.node)
+
+
+## 场景 3D 服务只接受绝对用户路径；这里把两种约定归一化后再委托。
+## 空/缺失路径原样透传，保留既有的 missing/invalid 报错。
+static func _resolved(payload: Dictionary, key: String) -> Dictionary:
+	var value: Variant = payload.get(key, "")
+	if not value is String or value.is_empty():
+		return payload
+	var found := NodePathResolver.resolve(value)
+	if not found.ok:
+		return payload
+	var normalized := payload.duplicate()
+	normalized[key] = found.path
+	return normalized
 
 
 # Called only inside the running game by runtime_probe.

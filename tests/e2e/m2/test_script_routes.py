@@ -12,10 +12,7 @@ import pytest
 from .helpers import exec_error, exec_ok, tree_digest
 
 MAIN_SCENE = "res://scenes/main.tscn"
-PLAYER = "/root/Main/Player"
 PLAYER_SCRIPT = "res://scripts/player.gd"
-# `Child` is parented to `Player` in scenes/main.tscn.
-CHILD = "/root/Main/Player/Child"
 
 
 def _reopen_main_scene(editor) -> None:
@@ -63,55 +60,56 @@ def _node_script_path(scene_text: str, node_name: str) -> str | None:
     return _script_ext_resources(scene_text).get(match.group(1))
 
 
-def _node_signals(editor) -> list[str]:
-    return exec_ok(editor, "node/signal/list", {"node_path": CHILD})["signals"]
+def _node_signals(editor, node_path) -> list[str]:
+    return exec_ok(editor, "node/signal/list", {"node_path": node_path})["signals"]
 
 
-def test_script_attach_survives_reopen(m2_editor):
+def test_script_attach_survives_reopen(m2_editor, m2_main):
+    child = exec_ok(m2_editor, "node/create", {"parent_path": "/root/Main", "type": "Node2D", "name": "AttachPersistence"})["node_path"]
     """Attaching a script must be observable on the node and persist to the scene file."""
-    assert "health_changed" not in _node_signals(m2_editor)
-    assert _node_script_path(_scene_text(m2_editor), "Child") is None
+    assert "health_changed" not in _node_signals(m2_editor, child)
 
     attached = exec_ok(m2_editor, "script/attach", {
-        "node_path": CHILD, "path": PLAYER_SCRIPT,
+        "node_path": child, "path": PLAYER_SCRIPT,
     })
     assert attached["undoable"] is True
     assert attached["script_path"] == PLAYER_SCRIPT
     # `health_changed` is declared by player.gd, so it proves the script is mounted.
-    assert "health_changed" in _node_signals(m2_editor)
+    assert "health_changed" in _node_signals(m2_editor, child)
 
     exec_ok(m2_editor, "scene/current/save")
-    assert _node_script_path(_scene_text(m2_editor), "Child") == PLAYER_SCRIPT
+    assert _node_script_path(_scene_text(m2_editor), "AttachPersistence") == PLAYER_SCRIPT
 
     _reopen_main_scene(m2_editor)
-    assert "health_changed" in _node_signals(m2_editor)
-    assert _node_script_path(_scene_text(m2_editor), "Child") == PLAYER_SCRIPT
+    assert "health_changed" in _node_signals(m2_editor, child)
+    assert _node_script_path(_scene_text(m2_editor), "AttachPersistence") == PLAYER_SCRIPT
 
 
-def test_script_detach_survives_reopen(m2_editor):
-    exec_ok(m2_editor, "script/attach", {"node_path": CHILD, "path": PLAYER_SCRIPT})
+def test_script_detach_survives_reopen(m2_editor, m2_main):
+    child = exec_ok(m2_editor, "node/create", {"parent_path": "/root/Main", "type": "Node2D", "name": "DetachPersistence"})["node_path"]
+    exec_ok(m2_editor, "script/attach", {"node_path": child, "path": PLAYER_SCRIPT})
     exec_ok(m2_editor, "scene/current/save")
 
     _reopen_main_scene(m2_editor)
-    assert "health_changed" in _node_signals(m2_editor)
-    assert _node_script_path(_scene_text(m2_editor), "Child") == PLAYER_SCRIPT
+    assert "health_changed" in _node_signals(m2_editor, child)
+    assert _node_script_path(_scene_text(m2_editor), "DetachPersistence") == PLAYER_SCRIPT
 
-    detached = exec_ok(m2_editor, "script/detach", {"node_path": CHILD})
+    detached = exec_ok(m2_editor, "script/detach", {"node_path": child})
     assert detached["undoable"] is True
-    assert "health_changed" not in _node_signals(m2_editor)
+    assert "health_changed" not in _node_signals(m2_editor, child)
 
     exec_ok(m2_editor, "scene/current/save")
-    assert _node_script_path(_scene_text(m2_editor), "Child") is None
+    assert _node_script_path(_scene_text(m2_editor), "DetachPersistence") is None
 
     _reopen_main_scene(m2_editor)
-    assert "health_changed" not in _node_signals(m2_editor)
-    assert _node_script_path(_scene_text(m2_editor), "Child") is None
-    error = exec_error(m2_editor, "script/detach", {"node_path": CHILD})
+    assert "health_changed" not in _node_signals(m2_editor, child)
+    assert _node_script_path(_scene_text(m2_editor), "DetachPersistence") is None
+    error = exec_error(m2_editor, "script/detach", {"node_path": child})
     assert error["code"] == "not_found"
 
 
-def test_script_create_patch_validate_attach(m2_editor):
-    path = "res://scripts/generated.gd"
+def test_script_create_patch_validate_attach(m2_editor, m2_main):
+    path = "res://scripts/m2_authored.gd"
     source = "extends Node2D\nvar speed := 10\n"
     create_result = exec_ok(m2_editor, "script/create", {
         "path": path, "content": source
@@ -127,8 +125,9 @@ def test_script_create_patch_validate_attach(m2_editor):
     valid = exec_ok(m2_editor, "script/validate", {"path": path})
     assert valid["valid"] is True
 
+    author = exec_ok(m2_editor, "node/create", {"parent_path": "/root/Main", "type": "Node2D", "name": "ScriptAuthor"})["node_path"]
     attached = exec_ok(m2_editor, "script/attach", {
-        "node_path": PLAYER, "path": path
+        "node_path": author, "path": path
     })
     assert attached["undoable"] is True
 
@@ -176,13 +175,14 @@ def test_script_writes_read_only_targets_fail_cleanly(m2_editor, route, data):
     original = target.read_bytes()
     target.chmod(stat.S_IREAD)
     try:
-        exec_ok(m2_editor, "gdapi/audit/clear")
+        entries_before = exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
+        seq = max((entry["seq"] for entry in entries_before), default=0)
         error = exec_error(m2_editor, route, data)
         assert error["code"] == "godot_error", error
         assert target.read_bytes() == original
         assert not Path(str(target) + ".tmp").exists()
         entries = [
-            entry for entry in exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
+            entry for entry in exec_ok(m2_editor, "gdapi/audit/list", {"since": seq, "limit": 1000})["entries"]
             if entry.get("route") == route
         ]
         assert len(entries) == 1, entries
@@ -205,7 +205,7 @@ def test_invalid_script_returns_valid_false(m2_editor):
     ("script/write", {"path": "res://addons/gdapi/plugin.gd", "content": "x"}, "permission_denied"),
     ("script/attach", {"node_path": "/root/Main/Missing", "path": "res://scripts/player.gd"}, "not_found"),
 ])
-def test_script_rejections_do_not_change_files(m2_editor, route, data, code):
+def test_script_rejections_do_not_change_files(m2_editor, m2_main, route, data, code):
     before = tree_digest(m2_editor["project"])
     error = exec_error(m2_editor, route, data)
     assert error["code"] == code

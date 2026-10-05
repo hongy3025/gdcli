@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const DeferredTaskRegistry := preload("res://addons/gdapi/runtime/deferred_task_registry.gd")
 
@@ -7,7 +7,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	test_tick_removes_completed_task_after_one_response()
 	test_timeout_cancels_and_sends_one_terminal_error()
 	test_cancel_all_cleans_up_every_pending_task_once()
@@ -15,7 +15,7 @@ func _init() -> void:
 	test_completed_task_without_outcome_is_reported_as_failure()
 	test_state_outcome_is_forwarded_to_terminal_callback()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func test_tick_removes_completed_task_after_one_response() -> void:

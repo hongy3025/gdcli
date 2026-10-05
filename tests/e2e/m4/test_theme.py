@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .helpers import exec_error, exec_ok
+from .helpers import audit_cursor, exec_error, exec_ok
 
 
 THEME_PATH = "res://themes/roundtrip.tres"
@@ -27,6 +27,7 @@ def _project_file(env: dict[str, Any], path: str) -> Path:
 
 def test_theme_create_and_item_writes_round_trip_through_reload(m4_env):
     """Saving without a reloadable value (or a wrong value) must fail this test."""
+    since = audit_cursor(m4_env)
     created = exec_ok(m4_env, "theme/create", {"path": THEME_PATH})
     assert created["saved"] is True
     assert created["undoable"] is False
@@ -83,7 +84,7 @@ def test_theme_create_and_item_writes_round_trip_through_reload(m4_env):
     assert properties["Button/styles/normal"] == {"type": "Resource", "value": STYLEBOX_PATH}
     assert exec_ok(m4_env, "resource/info", {"path": STYLEBOX_PATH})["class"] == "StyleBoxFlat"
 
-    entries = exec_ok(m4_env, "gdapi/audit/list", {"since": 0, "limit": 100})["entries"]
+    entries = exec_ok(m4_env, "gdapi/audit/list", {"since": since, "limit": 100})["entries"]
     for route, _body in writes:
         assert any(
             entry["route"] == route

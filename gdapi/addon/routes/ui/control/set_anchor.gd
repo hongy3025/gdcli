@@ -26,7 +26,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("设置控件锚点")
 		. mutates()
-		. param("node_path", "String", true, "Control 路径", "")
+		. param("node_path", "String", true, "Control 路径（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. param("anchors", "Dictionary", true, "left/top/right/bottom", "")
 		. param("offsets", "Dictionary", false, "可选偏移", "{}")
 		. example('{"node_path":"Button","anchors":{"left":0,"top":0,"right":1,"bottom":1}}')

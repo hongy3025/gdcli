@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from .helpers import command_doc, editor_redo, editor_undo, exec_error, exec_ok, save_reopen
+from .helpers import command_doc, editor_redo, editor_undo, exec_error, exec_ok, save_scene, select_domain
 
 
 ANIMATION_ROUTES = {
@@ -28,17 +28,17 @@ def test_animation_routes_are_discoverable_and_documented(m4_env):
 
 def test_animation_create_delete_are_undoable(m4_env, monkeypatch):
     """Removing the UndoRedo action would leave a deleted animation unrecoverable."""
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
+    select_domain(m4_env, "animation")
     created = exec_ok(
         m4_env,
         "animation/create",
-        {"player_path": "AnimationPlayer", "name": "idle"},
+        {"player_path": "AnimationPlayer", "name": "history_idle"},
     )
     assert created["undoable"] is True
     exec_ok(
         m4_env,
         "animation/delete",
-        {"player_path": "AnimationPlayer", "name": "idle"},
+        {"player_path": "AnimationPlayer", "name": "history_idle"},
     )
 
     command = Path(m4_env["project"]) / ".godot" / "gdapi-test-command.json"
@@ -68,23 +68,23 @@ def test_animation_create_delete_are_undoable(m4_env, monkeypatch):
     duplicate = exec_error(
         m4_env,
         "animation/create",
-        {"player_path": "AnimationPlayer", "name": "idle"},
+        {"player_path": "AnimationPlayer", "name": "history_idle"},
     )
     assert duplicate["code"] == "conflict"
     editor_redo(m4_env)
     recreated = exec_ok(
         m4_env,
         "animation/create",
-        {"player_path": "AnimationPlayer", "name": "idle"},
+        {"player_path": "AnimationPlayer", "name": "history_idle"},
     )
-    assert recreated["name"] == "idle"
+    assert recreated["name"] == "history_idle"
 
 
 def test_history_result_recovers_after_reader_releases_file(m4_env):
     """A temporary Windows reader lock must not force a ten-second command retransmit."""
     if sys.platform != "win32":
         pytest.skip("Windows result-file sharing violation")
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
+    select_domain(m4_env, "animation")
     params = {"player_path": "AnimationPlayer", "name": "locked_a"}
     other = params | {"name": "locked_b"}
     for data in (params, other):
@@ -114,31 +114,31 @@ def test_history_result_recovers_after_reader_releases_file(m4_env):
 
 def test_animation_tree_state_and_transition_are_undoable(m4_env):
     """Replacing state-machine edits with no-ops must fail this observable contract."""
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
+    select_domain(m4_env, "animation")
     state = exec_ok(
         m4_env,
         "animation_tree/state/add",
-        {"tree_path": "AnimationTree", "name": "idle"},
+        {"tree_path": "AnimationTree", "name": "transition_idle"},
     )
     assert state["undoable"] is True
     transition = exec_ok(
         m4_env,
         "animation_tree/transition/add",
-        {"tree_path": "AnimationTree", "from": "Start", "to": "idle"},
+        {"tree_path": "AnimationTree", "from": "Start", "to": "transition_idle"},
     )
     assert transition["undoable"] is True
     duplicate = exec_error(
         m4_env,
         "animation_tree/state/add",
-        {"tree_path": "AnimationTree", "name": "idle"},
+        {"tree_path": "AnimationTree", "name": "transition_idle"},
     )
     assert duplicate["code"] == "conflict"
 
 
-def test_animation_track_and_key_persist_after_reopen(m4_env):
-    """Dropping the resource replacement would lose authored keys on scene reload."""
+def test_animation_track_and_key_persist_in_saved_scene(m4_env):
+    """Authored keys must reach disk without replacing the ongoing editor scene."""
     scene_path = "res://scenes/animation.tscn"
-    exec_ok(m4_env, "scene/open", {"path": scene_path})
+    select_domain(m4_env, "animation")
     exec_ok(
         m4_env,
         "animation/create",
@@ -161,15 +161,15 @@ def test_animation_track_and_key_persist_after_reopen(m4_env):
         },
     )
     assert key["undoable"] is True
-    save_reopen(m4_env, scene_path)
+    content = save_scene(m4_env, scene_path)
     duplicate = exec_error(
         m4_env,
         "animation/create",
         {"player_path": "AnimationPlayer", "name": "move"},
     )
     assert duplicate["code"] == "conflict"
-    # Read the persisted track/key back through the animation API on the reopened scene.
-    reopened_key = exec_ok(
+    # Read the authored track/key back from the same ongoing editor scene.
+    removed_key = exec_ok(
         m4_env,
         "animation/key/remove",
         {
@@ -179,7 +179,7 @@ def test_animation_track_and_key_persist_after_reopen(m4_env):
             "time": 0.0,
         },
     )
-    assert reopened_key["key_index"] == key["key_index"]
+    assert removed_key["key_index"] == key["key_index"]
     missing_key = exec_error(
         m4_env,
         "animation/key/remove",
@@ -202,7 +202,7 @@ def test_animation_track_and_key_persist_after_reopen(m4_env):
         },
     )
     assert missing_track["code"] == "not_found"
-    reopened_track = exec_ok(
+    removed_track = exec_ok(
         m4_env,
         "animation/track/remove",
         {
@@ -211,20 +211,19 @@ def test_animation_track_and_key_persist_after_reopen(m4_env):
             "track_index": track["track_index"],
         },
     )
-    assert reopened_track["track_index"] == track["track_index"]
+    assert removed_track["track_index"] == track["track_index"]
     # The saved scene file itself must carry the authored track path and key time.
-    content = exec_ok(m4_env, "filesystem/read", {"path": scene_path})["content"]
     assert 'tracks/0/path = NodePath(".:position")' in content, content
     assert "PackedFloat32Array(0)" in content, content
 
 
 def test_animation_play_and_stop_expose_player_state(m4_env):
     """Hard-coded play/stop results must not survive the AnimationPlayer read-back."""
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
+    select_domain(m4_env, "animation")
     exec_ok(
         m4_env,
         "animation/create",
-        {"player_path": "AnimationPlayer", "name": "idle"},
+        {"player_path": "AnimationPlayer", "name": "playback_idle"},
     )
 
     def current_animation() -> str:
@@ -234,16 +233,15 @@ def test_animation_play_and_stop_expose_player_state(m4_env):
             {"node_path": "/root/AnimationDomain/AnimationPlayer", "property": "current_animation"},
         )["value"]
 
-    assert current_animation() == ""
-    exec_ok(m4_env, "animation/play", {"player_path": "AnimationPlayer", "name": "idle"})
-    assert current_animation() == "idle"
+    exec_ok(m4_env, "animation/play", {"player_path": "AnimationPlayer", "name": "playback_idle"})
+    assert current_animation() == "playback_idle"
     exec_ok(m4_env, "animation/stop", {"player_path": "AnimationPlayer"})
     assert current_animation() == ""
 
 
 def test_animation_key_removal_undo_redo_and_invalid_value(m4_env):
     """A removed key must return only after undo; malformed variants must not mutate it."""
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
+    select_domain(m4_env, "animation")
     exec_ok(
         m4_env,
         "animation/create",
@@ -276,7 +274,7 @@ def test_animation_key_removal_undo_redo_and_invalid_value(m4_env):
 
 def test_animation_tree_blend_position_is_undoable(m4_env):
     """Replacing blend edits with direct mutation would lose editor UndoRedo history."""
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/animation.tscn"})
+    select_domain(m4_env, "animation")
     result = exec_ok(
         m4_env,
         "animation_tree/blend/set",

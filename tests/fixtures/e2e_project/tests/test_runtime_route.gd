@@ -3,7 +3,7 @@
 ## 使用内存 broker/server/plugin 验证 HTTP adapter 的行为边界，不启动真实游戏进程。
 
 @tool
-extends SceneTree
+extends RefCounted
 
 const Request := preload("res://addons/gdapi/runtime/request.gd")
 const Response := preload("res://addons/gdapi/runtime/response.gd")
@@ -48,7 +48,12 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
+	var original_meta := {}
+	for key in ["gdapi_runtime_broker", "gdapi_plugin"]:
+		if Engine.has_meta(key):
+			original_meta[key] = Engine.get_meta(key)
+	Engine.set_meta("gdapi_plugin", FakePlugin.new())
 	print("Running GdApiRuntimeRoute tests...\n")
 	test_disconnected_broker_is_conflict()
 	test_dispatch_requires_exact_runtime_path_and_operation()
@@ -66,11 +71,14 @@ func _init() -> void:
 	test_audit_summary_redacts_aliases_and_bounds_unclassified_values()
 	test_redact_bounds_keys_and_unclassified_variants()
 	test_response_is_sent_exactly_once()
-	Engine.remove_meta("gdapi_runtime_broker")
-	Engine.remove_meta("gdapi_plugin")
+	for key in ["gdapi_runtime_broker", "gdapi_plugin"]:
+		if original_meta.has(key):
+			Engine.set_meta(key, original_meta[key])
+		elif Engine.has_meta(key):
+			Engine.remove_meta(key)
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void:

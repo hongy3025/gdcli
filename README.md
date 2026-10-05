@@ -95,26 +95,30 @@ uv run pytest tests/e2e/m2 -v
 uv run pytest tests/e2e/m3 -v
 ```
 
-完整回归按统一顺序执行 formatter、GDScript lint、clippy、workspace 单元测试、file transport 全量 E2E、独立 EngineDebugger 会话、真实 OpenGL 渲染器验收及 headless 全量预算：
+完整回归按统一顺序执行 formatter、GDScript lint、clippy、workspace 单元测试、单一持久编辑器内的完整 E2E（file transport、EngineDebugger 和真实 OpenGL 渲染器）以及父进程 wall-clock 预算：
 
 ```bash
 uv run python scripts/check.py
 ```
 
-可重复传入 `--gate format|clippy|unit|file|engine|render|budget` 选择门禁。file、engine、render 是顺序运行的独立单编辑器 pytest 会话；render 在非 headless `gl_compatibility` 编辑器中验证 GridMap 与 MultiMesh 的实际状态/持久化（CI 使用 Mesa llvmpipe）。headless file/预算套件排除这两个需要 RenderingServer 的验收。`GDAPI_E2E_BUDGET_SECONDS` 显式配置完整 headless wall-clock 阈值（默认 360 秒）；成功等待只报告 P50/P95/P99/max 和 P99×3 建议，不会静默提高门限。每次运行的原始等待样本和 session 证据写入 `.pytest-artifacts/`。
+可重复传入 `--gate format|clippy|unit|e2e|budget` 选择门禁。`e2e` 在一个 GUI `gl_compatibility` 编辑器中运行全部用例，包含 GridMap、MultiMesh 和 EngineDebugger 数据面，不再分别启动 file/engine/render 会话；CI 使用 Mesa llvmpipe。直接运行 `uv run pytest tests/e2e/` 也默认包含这些用例。`GDAPI_E2E_BUDGET_SECONDS` 配置完整 wall-clock 阈值（默认 360 秒）；等待统计只报告 P50/P95/P99/max 和 P99×3 建议，不会静默提高门限。
 
-同一次 `scripts/check.py` 调用选择 `file` 和 `budget` 时，只执行一次完整 file 套件：budget 使用该次子进程从启动到退出的父进程 monotonic wall-clock，不复用旧产物、不缩减测试。单独 `--gate budget` 仍重新运行完整套件。E2E 编辑器不再强行设置 180 秒 handler 超时，默认与生产一样为 30 秒。GDScript 格式/lint 在遍历前排除生成目录，junction 别名按物理目录去重，并按 Windows 命令行长度限制合并批次。
+同一次 `scripts/check.py` 调用选择 `e2e` 和 `budget` 时，只执行一次完整套件：budget 使用该次 pytest 子进程从启动到退出的父进程 monotonic wall-clock。单独 `--gate budget` 也只调度一次完整 E2E，不嵌套 pytest、不复用旧产物。`.pytest-artifacts/e2e-waits.json` 记录每个参数化 case 的 setup/call/teardown、状态、等待样本和单编辑器证据；`e2e.xml` 提供 JUnit 报告。E2E 保留生产默认 30 秒 handler 期限。格式/lint 排除生成目录，junction 别名按物理目录去重，并按 Windows 命令行长度限制合并批次。
 
-E2E 的测试专用 `gdapi_test` 插件将编辑器聚焦/失焦时的帧间休眠统一设为 2ms，并在插件退出时恢复原值，避免默认 100ms 失焦休眠反复拖慢 HTTP 请求、场景切换与 Undo/Redo。保留正数休眠，不启用忙循环、不加速游戏时间；生产 addon 的帧调度、30 秒请求期限、每测试文件/场景隔离与测试选择均不变。大响应的 JSON 转义修正使用原生扫描与分段合并，避免逐字符字符串拼接卡住编辑器主线程。
+项目复制、构建、安装和编辑器启动均只发生一次。各用例持续操作同一项目、场景标签页、UndoRedo 历史和审计记录；不再有通用的场景关闭/重开、全项目快照、文件回滚或运行时重置。用例使用自己拥有的资源和名称，并按实时状态做前后比较；只有显式测试撤销、持久化、取消、run/stop 等行为时才执行相应生命周期操作。普通 runtime 用例复用正在运行的 `RuntimeMain`，其中包含 Physics/Navigation domain；意外断连直接报诊断错误，不以自动重启掩盖。
 
-Undo/Redo 测试文件桥先将命令完整写入同目录的请求专属临时文件，关闭后原子替换正式命令文件，避免编辑器读到半写 JSON 后删掉命令、白等 10 秒再重投。结果文件遭遇 Windows 读句柄共享冲突时，插件保留已写好的临时结果并在后续帧继续发布，不重写内容、不重做历史操作。保留原有 10 秒等待、最多 3 次尝试和 `request_id` 幂等执行；命令临时文件在退出时清理。文件基线仅排除 Godot 自身维护的根目录音频布局及其数字后缀原生保存临时文件，嵌套同名文件与用户备份仍按原规则恢复和校验。
+24 个原生 GDScript 套件通过测试插件的 `run_suite` 文件桥，在这个编辑器的真实 SceneTree 中执行，不再启动 `--headless --script` 进程。Godot 原生游戏运行和真实导出仍按产品行为使用子进程：共享的是持续提供 CLI 服务的编辑器，而不是将这些被测行为伪装成同一 OS 进程。
+
+测试专用 `gdapi_test` 插件将编辑器聚焦/失焦时的帧间休眠统一设为 2ms，并在退出时恢复原值；保留正数休眠，不忙循环、不加速游戏时间。生产 addon 的帧调度与请求期限不变。大响应的 JSON 转义使用原生扫描与分段合并，避免逐字符字符串拼接卡住编辑器主线程。
+
+Undo/Redo 与原生套件共用带 `request_id` 的文件桥。命令完整写入请求专属临时文件，关闭后原子替换正式命令；已完成请求重投只重发结果，执行中的套件不会重复启动。结果遭遇 Windows 读句柄共享冲突时，插件保留已写好的临时结果并逐帧继续发布，不重写内容或重做操作。Undo/Redo 保留 10 秒等待与最多 3 次尝试；原生套件使用独立的 45 秒等待，失败结果保留真实计数与诊断。
 
 通过 `GODOT_BIN` 环境变量可覆盖 Godot 路径；共享 E2E fixture 在 Windows 上默认使用 `D:\app\devel\Godot\v4.7.2\godot_console.exe`，其他平台默认使用 PATH 中的 `godot`。直接调用 `build_environment(godot_bin=...)` 时，显式参数优先于环境变量。
 
-E2E fixture 默认强制 file transport（保证确定性）；需要验收 EngineDebugger 数据面时：
+共享 fixture 初始使用 file transport；EngineDebugger 用例在同一编辑器内通过真实项目设置和游戏 stop/run 切换数据面，并验证不发生 file 回退。可单独运行该场景：
 
 ```bash
-GDAPI_E2E_TRANSPORT=engine_debugger uv run pytest tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_runtime_nodes.py -q
+uv run pytest tests/e2e/m3/test_engine_transport.py -q -s
 ```
 
 Windows PowerShell 示例：
@@ -431,7 +435,7 @@ Physics 与 Navigation 当前只支持 2D。3D 节点、形状、地图或查询
 
 ### M5 项目、诊断与发布
 
-M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项目诊断和受控导出路由。配置变更使用隔离 fixture 快照验证，持久化 mutation 返回 `undoable:false`，删除/修复/覆盖为不可撤销写入。
+M5 提供项目设置、InputMap、Autoload、ClassDB、UID 修复、只读项目诊断和受控导出路由。配置用例在持久项目中观察真实内存与磁盘状态，仅管理自己改变的设置、动作和资源；持久化 mutation 返回 `undoable:false`，删除/修复/覆盖为不可撤销写入。
 
 除 health、unused-resource、dependency-cycle 与 script-error diagnostics，`diagnostics/signal_flow`、`scene_complexity`、`script_references`、`project_statistics` 返回带位置/类型信息的静态扫描结果。无法从静态源文件证明运行期连接行为时显式标记为 `unknown`。
 
@@ -475,7 +479,7 @@ M3 提供 runtime 路由；M6 引入 `runtime/eval` 作为 v2 协议下运行进
 - `runtime/screenshot/compare`：比较实际 PNG 像素、尺寸、阈值、误差统计和差异框。
 - `runtime/tween/*` `runtime/node/meta/*`：typed tween 运行状态与受控运行节点 meta。
 
-等待阈值通过 `GDAPI_E2E_*_SECONDS` 显式配置；成功等待统计只给建议，不改动验收门限。独立 EngineDebugger gate 要求 `transport=engine_debugger`，验证协议 v2、运行时读写、输入、PNG 与 stop，不接受 file transport 回退。
+等待阈值通过 `GDAPI_E2E_*_SECONDS` 显式配置；成功等待统计只给建议，不改动验收门限。共享会话内的 EngineDebugger 场景要求 `transport=engine_debugger`，验证协议 v2、运行时读写、输入、PNG 与 stop，不接受 file transport 回退。
 
 M6 高风险能力（`editor/eval`、`runtime/eval`、`process/run`、`network/http_request`、
 `filesystem/batch/delete`、`filesystem/batch/replace`、`filesystem/batch/recover`）自 2026-08-01 起默认可用，不再需要额外权限配置或

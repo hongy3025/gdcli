@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
@@ -7,11 +7,11 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	test_audit_log_redacts_high_risk_payloads_recursively()
 	test_audit_log_redacts_url_userinfo_everywhere()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func test_audit_log_redacts_high_risk_payloads_recursively() -> void:

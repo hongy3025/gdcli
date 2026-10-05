@@ -18,7 +18,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("查询 TileMapLayer 信息")
-		. param("layer_path", "String", true, "TileMapLayer 路径", "")
+		. param("layer_path", "String", true, "TileMapLayer 路径（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. example('{"layer_path":"TileMapLayer"}')
 		. returns("图层信息", {"used_cell_count": "int"})
 	)

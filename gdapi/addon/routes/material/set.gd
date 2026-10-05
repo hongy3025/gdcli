@@ -26,7 +26,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("设置受支持材质属性")
 		. mutates()
-		. param("node_path", "String", true, "目标节点", "")
+		. param("node_path", "String", true, "目标节点（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. param("property", "String", true, "稳定白名单中的属性", "")
 		. param("value", "Variant", true, "与属性类型精确匹配的值", "")
 		. example('{"node_path":"Sprite","property":"blend_mode","value":1}')

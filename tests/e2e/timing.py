@@ -42,7 +42,7 @@ def validate_configuration() -> None:
     transport = os.environ.get("GDAPI_E2E_TRANSPORT", "file")
     if transport not in ("file", "engine_debugger"):
         raise ValueError(f"GDAPI_E2E_TRANSPORT={transport!r}: expected file or engine_debugger")
-    editor_mode = os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless")
+    editor_mode = os.environ.get("GDAPI_E2E_EDITOR_MODE", "gui")
     if editor_mode not in ("headless", "gui"):
         raise ValueError(f"GDAPI_E2E_EDITOR_MODE={editor_mode!r}: expected headless or gui")
 
@@ -97,16 +97,28 @@ def successful_wait(group: str):
     return decorate
 
 
-def write_report(path: Path, *, exitstatus: int, editor_starts: int) -> None:
+def write_report(
+    path: Path, *, exitstatus: int, editor_starts: int, cases: list[dict],
+    deselected: list[str], session_seconds: float,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     report = {
         "units": "seconds",
         "exitstatus": int(exitstatus),
         "editor_starts": editor_starts,
         "transport": os.environ.get("GDAPI_E2E_TRANSPORT", "file"),
-        "editor_mode": os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless"),
+        "editor_mode": os.environ.get("GDAPI_E2E_EDITOR_MODE", "gui"),
         "thresholds": {name: positive_seconds(name) for name in DEFAULTS},
         "groups": TIMINGS.summary(),
+        "cases": cases,
+        "case_counts": {status: sum(row["status"] == status for row in cases)
+                        for status in ("passed", "failed", "skipped")},
+        "phase_totals_seconds": {
+            phase: sum(row[f"{phase}_seconds"] for row in cases)
+            for phase in ("setup", "call", "teardown")
+        },
+        "deselected_nodeids": deselected,
+        "pytest_session_seconds": session_seconds,
     }
     path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 

@@ -6,6 +6,8 @@
 [ext_resource type="Script" uid="uid://bfi1tws4bwhje" path="res://scripts/probe_input_action.gd" id="4_input_action"]
 [ext_resource type="Script" uid="uid://hh86eclv3cvg" path="res://scripts/probe_finished_signal.gd" id="5_finished_signal"]
 [ext_resource type="PackedScene" path="res://scenes/particles.tscn" id="6_particles"]
+[ext_resource type="PackedScene" path="res://scenes/physics.tscn" id="7_physics"]
+[ext_resource type="PackedScene" path="res://scenes/navigation.tscn" id="8_navigation"]
 
 [node name="RuntimeMain" type="Node2D" unique_id=447033441]
 script = ExtResource("1_main")
@@ -23,3 +25,7 @@ script = ExtResource("4_input_action")
 script = ExtResource("5_finished_signal")
 
 [node name="ParticlesFixture" parent="." instance=ExtResource("6_particles")]
+
+[node name="PhysicsDomain" parent="." instance=ExtResource("7_physics")]
+
+[node name="NavigationDomain" parent="." instance=ExtResource("8_navigation")]

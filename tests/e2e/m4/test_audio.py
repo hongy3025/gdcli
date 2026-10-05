@@ -1,6 +1,6 @@
 """Audio bus and player M4 route contracts."""
 
-from .helpers import command_doc, editor_undo, exec_error, exec_ok
+from .helpers import command_doc, editor_undo, exec_error, exec_ok, select_domain
 
 
 AUDIO_ROUTES = {
@@ -17,17 +17,18 @@ def test_audio_routes_are_discoverable_and_documented(m4_env):
 
 
 def test_audio_bus_add_and_remove_require_safe_semantics(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/audio.tscn"})
-    added = exec_ok(m4_env, "audio/bus/add", {"name": "Effects"})
+    select_domain(m4_env, "audio")
+    before = exec_ok(m4_env, "audio/bus/list")["buses"]
+    added = exec_ok(m4_env, "audio/bus/add", {"name": "M4Effects"})
     assert added["undoable"] is True
-    assert "Effects" in exec_ok(m4_env, "audio/bus/list")["buses"]
-    removed = exec_ok(m4_env, "audio/bus/remove", {"name": "Effects"})
+    assert set(exec_ok(m4_env, "audio/bus/list")["buses"]) == set(before) | {"M4Effects"}
+    removed = exec_ok(m4_env, "audio/bus/remove", {"name": "M4Effects"})
     assert removed["changed"] is True
     assert removed["undoable"] is True
-    assert "Effects" not in exec_ok(m4_env, "audio/bus/list")["buses"]
+    assert exec_ok(m4_env, "audio/bus/list")["buses"] == before
 
 def test_audio_player_creation_is_undoable(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/audio.tscn"})
+    select_domain(m4_env, "audio")
     created = exec_ok(
         m4_env,
         "audio/player/create",
@@ -39,7 +40,7 @@ def test_audio_player_creation_is_undoable(m4_env):
 
 def test_audio_play_and_stop_expose_real_player_state(m4_env):
     """A hard-coded ``playing`` field must not survive a real play/stop round trip."""
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/audio.tscn"})
+    select_domain(m4_env, "audio")
     # An endless generator stream keeps ``playing`` observable across editor frames.
     stream_path = "res://resources/playback_probe.tres"
     exec_ok(m4_env, "resource/create", {"path": stream_path, "type": "AudioStreamGenerator"})

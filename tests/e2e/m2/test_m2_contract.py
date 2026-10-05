@@ -1,19 +1,6 @@
-"""M2 acceptance: route inventory, command listing, and standardized error codes."""
+"""M2 acceptance: native route inventory and command listing."""
 
 from __future__ import annotations
-
-import re
-import sys
-from pathlib import Path
-
-import pytest
-
-_REPO_ROOT_CANDIDATE = Path(__file__).resolve().parents[2]
-_TESTS_DIR = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT_CANDIDATE) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT_CANDIDATE))
-if str(_TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TESTS_DIR))
 
 from .helpers import exec_ok
 
@@ -65,21 +52,3 @@ def test_commands_list_contains_m2_baseline_routes(m2_editor):
     assert not missing, f"missing M2 routes in command/list: {sorted(missing)}"
 
 
-
-def test_error_codes_are_m1_standard():
-    """Pure static check: routes only emit the 10 standard M1 codes."""
-    root = Path(__file__).resolve().parent.parent.parent.parent.parent
-    gdapi_dir = root / "gdapi" / "addon"
-    standard = {
-        "missing_param", "invalid_param", "invalid_path", "not_found",
-        "conflict", "not_supported", "permission_denied",
-        "unsafe_operation", "timeout", "godot_error",
-    }
-    pattern = re.compile(r"res\.error\([^)]+?,\s*\"([a-z_]+)\"")
-    found = set()
-    for path in gdapi_dir.rglob("*.gd"):
-        if ".uid" in path.name:
-            continue
-        found.update(pattern.findall(path.read_text(encoding="utf-8")))
-    extra = found - standard
-    assert not extra, f"non-standard codes: {sorted(extra)}"

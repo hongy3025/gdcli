@@ -108,7 +108,7 @@ def wait_for_godot_ready(project: Path, timeout: float = 30.0) -> None:
         if log.exists():
             try:
                 content = log.read_text(encoding="utf-8", errors="replace")
-                if os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless") == "gui":
+                if os.environ.get("GDAPI_E2E_EDITOR_MODE", "gui") == "gui":
                     ready = (
                         layout.is_file()
                         and "OpenGL API" in content
@@ -134,7 +134,6 @@ def gdcli_exec(env: dict, *args: str, check: bool = True) -> subprocess.Complete
     )
 
 
-# keep gdcli_exec as alias for legacy callers
 
 
 
@@ -146,10 +145,9 @@ def exec_ok(env: dict, route: str, data: dict | None = None) -> dict[str, Any]:
         [str(env["gdcli"]), "--json", *args],
         capture_output=True, encoding="utf-8", errors="replace",
     )
-    if result.returncode != 0:
-        print("\n[gdcli failed]", args)
-        print("STDOUT:", result.stdout)
-        print("STDERR:", result.stderr)
+    assert result.returncode == 0, (
+        f"{route}: CLI exited {result.returncode}\n{result.stdout}\n{result.stderr}"
+    )
     payload = json.loads(result.stdout)
     assert payload.get("ok") is True, f"{route}: {payload}"
     return payload
@@ -209,15 +207,9 @@ def tree_digest(project: Path) -> str:
 # ── gdapi_test bridge ──────────────────────────────────────────────────────
 
 
-@successful_wait("undo_bridge")
 def wait_for_test_result(env: dict, *, request_id: str = "", timeout: float = 10.0) -> dict:
-    """Wait for the fixture plugin's next-frame history result.
-
-    给定 `request_id` 时必须匹配该 id，重投命令后不会误读上一次的结果。结果读取容忍
-    插件用临时文件 + rename 发布时的 Windows 共享冲突（PermissionError）与半写状态。
-    """
+    """Wait for a complete fixture reply matching the current command."""
     result_path = Path(env["project"]) / ".godot" / "gdapi-test-result.json"
-    timeout = positive_seconds("GDAPI_E2E_UNDO_TIMEOUT_SECONDS", timeout)
     deadline = time.monotonic() + timeout
     last_error: OSError | ValueError | None = None
     while time.monotonic() < deadline:
@@ -233,19 +225,15 @@ def wait_for_test_result(env: dict, *, request_id: str = "", timeout: float = 10
     raise RuntimeError(f"gdapi_test plugin never produced a result (last error: {last_error})")
 
 
-def history_action(env: dict, action: str) -> dict:
-    """Run one editor undo/redo through the fixture plugin's file bridge.
-
-    命令完整写入同目录临时文件并关闭后才原子发布，编辑器不会读取/删除半写命令。
-    命令携带 `request_id`；插件对同一 id 只执行一次（重投只重发结果），因此编辑器
-    短暂卡顿或结果发布失败后的超时重投不会重复执行历史操作。
-    """
+def fixture_command(
+    env: dict, action: str, *, data: dict | None = None, timeout: float = 45.0,
+) -> dict:
+    """Atomically publish a command; replaying its request_id never repeats the action."""
     command_path = Path(env["project"]) / ".godot" / "gdapi-test-command.json"
     request_id = uuid.uuid4().hex
-    timeout = positive_seconds("GDAPI_E2E_UNDO_TIMEOUT_SECONDS", 10.0)
     last_error: RuntimeError | None = None
     temporary_path = command_path.with_name(f"gdapi-test-command-{request_id}.tmp")
-    command = json.dumps({"action": action, "request_id": request_id})
+    command = json.dumps({**(data or {}), "action": action, "request_id": request_id})
     try:
         for _attempt in range(3):
             try:
@@ -263,6 +251,13 @@ def history_action(env: dict, action: str) -> dict:
         temporary_path.unlink(missing_ok=True)
 
 
+@successful_wait("undo_bridge")
+def history_action(env: dict, action: str) -> dict:
+    return fixture_command(
+        env, action, timeout=positive_seconds("GDAPI_E2E_UNDO_TIMEOUT_SECONDS", 10.0),
+    )
+
+
 def editor_undo(env: dict) -> None:
     payload = history_action(env, "undo")
     assert payload.get("ok") is True, payload
@@ -272,7 +267,3 @@ def editor_redo(env: dict) -> None:
     payload = history_action(env, "redo")
     assert payload.get("ok") is True, payload
 
-
-def editor_clear_undo(env: dict) -> None:
-    payload = history_action(env, "clear_undo")
-    assert payload.get("ok") is True, payload

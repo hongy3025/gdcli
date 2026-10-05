@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const PathGuard := preload("res://addons/gdapi/runtime/path_guard.gd")
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
@@ -8,7 +8,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	assert_true(PathGuard.validate("res://", "read").ok, "project root can be read")
 	assert_eq(
 		PathGuard.validate("res://", "write").code,
@@ -87,7 +87,7 @@ func _init() -> void:
 		PathGuard.validate("res://a.txt", "execute").code, ErrorCodes.INVALID_PARAM, "unknown mode"
 	)
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_true(value: bool, context: String) -> void:

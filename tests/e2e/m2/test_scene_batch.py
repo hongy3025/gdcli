@@ -57,13 +57,12 @@ def read_open(env, scene, root, relative, property):
 
 
 def test_two_unopened_scenes_apply_reload_recover(m2_editor):
+    positions = [read_open(m2_editor, scene, name, "Target", "position") for scene, name in zip(SCENES, NAMES)]
+    shared = [read_open(m2_editor, scene, name, "Shared", "position") for scene, name in zip(SCENES, NAMES)]
     before = contents(m2_editor)
     result, plan = apply(m2_editor)
     assert contents(m2_editor) != before
-    assert [op["previous"] for op in plan["operations"]] == [
-        {"type": "Vector2", "value": [1.0, 2.0]},
-        {"type": "Vector2", "value": [5.0, 6.0]},
-    ]
+    assert [op["previous"] for op in plan["operations"]] == positions
     assert {scene["path"]: scene["sha256"] for scene in plan["scenes"]} == {
         scene: hashlib.sha256(content).hexdigest() for scene, content in zip(SCENES, before)
     }
@@ -90,19 +89,17 @@ def test_two_unopened_scenes_apply_reload_recover(m2_editor):
     for scene, name in zip(SCENES, NAMES):
         assert read_open(m2_editor, scene, name, "Target", "position") == {"type": "Vector2", "value": [90.0, 80.0]}
         assert read_open(m2_editor, scene, name, "Collision", "shape") == {"type": "Resource", "value": ROOT + "/shape.tres"}
-    assert read_open(m2_editor, SCENES[0], NAMES[0], "Shared", "position") == {"type": "Vector2", "value": [11.0, 12.0]}
-    assert read_open(m2_editor, SCENES[1], NAMES[1], "Shared", "position") == {"type": "Vector2", "value": [21.0, 22.0]}
+    assert read_open(m2_editor, SCENES[0], NAMES[0], "Shared", "position") == shared[0]
+    assert read_open(m2_editor, SCENES[1], NAMES[1], "Shared", "position") == shared[1]
     recovered = exec_ok(m2_editor, "scene/batch/recover", {"operation_id": result["operation_id"]})
     assert recovered["restored"] == 2
     assert contents(m2_editor) == before
-    assert read_open(m2_editor, SCENES[0], NAMES[0], "Target", "position") == {
-        "type": "Vector2",
-        "value": [1.0, 2.0],
-    }
+    assert read_open(m2_editor, SCENES[0], NAMES[0], "Target", "position") == positions[0]
     assert exec_error(m2_editor, "scene/batch/recover", {"operation_id": result["operation_id"]})["code"] == "conflict"
 
 
 def test_single_scene_multi_property_and_instance_override(m2_editor):
+    source_position = read_open(m2_editor, ROOT + "/base.tscn", "Shared", "Nested", "position")
     body = request(scenes=[SCENES[0]], operations=[
         {"property": "position", "value": {"type": "Vector2", "value": [7, 8]}},
         {"property": "rotation", "value": 0.5},
@@ -118,7 +115,7 @@ def test_single_scene_multi_property_and_instance_override(m2_editor):
     assert read_open(m2_editor, SCENES[0], NAMES[0], "Target", "rotation") == pytest.approx(0.5)
     assert read_open(m2_editor, SCENES[0], NAMES[0], "Shared/Nested", "position") == {"type": "Vector2", "value": [31.0, 32.0]}
     # The source instance remains untouched, not flattened/replaced by the override.
-    assert read_open(m2_editor, ROOT + "/base.tscn", "Shared", "Nested", "position") == {"type": "Vector2", "value": [3.0, 4.0]}
+    assert read_open(m2_editor, ROOT + "/base.tscn", "Shared", "Nested", "position") == source_position
     references = exec_ok(m2_editor, "scene/project/references", {"scenes": [SCENES[0]]})["items"]
     assert any(row["kind"] == "instance" and row["node_path"] == "Shared" and row["target"] == ROOT + "/base.tscn" for row in references)
     assert any(row["kind"] == "connection" and row["signal"] == "visibility_changed" and row["target"] == "Twin" for row in references)
@@ -156,7 +153,7 @@ def test_plan_hash_binds_parameters_external_edits_and_dependencies(m2_editor):
     assert contents(m2_editor) == external
     second.write_bytes(before[1])
     shape = disk(m2_editor, ROOT + "/shape.tres")
-    shape.write_text(shape.read_text(encoding="utf-8").replace("12, 18", "13, 18"), encoding="utf-8")
+    shape.write_bytes(shape.read_bytes() + b"\n; external dependency edit\n")
     assert exec_error(m2_editor, "scene/batch/apply", bound)["code"] == "conflict"
     assert contents(m2_editor) == before
 
@@ -220,19 +217,18 @@ def test_unsaved_open_scene_is_rejected_without_losing_editor_changes(m2_editor)
         assert exec_error(m2_editor, "scene/batch/apply", bound)["code"] == "conflict"
         assert contents(m2_editor) == before
         assert exec_ok(m2_editor, "node/property/get", {"node_path": "/root/BatchB/Target", "property": "position"})["value"] == {"type": "Vector2", "value": [123.0, 456.0]}
-        # Restore the editor value before closing, so no modal save prompt is needed.
-        exec_ok(m2_editor, "node/property/set", {"node_path": "/root/BatchB/Target", "property": "position", "value": {"type": "Vector2", "value": [5, 6]}})
+        # Commit the scenario-owned edit; the next offline transaction observes it.
         exec_ok(m2_editor, "scene/current/save")
     finally:
         exec_ok(m2_editor, "scene/close", {"path": SCENES[1]})
 
 
 def test_project_scan_reports_real_nodepath_connection_instance_dependencies(m2_editor):
-    nodes = exec_ok(m2_editor, "scene/project/find_nodes", {"root": ROOT, "class": "RemoteTransform2D"})["items"]
+    nodes = exec_ok(m2_editor, "scene/project/find_nodes", {"scenes": SCENES, "class": "RemoteTransform2D"})["items"]
     assert {(row["path"], row["node_path"], row["class"]) for row in nodes} == {(scene, "Reference", "RemoteTransform2D") for scene in SCENES}
-    references = exec_ok(m2_editor, "scene/project/references", {"root": ROOT})["items"]
+    references = exec_ok(m2_editor, "scene/project/references", {"scenes": SCENES})["items"]
     assert {(row["path"], row["value"], row["target"]) for row in references if row["kind"] == "property" and row["property"] == "remote_path"} == {(SCENES[0], "../Twin", "Twin"), (SCENES[1], "../Collision", "Collision")}
-    target_references = exec_ok(m2_editor, "scene/project/references", {"root": ROOT, "node_path": "Target"})["items"]
+    target_references = exec_ok(m2_editor, "scene/project/references", {"scenes": SCENES, "node_path": "Target"})["items"]
     assert any(row["kind"] == "connection" and row["node_path"] == "Target" and row["target"] == "Twin" for row in target_references)
     dependencies = exec_ok(m2_editor, "scene/project/dependencies", {"scenes": SCENES})["items"]
     assert {(row["path"], row["dependency"]) for row in dependencies} == {(scene, ROOT + suffix) for scene in SCENES for suffix in ["/base.tscn", "/shape.tres"]}
@@ -274,12 +270,13 @@ def test_recovery_backup_corruption_does_not_restore_first_scene(m2_editor):
 
 
 def test_scan_excludes_generated_subdirectories(m2_editor):
+    before = exec_ok(m2_editor, "scene/project/find_nodes", {"root": ROOT, "selector": {"name": "Target"}})["items"]
     generated = disk(m2_editor, ROOT + "/.generated")
-    generated.mkdir()
+    generated.mkdir(exist_ok=True)
     # A corrupt generated scene must never be loaded or reported as a match.
     (generated / "broken.tscn").write_text("not a PackedScene", encoding="utf-8")
     rows = exec_ok(m2_editor, "scene/project/find_nodes", {"root": ROOT, "selector": {"name": "Target"}})
-    assert {row["path"] for row in rows["items"]} == set(SCENES)
+    assert rows["items"] == before
     assert any(ROOT + "/.generated" in warning for warning in rows["warnings"])
 
 

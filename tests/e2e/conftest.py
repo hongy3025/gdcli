@@ -11,10 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -36,7 +33,6 @@ from e2e.shared_fixture import (  # noqa: E402,F401 — re-export
     gdcli_expect_failure,
     m2_editor,
     m3_editor,
-    m3_lifecycle,
     m3_running,
     m4_env,
     m5_editor,
@@ -45,10 +41,16 @@ from e2e.shared_fixture import (  # noqa: E402,F401 — re-export
     m6_editor_eval,
     m6_editor_network,
     m6_editor_process,
-    reset_shared_state,
     teardown_environment,
 )
-from e2e.timing import TIMINGS, positive_seconds, validate_configuration, write_report
+from e2e.timing import (
+    TIMINGS, positive_seconds, successful_wait, validate_configuration, write_report,
+)
+from e2e.m2.helpers import fixture_command
+
+_CASE_REPORTS: dict[str, dict] = {}
+_DESELECTED_CASES: list[str] = []
+_SESSION_STARTED = 0.0
 
 
 def pytest_configure(config):
@@ -58,6 +60,33 @@ def pytest_configure(config):
         raise pytest.UsageError(str(exc)) from exc
     TIMINGS.samples.clear()
     TIMINGS.enabled = False
+
+    _CASE_REPORTS.clear()
+    _DESELECTED_CASES.clear()
+
+
+def pytest_sessionstart(session):
+    del session
+    global _SESSION_STARTED
+    _SESSION_STARTED = time.monotonic()
+
+
+def pytest_deselected(items):
+    _DESELECTED_CASES.extend(item.nodeid for item in items)
+
+
+def pytest_runtest_logreport(report):
+    row = _CASE_REPORTS.setdefault(
+        report.nodeid,
+        {"nodeid": report.nodeid, "status": "passed", "setup_seconds": 0.0,
+         "call_seconds": 0.0, "teardown_seconds": 0.0},
+    )
+    row[f"{report.when}_seconds"] = report.duration
+    row["total_seconds"] = sum(row[f"{phase}_seconds"] for phase in ("setup", "call", "teardown"))
+    if report.failed:
+        row["status"] = "failed"
+    elif report.skipped and row["status"] != "failed":
+        row["status"] = "skipped"
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -71,7 +100,11 @@ def pytest_sessionfinish(session, exitstatus):
     path = Path(os.environ.get("GDAPI_E2E_TIMING_JSON", ".pytest-artifacts/wait-timings.json"))
     if not path.is_absolute():
         path = Path(session.config.rootpath) / path
-    write_report(path, exitstatus=int(exitstatus), editor_starts=int(EDITOR_START_COUNTER["starts"]))
+    write_report(
+        path, exitstatus=int(exitstatus), editor_starts=int(EDITOR_START_COUNTER["starts"]),
+        cases=list(_CASE_REPORTS.values()), deselected=_DESELECTED_CASES,
+        session_seconds=time.monotonic() - _SESSION_STARTED,
+    )
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -101,79 +134,8 @@ def pytest_collection_modifyitems(items):
     items[:] = reordered
 
 
-def parse_godot_version(output: str) -> tuple[int, int, int]:
-    match = re.search(r"(?:v)?(\d+)\.(\d+)(?:\.(\d+))?", output)
-    if match is None:
-        raise RuntimeError(f"Godot 4.7.x is required; cannot parse version: {output!r}")
-    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
-
-
-def require_godot_47(godot_bin: str) -> tuple[int, int, int]:
-    try:
-        result = subprocess.run(
-            [godot_bin, "--version"],
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=15,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"Godot 4.7.x is required: {exc}") from exc
-    version = parse_godot_version(result.stdout or result.stderr)
-    if version[:2] != (4, 7):
-        raise RuntimeError(
-            f"Godot 4.7.x is required; found {version[0]}.{version[1]}.{version[2]}"
-        )
-    return version
-
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent.parent
-
-
-def _gdcli_bin() -> Path:
-    name = "gdcli.exe" if sys.platform == "win32" else "gdcli"
-    return _repo_root() / "target" / "debug" / name
-
-
-def _run_gdcli(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [str(_gdcli_bin()), "--json", *args],
-        capture_output=True, encoding="utf-8", errors="replace",
-    )
-
-
-def _fixture_runtime_root(fixture: Path) -> Path:
-    fixture = fixture.resolve()
-    godot_dir = (fixture / ".godot").resolve()
-    if godot_dir.parent != fixture or godot_dir.name != ".godot":
-        raise RuntimeError(f"unexpected fixture metadata root: {godot_dir}")
-    runtime_root = (godot_dir / "gdapi_runtime").resolve()
-    if runtime_root.parent != godot_dir or runtime_root.name != "gdapi_runtime":
-        raise RuntimeError(f"unexpected fixture runtime root: {runtime_root}")
-    return runtime_root
-
-
-def _cleanup_fixture_runtime(fixture: Path) -> None:
-    runtime_root = _fixture_runtime_root(fixture)
-    if runtime_root.exists():
-        shutil.rmtree(runtime_root)
-
-
-def _teardown_godot_fixture(godot: subprocess.Popen, fixture: Path) -> None:
-    try:
-        godot.terminate()
-        try:
-            godot.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            godot.kill()
-            godot.wait(timeout=10)
-    finally:
-        _cleanup_fixture_runtime(fixture)
-
-
 def gdcli_json(env: dict, *args: str) -> dict:
-    """Run gdcli --json and return parsed response (legacy helper)."""
+    """Run the actual CLI and parse its JSON response."""
     result = subprocess.run(
         [str(env["gdcli"]), "--json", *args],
         capture_output=True, encoding="utf-8", errors="replace",
@@ -195,28 +157,7 @@ def gdcli_expect_fail(env: dict, *args: str) -> int:
     return result.returncode
 
 
-def run_godot_script(
-    env: dict,
-    script: str,
-    *,
-    editor: bool = False,
-    extra_env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess:
-    """Run a Godot GDScript test through --headless --script."""
-    command = [env["godot_bin"], "--headless", "--path", str(env["project"])]
-    if editor:
-        command.append("--editor")
-    command += ["--script", script]
-    # Use isolated APPDATA/LOCALAPPDATA (same as the live editor) so that
-    # Godot can write app_userdata without crashing (SIGSEGV on dir-creation
-    # failure in headless mode).
-    process_env = build_editor_environment(env["project"])
-    process_env.update(extra_env or {})
-    return subprocess.run(
-        command,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        env=process_env,
-        timeout=45,
-    )
+@successful_wait("native_suite")
+def run_native_suite(env: dict, script: str) -> dict:
+    """Execute a native GDScript suite inside the already running editor."""
+    return fixture_command(env, "run_suite", data={"path": script}, timeout=45.0)

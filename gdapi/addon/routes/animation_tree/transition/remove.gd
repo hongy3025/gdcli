@@ -20,7 +20,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("删除动画状态图 transition/remove")
 		. mutates()
-		. param("tree_path", "String", true, "场景内AnimationTree路径", "")
+		. param("tree_path", "String", true, "场景内相对路径或 /root/<场景根>/... 绝对节点路径", "")
 		. param("from", "String", true, "起点状态", "")
 		. param("to", "String", true, "终点状态", "")
 		. example('{"tree_path": "AnimationTree", "from": "Start", "to": "idle"}')

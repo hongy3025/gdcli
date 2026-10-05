@@ -14,6 +14,8 @@ const AtomicFile := preload("res://addons/gdapi/runtime/atomic_file.gd")
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 
+const SCENE_TABS_CONTAINER_CLASS := "EditorSceneTabs"
+
 const ResourceEditor := preload("res://addons/gdapi/runtime/services/resource_editor.gd")
 const ScriptAnalysis := preload(
 	"res://addons/gdapi/runtime/services/diagnostics_script_analysis.gd"
@@ -45,8 +47,9 @@ static func is_open(path: String) -> bool:
 
 ## 当前场景是否有未保存改动。以编辑器自身记录为准。
 ##
-## 编辑器的 open/unsaved 路径在 save-as 后可能仍是旧路径；按 tab 索引读取
-## unsaved 标记，并用实际 scene root 识别当前场景。空路径的新场景也必须走相同映射。
+## 逐 tab 的脏标记只在场景 tab 标题里暴露（见 _unsaved_flags）：save-as 后编辑器登记的
+## 打开路径仍是旧路径，同一个路径可以同时属于脏的 save-as tab 和干净的重开 tab，因此
+## 不能用路径归属判断，必须按 tab 索引用实际 scene root 识别当前场景。
 static func is_current_scene_unsaved() -> bool:
 	var root := current_root()
 	if root == null:
@@ -62,12 +65,70 @@ static func is_current_scene_unsaved() -> bool:
 static func _root_tab_is_unsaved(
 	target_root: Node, roots: Array, open_paths: PackedStringArray, unsaved_paths: PackedStringArray
 ) -> bool:
+	var flagged := _unsaved_flags(open_paths, unsaved_paths)
 	for root_index in roots.size():
 		if roots[root_index] != target_root:
 			continue
 		var open_index := _open_path_index_for_root(root_index, roots, open_paths)
-		return open_index >= 0 and open_paths[open_index] in unsaved_paths
+		return flagged.has(open_index)
 	return false
+
+
+## 编辑器只在场景 tab 标题里暴露“逐 tab 未保存”状态：
+## EditorSceneTabs 用 UndoRedoManager::is_history_unsaved 渲染 "(*)" 后缀，而该调用
+## 未绑定给脚本；get_unsaved_scenes() 只返回经过过滤的路径，save-as 后同一路径可能同时
+## 属于脏的 save-as tab 和干净的重开 tab，按路径归属会误判。这里优先读取真实 tab 控件。
+static func _unsaved_flags(
+	open_paths: PackedStringArray, unsaved_paths: PackedStringArray
+) -> Dictionary:
+	var from_tabs := _tab_unsaved_flags()
+	if from_tabs is Dictionary:
+		return from_tabs
+	return _unsaved_indexes(open_paths, unsaved_paths)
+
+
+## 按场景 tab 索引读取未保存标记；控件不可用时返回 null，由调用方回退。
+static func _tab_unsaved_flags() -> Variant:
+	var bar := _scene_tabs_bar()
+	if bar == null:
+		return null
+	var flagged := {}
+	for index in bar.get_tab_count():
+		if bar.get_tab_title(index).ends_with("(*)"):
+			flagged[index] = true
+	return flagged
+
+
+## 定位编辑器场景 tab 控件；tab 数量必须与编辑器登记的打开场景数一致。
+static func _scene_tabs_bar() -> TabBar:
+	if not Engine.is_editor_hint():
+		return null
+	var base := EditorInterface.get_base_control()
+	if base == null:
+		return null
+	var expected := EditorInterface.get_open_scenes().size()
+	for container in base.find_children("*", SCENE_TABS_CONTAINER_CLASS, true, false):
+		for candidate in container.find_children("*", "TabBar", true, false):
+			var bar: TabBar = candidate
+			if bar.get_tab_count() == expected:
+				return bar
+	return null
+
+
+## 把"未保存场景路径"解码成 tab 索引。get_unsaved_scenes() 是按 tab 顺序过滤出的
+## 有序子序列，因此重复路径必须逐个匹配，不能用路径归属判断。
+static func _unsaved_indexes(
+	open_paths: PackedStringArray, unsaved_paths: PackedStringArray
+) -> Dictionary:
+	var flagged := {}
+	var next := 0
+	for index in open_paths.size():
+		if next >= unsaved_paths.size():
+			break
+		if open_paths[index] == unsaved_paths[next]:
+			flagged[index] = true
+			next += 1
+	return flagged
 
 
 ## get_open_scene_roots() omits null roots, while get_open_scenes() preserves their empty paths.
@@ -105,6 +166,7 @@ static func _scene_tab_status_for(
 ) -> Dictionary:
 	var opened := false
 	var unsaved := false
+	var flagged := _unsaved_flags(open_paths, unsaved_paths)
 	for root_index in roots.size():
 		var root: Node = roots[root_index]
 		if root == null or root.scene_file_path != path:
@@ -113,7 +175,7 @@ static func _scene_tab_status_for(
 		if open_index < 0:
 			continue
 		opened = true
-		unsaved = open_paths[open_index] in unsaved_paths
+		unsaved = flagged.has(open_index)
 	return {"open": opened, "unsaved": unsaved}
 
 
@@ -204,13 +266,24 @@ static func save_scene(path: String) -> Dictionary:
 	var persisted := ResourceLoader.load(
 		target, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE_DEEP
 	)
-	if (
-		verification.pack_error != OK
-		or not persisted is PackedScene
-		or not ResourceEditor._equivalent(_scene_contents(expected), _scene_contents(persisted))
-		or root.scene_file_path != target
-		or is_current_scene_unsaved()
-	):
+	var contents_match: bool = (
+		verification.pack_error == OK
+		and persisted is PackedScene
+		and ResourceEditor._equivalent(_scene_contents(expected), _scene_contents(persisted))
+	)
+	var still_unsaved := is_current_scene_unsaved()
+	if not contents_match or root.scene_file_path != target or still_unsaved:
+		# Capture the real failed boundary before rollback changes path/dirty state.
+		var details := {
+			"pack_error": verification.pack_error,
+			"read_back_packed_scene": persisted is PackedScene,
+			"contents_match": contents_match,
+			"current_path": root.scene_file_path,
+			"target": target,
+			"unsaved": still_unsaved,
+			"open_paths": EditorInterface.get_open_scenes(),
+			"unsaved_paths": EditorInterface.get_unsaved_scenes(),
+		}
 		var restored := ResourceEditor._restore_file(target, prepared.existed, prepared.before)
 		restored = (
 			ResourceEditor._restore_file(target + ".uid", prepared.uid_existed, prepared.uid_before)
@@ -219,7 +292,7 @@ static func save_scene(path: String) -> Dictionary:
 		root.scene_file_path = original_path
 		if was_unsaved:
 			EditorInterface.mark_scene_as_unsaved()
-		var message := "scene save/read-back failed"
+		var message := "scene save/read-back failed: " + JSON.stringify(details)
 		if not restored:
 			message += "; disk rollback failed"
 		return _save_failure(target, message)

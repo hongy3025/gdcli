@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
-
 from .helpers import exec_error, exec_ok
 
 
-def test_selection_round_trip(m2_editor):
+def test_selection_round_trip(m2_editor, m2_main):
     result = exec_ok(m2_editor, "editor/selection/set", {
         "node_paths": ["/root/Main/Player", "/root/Main/Target"]
     })
@@ -21,7 +19,7 @@ def test_selection_round_trip(m2_editor):
     )
 
 
-def test_selection_atomically_rejects_missing(m2_editor):
+def test_selection_atomically_rejects_missing(m2_editor, m2_main):
     exec_ok(m2_editor, "editor/selection/set", {
         "node_paths": ["/root/Main/Player"]
     })
@@ -44,7 +42,7 @@ def test_main_screen_allowlist(m2_editor):
     )["code"] == "invalid_param"
 
 
-def test_node_select_routes_through_selection_service(m2_editor):
+def test_node_select_routes_through_selection_service(m2_editor, m2_main):
     result = exec_ok(m2_editor, "node/select", {
         "node_paths": ["/root/Main/Player"]
     })

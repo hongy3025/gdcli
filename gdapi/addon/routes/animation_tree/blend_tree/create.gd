@@ -16,7 +16,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("编辑真实动画混合树 create")
 		. mutates()
-		. param("tree_path", "String", true, "场景内AnimationTree路径", "")
+		. param("tree_path", "String", true, "场景内相对路径或 /root/<场景根>/... 绝对节点路径", "")
 		. example('{"tree_path": "AnimationTree"}')
 		. returns("result", {"undoable": "bool", "changed": "bool"})
 	)

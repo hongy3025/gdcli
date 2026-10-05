@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const Guard := preload("res://addons/gdapi/runtime/services/network_target_guard.gd")
 const NetworkService := preload("res://addons/gdapi/runtime/services/network_service.gd")
@@ -8,14 +8,14 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	_test_scheme_allowlist()
 	_test_structural_rejections()
 	_test_origin_components()
 	_test_redirect_uri_references()
 	_test_equivalent_ipv6_origins()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func _test_scheme_allowlist() -> void:

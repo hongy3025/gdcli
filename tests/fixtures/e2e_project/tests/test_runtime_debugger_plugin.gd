@@ -4,7 +4,7 @@
 ## instantiate the narrow production bridge used by that plugin instead.
 
 @tool
-extends SceneTree
+extends RefCounted
 
 const Broker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 const DebuggerBridge := preload("res://addons/gdapi/runtime/runtime_debugger_bridge.gd")
@@ -24,7 +24,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	print("Running GdApiRuntimeDebugger behavioral tests...\n")
 
 	test_registration_calls_add_and_remove_once()
@@ -34,7 +34,7 @@ func _init() -> void:
 	test_hello_requires_generation_metadata()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual, expected, context: String = "") -> void:

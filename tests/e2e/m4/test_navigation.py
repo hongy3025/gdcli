@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
-from .helpers import command_doc, exec_error, exec_ok, run_domain, save_reopen, stop_domain
+from e2e.m3.conftest import wait_stopped
+
+from .helpers import command_doc, editor_undo, exec_error, exec_ok, select_domain
 
 
 NAVIGATION_ROUTES = {
@@ -12,6 +14,7 @@ NAVIGATION_ROUTES = {
 
 REGION = "/root/NavigationDomain/Region"
 EMPTY_REGION = "/root/NavigationDomain/EmptyRegion"
+RUNTIME_REGION = "/root/RuntimeMain/NavigationDomain/Region"
 
 
 def test_navigation_routes_are_discoverable_and_documented(m4_env):
@@ -34,22 +37,12 @@ def _polygon_from_disk(env, path):
 
 
 def test_navigation_regions_bake_to_project_local_resource(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/navigation.tscn"})
-    regions = exec_ok(m4_env, "navigation/region/list")
-    assert regions["regions"] == [
-        {
-            "path": EMPTY_REGION,
-            "class": "NavigationRegion2D",
-            "vertex_count": 0,
-            "polygon_count": 0,
-        },
-        {
-            "path": REGION,
-            "class": "NavigationRegion2D",
-            "vertex_count": 4,
-            "polygon_count": 1,
-        },
-    ]
+    select_domain(m4_env, "navigation")
+    before = exec_ok(m4_env, "navigation/region/list")["regions"]
+    regions = {region["path"]: region for region in before}
+    assert regions[EMPTY_REGION]["vertex_count"] == 0
+    assert regions[REGION]["vertex_count"] == 4
+    assert regions[REGION]["polygon_count"] == 1
 
     target = "res://navigation/baked_test.tres"
     baked = exec_ok(m4_env, "navigation/mesh/bake", {
@@ -65,19 +58,13 @@ def test_navigation_regions_bake_to_project_local_resource(m4_env):
     assert baked["polygon_count"] == stored["polygon_count"] == 4
 
     # 烘焙不改写当前场景中的源多边形。
-    assert exec_ok(m4_env, "navigation/region/list")["regions"][1] == {
-        "path": REGION,
-        "class": "NavigationRegion2D",
-        "vertex_count": 4,
-        "polygon_count": 1,
-    }
+    assert exec_ok(m4_env, "navigation/region/list")["regions"] == before
 
     overwritten = exec_ok(m4_env, "navigation/mesh/bake", {
         "region_path": REGION, "path": target,
     })
     assert overwritten["path"] == target
 
-    save_reopen(m4_env, "res://scenes/navigation.tscn")
     reloaded = _polygon_from_disk(m4_env, target)
     assert reloaded["class"] == "NavigationPolygon"
     assert reloaded["vertex_count"] == 8
@@ -85,7 +72,7 @@ def test_navigation_regions_bake_to_project_local_resource(m4_env):
 
 
 def test_navigation_bake_reflects_current_source_geometry(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/navigation.tscn"})
+    select_domain(m4_env, "navigation")
     before_path = "res://navigation/source_before.tres"
     after_path = "res://navigation/source_after.tres"
 
@@ -95,24 +82,33 @@ def test_navigation_bake_reflects_current_source_geometry(m4_env):
     before_info = _polygon_from_disk(m4_env, before_path)
     assert before["polygon_count"] == before_info["polygon_count"] == 4
 
-    # 放大障碍物（源几何）后重新烘焙，产物必须随之变化。
+    # Change only this scenario's obstacle edit, then undo precisely that edit.
+    shape_path = REGION + "/Obstacle/ObstacleShape"
+    baseline = exec_ok(m4_env, "node/property/get", {
+        "node_path": shape_path, "property": "scale",
+    })["value"]
     exec_ok(m4_env, "node/property/set", {
-        "node_path": REGION + "/Obstacle/ObstacleShape",
-        "property": "scale",
+        "node_path": shape_path, "property": "scale",
         "value": {"type": "Vector2", "value": [6, 1]},
     })
-    after = exec_ok(m4_env, "navigation/mesh/bake", {
-        "region_path": REGION, "path": after_path,
-    })
-    after_info = _polygon_from_disk(m4_env, after_path)
-    assert after["polygon_count"] == after_info["polygon_count"] == 3
-    assert after_info["polygon_count"] != before_info["polygon_count"]
-    assert after_info["vertices"] != before_info["vertices"]
+    try:
+        after = exec_ok(m4_env, "navigation/mesh/bake", {
+            "region_path": REGION, "path": after_path,
+        })
+        after_info = _polygon_from_disk(m4_env, after_path)
+        assert after["polygon_count"] == after_info["polygon_count"] == 3
+        assert after_info["polygon_count"] != before_info["polygon_count"]
+        assert after_info["vertices"] != before_info["vertices"]
+    finally:
+        editor_undo(m4_env)
+    assert exec_ok(m4_env, "node/property/get", {
+        "node_path": shape_path, "property": "scale",
+    })["value"] == baseline
 
 
 def test_navigation_bake_failures_leave_no_output(m4_env):
     project = Path(m4_env["project"])
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/navigation.tscn"})
+    select_domain(m4_env, "navigation")
 
     wrong_extension = exec_error(m4_env, "navigation/mesh/bake", {
         "region_path": REGION, "path": "res://navigation/bake_wrong.txt",
@@ -140,22 +136,28 @@ def test_navigation_bake_failures_leave_no_output(m4_env):
     assert not (project / "navigation" / "empty_bake.tres").exists()
 
 
-def test_navigation_runtime_round_trip_is_2d_and_cleans_up(m4_env):
-    run_domain(m4_env, "navigation")
+def test_navigation_runtime_round_trip_is_2d(m3_running):
+    m4_env = m3_running
     path = exec_ok(m4_env, "navigation/path/get", {
-        "region_path": REGION,
+        "region_path": RUNTIME_REGION,
         "from": {"x": 0, "y": 0}, "to": {"x": 100, "y": 0},
     })
     assert path["points"]
     assert exec_ok(m4_env, "navigation/agent/target", {
-        "agent_path": "/root/NavigationDomain/Agent", "target": {"x": 100, "y": 0},
+        "agent_path": "/root/RuntimeMain/NavigationDomain/Agent", "target": {"x": 100, "y": 0},
     })["target"] == {"type": "Vector2", "value": [100.0, 0.0]}
     assert exec_error(m4_env, "navigation/path/get", {
-        "region_path": REGION,
+        "region_path": RUNTIME_REGION,
         "from": {"x": 0, "y": 0, "z": 0}, "to": {"x": 1, "y": 0},
     })["code"] == "not_supported"
-    stop_domain(m4_env, "navigation")
-    assert exec_error(m4_env, "navigation/path/get", {
-        "region_path": REGION,
+
+
+def test_navigation_runtime_queries_require_running_game(m3_running):
+    """Stopping the actual shared game must reject subsequent runtime queries."""
+    exec_ok(m3_running, "project/stop")
+    m3_running["game_attached"] = False
+    assert wait_stopped(m3_running, timeout=15.0)["pending"] == 0
+    assert exec_error(m3_running, "navigation/path/get", {
+        "region_path": RUNTIME_REGION,
         "from": {"x": 0, "y": 0}, "to": {"x": 1, "y": 0},
     })["code"] in {"conflict", "not_connected", "timeout"}

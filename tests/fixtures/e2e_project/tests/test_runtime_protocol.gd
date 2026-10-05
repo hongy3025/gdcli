@@ -7,7 +7,7 @@
 ## - 拒绝 eval/process-run/network/http_request 等保留 op
 
 @tool
-extends SceneTree
+extends RefCounted
 
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
@@ -15,7 +15,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	print("Running GdApiRuntimeProtocol tests...\n")
 
 	_test_request_message_shape()
@@ -38,10 +38,7 @@ func _init() -> void:
 	_test_versioned_builders_preserve_version()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	if failed > 0:
-		quit(1)
-	else:
-		quit(0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual, expected, context: String = "") -> void:

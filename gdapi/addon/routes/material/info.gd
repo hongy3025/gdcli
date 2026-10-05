@@ -18,7 +18,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("查询节点材质")
-		. param("node_path", "String", true, "目标节点", "")
+		. param("node_path", "String", true, "目标节点（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. example('{"node_path":"Sprite"}')
 		. returns(
 			"材质信息",

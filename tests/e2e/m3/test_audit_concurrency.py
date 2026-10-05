@@ -9,7 +9,8 @@ from .conftest import exec_error, exec_ok, wait_for
 
 def test_concurrent_runtime_mutations_keep_one_final_audit_each(m3_running):
     env = m3_running
-    exec_ok(env, "gdapi/audit/clear")
+    baseline = exec_ok(env, "gdapi/audit/list", {"limit": 1000})["entries"]
+    since = max((entry["seq"] for entry in baseline), default=0)
     path = "/root/RuntimeMain/ProbeTarget"
     before = exec_ok(env, "runtime/node/get", {"node_path": path, "property": "counter"})["value"]
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -35,7 +36,7 @@ def test_concurrent_runtime_mutations_keep_one_final_audit_each(m3_running):
     })["value"] == before + 5)
     after = exec_ok(env, "runtime/node/get", {"node_path": path, "property": "counter"})["value"]
     assert after == before + 5
-    entries = exec_ok(env, "gdapi/audit/list", {"limit": 1000})["entries"]
+    entries = exec_ok(env, "gdapi/audit/list", {"since": since, "limit": 1000})["entries"]
     calls = [entry for entry in entries if entry["route"] == "runtime/node/call"]
     assert len(calls) == 2, calls
     assert all(entry["ok"] is True and entry["safety"] == "runtime" for entry in calls), calls

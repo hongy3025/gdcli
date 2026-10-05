@@ -1,50 +1,80 @@
 import os
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
-from .conftest import (
-    assert_snapshot_restored,
-    exec_error,
-    exec_ok,
-    m5_editor,
-    project_snapshot,
-    restore_snapshot,
-)
+from .conftest import exec_error, exec_ok
 
 
-def test_project_config_round_trip_restores_snapshot(m5_editor):
-    before = project_snapshot(m5_editor)
-    exec_ok(m5_editor, "project/settings/set", {
-        "name": "application/config/m5_test_value", "value": 42,
-    })
-    exec_ok(m5_editor, "project/input_map/action/add", {"action": "audit_jump"})
-    exec_ok(m5_editor, "project/autoload/add", {
-        "name": "AuditAuto", "path": "res://fixtures/state.gd",
-    })
-    assert exec_ok(m5_editor, "project/settings/get", {
-        "name": "application/config/m5_test_value",
-    })["value"] == 42
-    assert any(item["action"] == "audit_jump" for item in exec_ok(
+@pytest.fixture()
+def owned_setting(m5_editor):
+    """Remember and undo only the settings explicitly claimed by this scenario."""
+    prior = {}
+
+    def claim(name):
+        if name not in prior:
+            names = exec_ok(m5_editor, "project/settings/list", {"filter": name})["items"]
+            prior[name] = (
+                name in names,
+                exec_ok(m5_editor, "project/settings/get", {"name": name})["value"]
+                if name in names else None,
+            )
+        return name
+
+    yield claim
+    for name, (exists, value) in reversed(list(prior.items())):
+        if exists:
+            exec_ok(m5_editor, "project/settings/set", {"name": name, "value": value})
+        elif name in exec_ok(m5_editor, "project/settings/list", {"filter": name})["items"]:
+            exec_ok(m5_editor, "project/settings/reset", {"name": name})
+
+
+@pytest.fixture()
+def owned_autoload(m5_editor):
+    created = []
+
+    def add(name):
+        before = exec_ok(m5_editor, "project/autoload/list")["autoloads"]
+        assert all(item["name"] != name for item in before)
+        exec_ok(m5_editor, "project/autoload/add", {
+            "name": name, "path": "res://fixtures/state.gd",
+        })
+        created.append(name)
+
+    yield add
+    for name in reversed(created):
+        remaining = exec_ok(m5_editor, "project/autoload/list")["autoloads"]
+        if any(item["name"] == name for item in remaining):
+            exec_ok(m5_editor, "project/autoload/remove", {"name": name})
+
+
+def test_project_config_round_trip(m5_editor, owned_setting, input_action, owned_autoload):
+    name = owned_setting("application/config/m5_test_value")
+    exec_ok(m5_editor, "project/settings/set", {"name": name, "value": 42})
+    input_action("m5_round_trip_action")
+    owned_autoload("M5RoundTripAuto")
+    assert exec_ok(m5_editor, "project/settings/get", {"name": name})["value"] == 42
+    assert any(item["action"] == "m5_round_trip_action" for item in exec_ok(
         m5_editor, "project/input_map/list", {}
     )["items"])
-    assert any(item["name"] == "AuditAuto" for item in exec_ok(
+    assert any(item["name"] == "M5RoundTripAuto" for item in exec_ok(
         m5_editor, "project/autoload/list", {}
     )["autoloads"])
-    restore_snapshot(m5_editor)
-    assert_snapshot_restored(m5_editor, before)
 
 
-def test_project_config_removals_succeed_without_force(m5_editor):
-    before = project_snapshot(m5_editor)
+def test_project_config_removals_succeed_without_force(
+    m5_editor, owned_setting, input_action, owned_autoload,
+):
+    owned_setting("application/config/m5_remove_value")
     exec_ok(m5_editor, "project/settings/set", {
         "name": "application/config/m5_remove_value", "value": 7,
     })
     exec_ok(m5_editor, "project/settings/reset", {
         "name": "application/config/m5_remove_value",
     })
-    exec_ok(m5_editor, "project/input_map/action/add", {"action": "m5_remove_action"})
+    input_action("m5_remove_action")
     event = {"type": "InputEventKey", "keycode": 65}
     exec_ok(m5_editor, "project/input_map/bind", {
         "action": "m5_remove_action", "event": event,
@@ -53,9 +83,7 @@ def test_project_config_removals_succeed_without_force(m5_editor):
         "action": "m5_remove_action", "event": event,
     })
     exec_ok(m5_editor, "project/input_map/action/remove", {"action": "m5_remove_action"})
-    exec_ok(m5_editor, "project/autoload/add", {
-        "name": "M5RemoveAuto", "path": "res://fixtures/state.gd",
-    })
+    owned_autoload("M5RemoveAuto")
     exec_ok(m5_editor, "project/autoload/remove", {"name": "M5RemoveAuto"})
     settings = exec_ok(m5_editor, "project/settings/list", {
         "filter": "application/config/m5_remove_value",
@@ -65,28 +93,24 @@ def test_project_config_removals_succeed_without_force(m5_editor):
     assert all(item["action"] != "m5_remove_action" for item in actions["items"])
     autoloads = exec_ok(m5_editor, "project/autoload/list", {})
     assert all(item["name"] != "M5RemoveAuto" for item in autoloads["autoloads"])
-    restore_snapshot(m5_editor)
-    assert_snapshot_restored(m5_editor, before)
 
 
-def test_input_map_and_autoload_are_persisted_to_project_file(m5_editor):
-    """InputMap/Autoload 变更必须写进 project.godot，重载后才不会丢失。"""
-    before = project_snapshot(m5_editor)
-    exec_ok(m5_editor, "project/input_map/action/add", {"action": "m5_persist_action"})
-    exec_ok(m5_editor, "project/autoload/add", {
-        "name": "M5PersistAuto", "path": "res://fixtures/state.gd",
-    })
+def test_input_map_and_autoload_are_persisted_to_project_file(
+    m5_editor, input_action, owned_autoload,
+):
+    """Owned InputMap/Autoload changes must be persisted, not just live in memory."""
+    input_action("m5_persist_action")
+    owned_autoload("M5PersistAuto")
     text = (Path(m5_editor["project"]) / "project.godot").read_text(encoding="utf-8")
     assert "m5_persist_action" in text, text
     assert "M5PersistAuto" in text, text
-    restore_snapshot(m5_editor)
-    assert_snapshot_restored(m5_editor, before)
 
 
 
-def test_input_map_add_imports_preexisting_project_action(m5_editor, input_action):
+def test_input_map_add_imports_preexisting_project_action(m5_editor, input_action, owned_setting):
     """Adding a project-defined but not-yet-live action imports its exact state."""
     action = "m5_preexisting_input_action"
+    owned_setting("input/" + action)
     key_modifiers = (1 << 25) | (1 << 27)
     mouse_modifiers = 1 << 26
     stored_events = [
@@ -132,8 +156,9 @@ def test_input_map_add_imports_preexisting_project_action(m5_editor, input_actio
     assert re.search(r'"alt_pressed"\s*:\s*true', project_text)
 
 
-def test_input_map_add_rejects_unsupported_stored_event_without_mutation(m5_editor):
+def test_input_map_add_rejects_unsupported_stored_event_without_mutation(m5_editor, owned_setting):
     action = "m5_unsupported_project_action"
+    owned_setting("input/" + action)
     setting = {"deadzone": 0.41, "events": [{"type": "InputEventGesture"}]}
     exec_ok(m5_editor, "project/settings/set", {
         "name": "input/" + action, "value": setting,
@@ -162,52 +187,54 @@ def test_unwritable_project_file_fails_and_rolls_back(m5_editor, read_only_proje
     """
     project_godot = Path(m5_editor["project"]) / "project.godot"
     assert not os.access(project_godot, os.W_OK), "前置条件：project.godot 必须不可写"
-    before = project_snapshot(m5_editor)
     before_bytes = project_godot.read_bytes()
+    suffix = uuid4().hex
+    setting_name = "application/config/m5_rollback_" + suffix
+    action_name = "m5_rollback_" + suffix
+    autoload_name = "M5Rollback" + suffix
+    before_settings = exec_ok(m5_editor, "project/settings/list", {"filter": setting_name})
+    before_actions = exec_ok(m5_editor, "project/input_map/list", {"filter": action_name})
+    before_autoloads = exec_ok(m5_editor, "project/autoload/list")["autoloads"]
 
     error = exec_error(m5_editor, "project/settings/set", {
-        "name": "application/config/m5_rollback_value", "value": 3,
+        "name": setting_name, "value": 3,
     })
     assert error["code"] == "godot_error", error
-    settings = exec_ok(m5_editor, "project/settings/list", {
-        "filter": "application/config/m5_rollback_value",
-    })
-    assert "application/config/m5_rollback_value" not in settings["items"], settings
+    assert exec_ok(m5_editor, "project/settings/list", {"filter": setting_name}) == before_settings
 
     error = exec_error(m5_editor, "project/input_map/action/add", {
-        "action": "m5_rollback_action",
+        "action": action_name,
     })
     assert error["code"] == "godot_error", error
-    actions = exec_ok(m5_editor, "project/input_map/list", {"filter": "m5_rollback_action"})
-    assert all(item["action"] != "m5_rollback_action" for item in actions["items"]), actions
+    assert exec_ok(m5_editor, "project/input_map/list", {"filter": action_name}) == before_actions
 
     error = exec_error(m5_editor, "project/autoload/add", {
-        "name": "M5RollbackAuto", "path": "res://fixtures/state.gd",
+        "name": autoload_name, "path": "res://fixtures/state.gd",
     })
     assert error["code"] == "godot_error", error
     autoloads = exec_ok(m5_editor, "project/autoload/list", {})["autoloads"]
-    assert all(item["name"] != "M5RollbackAuto" for item in autoloads), autoloads
+    assert autoloads == before_autoloads
 
     assert project_godot.read_bytes() == before_bytes
-    assert_snapshot_restored(m5_editor, before)
 
 
 @pytest.fixture()
-def input_action(m5_editor):
-    """创建 InputMap 动作，并在用例结束后从共享编辑器移除。
-
-    `m5_editor` 只恢复项目文件基线，共享编辑器的运行时 InputMap 不会随之回滚，
-    因此每个用例必须清理自己创建的动作，否则下一个用例会命中 "action already exists"。
-    """
+def input_action(m5_editor, owned_setting):
+    """Create and remove only this scenario's explicitly owned InputMap actions."""
     created: list[str] = []
 
     def _create(name: str, **body) -> None:
+        existing = exec_ok(m5_editor, "project/input_map/list", {"filter": name})["items"]
+        assert all(item["action"] != name for item in existing), existing
+        owned_setting("input/" + name)
         exec_ok(m5_editor, "project/input_map/action/add", {"action": name, **body})
         created.append(name)
 
     yield _create
     for name in reversed(created):
-        exec_ok(m5_editor, "project/input_map/action/remove", {"action": name})
+        remaining = exec_ok(m5_editor, "project/input_map/list", {"filter": name})["items"]
+        if any(item["action"] == name for item in remaining):
+            exec_ok(m5_editor, "project/input_map/action/remove", {"action": name})
 
 
 @pytest.mark.parametrize(("route", "keycode", "keys"), [

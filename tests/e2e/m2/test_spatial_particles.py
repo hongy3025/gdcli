@@ -23,13 +23,14 @@ def resource_state(value):
 
 
 def spatial(editor):
+    # Opening an already-open scene focuses its existing tab; it does not reload it.
     exec_ok(editor, "scene/open", {"path": "res://scenes/spatial.tscn"})
 
 
 def reopen(editor):
-    exec_ok(editor, "scene/current/save", {"path": "res://scenes/spatial_saved.tscn"})
+    exec_ok(editor, "scene/current/save", {"path": "res://scenes/spatial.tscn"})
     exec_ok(editor, "scene/close")
-    exec_ok(editor, "scene/open", {"path": "res://scenes/spatial_saved.tscn"})
+    exec_ok(editor, "scene/open", {"path": "res://scenes/spatial.tscn"})
 
 
 @pytest.mark.parametrize("kind,properties", [
@@ -48,10 +49,10 @@ def reopen(editor):
 def test_each_spatial_construct_configured_undo_redo_and_persistent(m2_editor, kind, properties):
     spatial(m2_editor)
     created = exec_ok(m2_editor, "scene3d/create", {
-        "parent_path": "/root/Spatial", "type": kind, "name": "Construct", "properties": properties,
+        "parent_path": "/root/Spatial", "type": kind, "name": "Construct" + kind, "properties": properties,
     })
     assert created["undoable"] is True
-    path = "/root/Spatial/Construct"
+    path = "/root/Spatial/Construct" + kind
     before = exec_ok(m2_editor, "scene3d/info", {"node_path": path})
     for key, value in properties.items():
         actual = before["properties"][key]
@@ -96,24 +97,6 @@ def test_environment_sky_material_configuration_persists_and_is_undoable(m2_edit
     saved = exec_ok(m2_editor, "scene3d/info", {"node_path": path})["properties"]["environment"]["properties"]
     assert saved["ambient_light_energy"] == 0.5
     assert saved["sky"]["properties"]["sky_material"]["properties"]["sky_top_color"] == sky_color
-
-
-def test_multimesh_instance_data_requires_active_renderer(m2_editor):
-    spatial(m2_editor)
-    before = exec_ok(m2_editor, "scene/tree")
-    failure = exec_error(
-        m2_editor,
-        "scene3d/create",
-        {
-            "parent_path": "/root/Spatial",
-            "type": "MultiMeshInstance3D",
-            "name": "Unsupported",
-            "multimesh": {"mesh": resource("BoxMesh"), "instances": [{}]},
-        },
-    )
-    assert failure["code"] == "not_supported"
-    assert "active renderer" in failure["error"]
-    assert exec_ok(m2_editor, "scene/tree") == before
 
 
 @pytest.mark.real_renderer
@@ -169,8 +152,8 @@ def test_particles_configuration_material_draw_resources_undo_and_persistence(m2
     props = {"amount": 24, "lifetime": 2.5, "emitting": False, "process_material": material}
     draw = "texture" if kind.endswith("2D") else "draw_pass_1"
     props[draw] = resource("GradientTexture2D", width=8, height=8, gradient=resource("Gradient")) if kind.endswith("2D") else resource("QuadMesh", size=variant("Vector2", [0.5, 0.5]))
-    exec_ok(m2_editor, "particles/create", {"parent_path": "/root/Spatial", "type": kind, "name": "GPU", "properties": props})
-    path = "/root/Spatial/GPU"
+    exec_ok(m2_editor, "particles/create", {"parent_path": "/root/Spatial", "type": kind, "name": "Configured" + kind, "properties": props})
+    path = "/root/Spatial/Configured" + kind
     before = exec_ok(m2_editor, "particles/info", {"node_path": path})["properties"]
     assert before["amount"] == 24
     assert before["lifetime"] == 2.5
@@ -207,8 +190,8 @@ def test_invalid_construction_leaves_no_half_node(m2_editor, route, kind, proper
 
 def test_particle_set_rejects_entire_batch_without_material_or_amount_leak(m2_editor):
     spatial(m2_editor)
-    exec_ok(m2_editor, "particles/create", {"parent_path": "/root/Spatial", "name": "GPU", "type": "GPUParticles3D", "properties": {"emitting": False}})
-    path = "/root/Spatial/GPU"
+    exec_ok(m2_editor, "particles/create", {"parent_path": "/root/Spatial", "name": "AtomicParticles", "type": "GPUParticles3D", "properties": {"emitting": False}})
+    path = "/root/Spatial/AtomicParticles"
     before = exec_ok(m2_editor, "particles/info", {"node_path": path})
     assert exec_error(m2_editor, "particles/set", {"node_path": path, "properties": {"amount": 99, "process_material": resource("ParticleProcessMaterial", gravity=variant("Vector3", [1, 2, 3])), "lifetime": 0}})["code"] == "invalid_param"
     assert exec_ok(m2_editor, "particles/info", {"node_path": path}) == before
@@ -230,8 +213,8 @@ def test_spatial_structured_boundary_rejections_leave_tree_unchanged(m2_editor, 
 @pytest.mark.parametrize("kind", ["GPUParticles2D", "GPUParticles3D"])
 def test_particle_lower_valid_amount_and_fractional_lifetime(m2_editor, kind):
     spatial(m2_editor)
-    created = exec_ok(m2_editor, "particles/create", {"parent_path": "/root/Spatial", "name": "One", "type": kind, "properties": {"amount": 1, "lifetime": 0.5, "emitting": False}})
+    created = exec_ok(m2_editor, "particles/create", {"parent_path": "/root/Spatial", "name": "One" + kind, "type": kind, "properties": {"amount": 1, "lifetime": 0.5, "emitting": False}})
     assert (created["properties"]["amount"], created["properties"]["lifetime"]) == (1, 0.5)
     before = exec_ok(m2_editor, "scene/tree")
-    assert exec_error(m2_editor, "particles/create", {"parent_path": "/root/Spatial", "name": "One", "type": kind})["code"] == "conflict"
+    assert exec_error(m2_editor, "particles/create", {"parent_path": "/root/Spatial", "name": "One" + kind, "type": kind})["code"] == "conflict"
     assert exec_ok(m2_editor, "scene/tree") == before

@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const Codec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 
@@ -7,7 +7,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	assert_eq(Codec.decode({"type": "Vector2", "value": [1, 2]}).value, Vector2(1, 2), "Vector2")
 	assert_eq(
 		Codec.decode({"type": "Vector3", "value": [1, 2, 3]}).value, Vector3(1, 2, 3), "Vector3"
@@ -42,7 +42,7 @@ func _init() -> void:
 	test_invalid_nested_component_returns_error()
 	test_invalid_numeric_values_are_rejected()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func test_compound_values_round_trip() -> void:

@@ -28,7 +28,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("设置 TileMap 单元格")
 		. mutates()
-		. param("layer_path", "String", true, "TileMapLayer 路径", "")
+		. param("layer_path", "String", true, "TileMapLayer 路径（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. param("cell", "Vector2i", true, "单元格坐标", "")
 		. param("source_id", "int", true, "TileSet source", "")
 		. param("atlas_coords", "Vector2i", true, "atlas 坐标", "")

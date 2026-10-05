@@ -1,6 +1,6 @@
 """2D physics construction M4 route contracts."""
 
-from .helpers import command_doc, editor_undo, exec_error, exec_ok
+from .helpers import command_doc, editor_undo, exec_error, exec_ok, select_domain
 
 
 PHYSICS_ROUTES = {"physics/body/create", "physics/shape/create", "physics/layer/set", "physics/raycast", "physics/joint/create"}
@@ -14,7 +14,7 @@ def test_physics_routes_are_discoverable_and_documented(m4_env):
 
 
 def test_physics_body_and_shape_are_undoable_and_3d_is_rejected(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/physics.tscn"})
+    select_domain(m4_env, "physics")
     body = exec_ok(m4_env, "physics/body/create", {"parent_path": "PhysicsDomain", "name": "Body", "type": "StaticBody2D"})
     assert body["undoable"] is True
     shape = exec_ok(m4_env, "physics/shape/create", {"body_path": "Body", "shape": "rectangle", "size": {"x": 10, "y": 10}})
@@ -33,7 +33,7 @@ def _property(m4_env, node_path: str, property_name: str):
 
 def test_physics_layer_set_reads_back_and_undo_restores(m4_env):
     """A faked layer write must not survive a read-back or an editor undo."""
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/physics.tscn"})
+    select_domain(m4_env, "physics")
     created = exec_ok(
         m4_env,
         "physics/body/create",
@@ -41,7 +41,7 @@ def test_physics_layer_set_reads_back_and_undo_restores(m4_env):
     )
     node_path = created["node_path"]
     assert node_path == "/root/PhysicsDomain/Layered"
-    assert _property(m4_env, node_path, "collision_layer") == 1
+    baseline = _property(m4_env, node_path, "collision_layer")
     changed = exec_ok(
         m4_env,
         "physics/layer/set",
@@ -50,12 +50,12 @@ def test_physics_layer_set_reads_back_and_undo_restores(m4_env):
     assert changed["undoable"] is True
     assert _property(m4_env, node_path, "collision_layer") == 5
     editor_undo(m4_env)
-    assert _property(m4_env, node_path, "collision_layer") == 1
+    assert _property(m4_env, node_path, "collision_layer") == baseline
 
 
 def test_physics_joint_create_reads_back_and_undo_removes_node(m4_env):
     """A no-op joint creation must fail the node/parameter read-back and the undo check."""
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/physics.tscn"})
+    select_domain(m4_env, "physics")
     created = exec_ok(
         m4_env,
         "physics/joint/create",

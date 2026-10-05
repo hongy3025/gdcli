@@ -9,9 +9,7 @@ longer overlay a capability policy; they return the shared session env as-is.
 from __future__ import annotations
 
 import concurrent.futures
-import hashlib
 import json
-import shutil
 import subprocess
 import sys
 import threading
@@ -26,60 +24,22 @@ _TESTS_DIR = Path(__file__).resolve().parents[2]
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
-from e2e.m2.helpers import gdcli_bin, repo_root, require_godot_47, resolve_godot_bin  # noqa: E402
 from e2e.m3.conftest import (  # noqa: E402
     command_doc,
     exec_error,
     exec_ok,
-    project_run,
-    project_stop,
 )
 from e2e.shared_fixture import (  # noqa: E402,F401
-    tracked_project_files,
     m6_editor as session_m6_editor,
     m6_editor_bulk as session_m6_editor_bulk,
     m6_editor_eval as session_m6_editor_eval,
     m6_editor_network as session_m6_editor_network,
     m6_editor_process as session_m6_editor_process,
-    restore_file_state,
 )
 
-M6_FIXTURE_SOURCE = repo_root() / "tests" / "fixtures" / "m6_project"
 
 M6_HTTP_PORT: int = 18923
 
-
-def _m6_project_digests(project: Path) -> dict[str, str]:
-    digests: dict[str, str] = {}
-    for rel, path in sorted(tracked_project_files(project).items()):
-        digests[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return digests
-
-
-@pytest.fixture(autouse=True)
-def isolated_m6_files(m6_editor: dict[str, Any]):
-    """M6 用例会批量删除/替换项目文件，每个用例结束必须恢复文件基线。
-
-    只恢复文件、不停止运行中的游戏，避免破坏模块级 running-game fixture。
-    """
-    project = Path(m6_editor["project"])
-    before = _m6_project_digests(project)
-    yield
-    baseline = m6_editor.get("file_baseline")
-    if baseline is not None:
-        restore_file_state(m6_editor, baseline)
-    after = _m6_project_digests(project)
-    assert after == before, (
-        "M6 project files changed after test: "
-        f"added={sorted(set(after) - set(before))} "
-        f"removed={sorted(set(before) - set(after))} "
-        f"changed={sorted(k for k in set(before) & set(after) if before[k] != after[k])}"
-    )
-
-
-# ── module-scoped policy overlay fixtures ───────────────────────────────
-# Each fixture is a plain module-scoped alias of the session-scoped shared
-# editor; capability overlays were removed with the policy gate in Task 1.
 
 
 @pytest.fixture(scope="module")
@@ -174,63 +134,25 @@ def local_http_server() -> _ServerRef:
         server.server_close()
 
 
-def latest_audit(env: dict[str, Any], route: str) -> dict[str, Any]:
-    # Query with limit=1000 to capture all entries regardless of prior
-    # module activity (M3 runtime tests can push 100+ entries).
-    entries = exec_ok(env, "gdapi/audit/list", {"limit": 1000}).get("entries", [])
-    matching = [e for e in entries if e.get("route") == route]
+def latest_audit(env: dict[str, Any], route: str, *, since: int = 0) -> dict[str, Any]:
+    matching = audit_for_route(env, route, since=since)
     if not matching:
-        raise AssertionError(f"No audit entries found for route {route}")
+        raise AssertionError(f"No audit entries found for route {route} after seq {since}")
     return matching[-1]
 
 
-def audit_for_route(env: dict[str, Any], route: str) -> list[dict[str, Any]]:
-    entries = exec_ok(env, "gdapi/audit/list", {"limit": 1000}).get("entries", [])
+def audit_for_route(
+    env: dict[str, Any], route: str, *, since: int = 0,
+) -> list[dict[str, Any]]:
+    entries = exec_ok(env, "gdapi/audit/list", {"since": since, "limit": 1000}).get("entries", [])
     return [e for e in entries if e.get("route") == route]
 
 
-def _wait_for_game_running(env: dict[str, Any], timeout: float = 15.0) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
-    last_status: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        status = exec_ok(env, "runtime/status")
-        last_status = status
-        if status.get("state") == "connected" and status.get("transport") != "none":
-            return status
-        time.sleep(0.2)
-    raise RuntimeError(
-        f"game never fully connected within {timeout}s (last status: {last_status})"
-    )
+def audit_cursor(env: dict[str, Any], route: str) -> int:
+    """Use retained sequence numbers, not list lengths that shift as the log fills."""
+    return max((entry["seq"] for entry in audit_for_route(env, route)), default=0)
 
 
-def _wait_stopped(env: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
-    last_status: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        status = exec_ok(env, "runtime/status")
-        last_status = status
-        if status.get("state") == "stopped" and status.get("pending", 0) == 0:
-            return status
-        time.sleep(0.1)
-    raise RuntimeError(
-        f"game did not stop within {timeout}s (last status: {last_status})"
-    )
-
-
-@pytest.fixture(scope="module")
-def m6_runtime_eval_running(m6_editor_eval: dict[str, Any]) -> dict[str, Any]:
-    project_run(m6_editor_eval)
-    m6_editor_eval["game_attached"] = True
-    _wait_for_game_running(m6_editor_eval)
-    try:
-        yield m6_editor_eval
-    finally:
-        if m6_editor_eval.get("game_attached"):
-            try:
-                project_stop(m6_editor_eval)
-                _wait_stopped(m6_editor_eval)
-            finally:
-                m6_editor_eval["game_attached"] = False
 
 
 def _exec_raw(env: dict[str, Any], route: str, body: dict) -> dict[str, Any]:
@@ -262,11 +184,6 @@ def start_async_exec(
     return future
 
 
-def stop_game(env: dict[str, Any]) -> dict[str, Any]:
-    project_stop(env)
-    result = _wait_stopped(env)
-    env["game_attached"] = False
-    return result
 
 
 # ── bulk file test helpers ─────────────────────────────────────────────
@@ -314,21 +231,6 @@ def clear_recover_failure(env: dict[str, Any]) -> None:
     project_file(env, ".gdapi-debug-recover-fail").unlink(missing_ok=True)
 
 
-def bulk_digest(env: dict[str, Any]) -> str:
-    import hashlib
-    bulk_dir = project_file(env, "bulk")
-    if not bulk_dir.is_dir():
-        return hashlib.sha256(b"").hexdigest()
-    files = sorted(bulk_dir.iterdir(), key=lambda p: p.name)
-    h = hashlib.sha256()
-    for f in files:
-        if f.is_file():
-            h.update(f.name.encode())
-            h.update(b"\x00")
-            h.update(f.read_bytes())
-    return h.hexdigest()
-
-
 def delete_plan(env: dict[str, Any], paths: list[str]) -> dict[str, Any]:
     plan = exec_ok(env, "filesystem/batch/delete", {
         "paths": paths, "dry_run": True,
@@ -347,8 +249,8 @@ def apply_delete(env: dict[str, Any], plan: dict) -> dict[str, Any]:
 __all__ = [
     "apply_delete",
     "apply_replace",
+    "audit_cursor",
     "audit_for_route",
-    "bulk_digest",
     "clear_recover_failure",
     "command_doc",
     "delete_plan",
@@ -363,11 +265,7 @@ __all__ = [
     "m6_editor_eval",
     "m6_editor_network",
     "m6_editor_process",
-    "m6_runtime_eval_running",
     "project_file",
-    "project_run",
-    "project_stop",
     "replace_plan",
     "start_async_exec",
-    "stop_game",
 ]

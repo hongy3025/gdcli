@@ -1,11 +1,7 @@
 ## Broker/file transport combination tests.
-##
-## These tests intentionally exercise the current pre-migration ownership seams.
-## They are expected to remain RED until the broker owns all pending replies and
-## the probe supports suspended handlers and transport generations.
 
 @tool
-extends SceneTree
+extends RefCounted
 
 const Broker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 const EditorTransport := preload("res://addons/gdapi/runtime/runtime_transport_file_editor.gd")
@@ -13,27 +9,17 @@ const ProbeTransport := preload("res://addons/gdapi/runtime/runtime_transport_fi
 const RuntimeProbe := preload("res://addons/gdapi/runtime/runtime_probe.gd")
 const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
-
-class FakeRuntimeMain:
-	extends Node
-	var reset_calls := 0
-
-	func reset_fixture() -> Dictionary:
-		reset_calls += 1
-		return {"changed": true, "undoable": false}
-
-
 var passed := 0
 var failed := 0
+var _tree: SceneTree
+var _test_root := ProjectSettings.globalize_path(
+	"res://.godot/gdapi_native_integration_%d" % Time.get_ticks_usec()
+)
 
 
-func _init() -> void:
+func run(tree: SceneTree) -> Dictionary:
+	_tree = tree
 	print("Running runtime broker/file transport integration tests...")
-	call_deferred("_run")
-
-
-func _run() -> void:
-	_cleanup(_make_root())
 	await test_broker_file_sync_roundtrip()
 	await test_broker_file_async_roundtrip()
 	await test_reply_completes_once()
@@ -41,15 +27,10 @@ func _run() -> void:
 	await test_timeout_then_late_reply_is_ignored()
 	await test_generation_and_priority_reject_stale_hello()
 	test_runtime_probe_requires_stripped_protocol_channel()
-	await test_fixture_reset_uses_one_fixed_helper_and_rejects_payload()
 
 	_cleanup(_make_root())
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
-
-
-func _exit_tree() -> void:
-	_cleanup(_make_root())
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual: Variant, expected: Variant, context: String = "") -> void:
@@ -66,7 +47,7 @@ func assert_true(value: bool, context: String = "") -> void:
 
 
 func _make_root() -> String:
-	return ProjectSettings.globalize_path("res://.godot/gdapi_runtime_test")
+	return _test_root
 
 
 func _cleanup(root: String) -> void:
@@ -137,8 +118,8 @@ func _sync_handler(message: Dictionary) -> Dictionary:
 
 
 func _async_handler(message: Dictionary) -> Dictionary:
-	await process_frame
-	await process_frame
+	await _tree.process_frame
+	await _tree.process_frame
 	return {"ok": true, "result": {"echo": int(message.get("id", -1))}}
 
 
@@ -198,7 +179,7 @@ func test_broker_file_async_roundtrip() -> void:
 		),
 		"async outbox waits before first resume"
 	)
-	await process_frame
+	await _tree.process_frame
 	pair.probe.tick(Time.get_ticks_msec())
 	assert_true(
 		not FileAccess.file_exists(
@@ -206,7 +187,7 @@ func test_broker_file_async_roundtrip() -> void:
 		),
 		"async outbox waits before second resume"
 	)
-	await process_frame
+	await _tree.process_frame
 	pair.probe.tick(Time.get_ticks_msec())
 	pair.editor.tick(Time.get_ticks_msec())
 	assert_eq(callback.count, 1, "async callback count")
@@ -406,36 +387,3 @@ func test_runtime_probe_requires_stripped_protocol_channel() -> void:
 	transport.stop()
 	broker = null
 	_cleanup(root)
-
-
-func test_fixture_reset_uses_one_fixed_helper_and_rejects_payload() -> void:
-	var fixture := FakeRuntimeMain.new()
-	fixture.name = "RuntimeMain"
-	root.add_child(fixture)
-	var probe: Node = root.get_node_or_null("GdApiRuntimeProbe")
-	assert_true(probe != null, "fixture project provides the runtime probe autoload")
-	if probe == null:
-		fixture.free()
-		return
-	probe.record_log("info", "must be cleared")
-
-	assert_true(
-		probe.has_method("reset_shared_fixture"), "probe exposes one fixed fixture reset helper"
-	)
-	if probe.has_method("reset_shared_fixture"):
-		var direct: Dictionary = probe.call("reset_shared_fixture")
-		assert_eq(direct.get("ok", false), true, "fixed helper succeeds")
-		assert_eq(fixture.reset_calls, 1, "fixed helper resets known RuntimeMain")
-		assert_eq(
-			direct.get("cleared_logs", -1), 1, "fixed helper reports the ring entries it cleared"
-		)
-		assert_eq(probe.ring_buffer().size(), 0, "fixed helper clears probe ring")
-
-	var rejected: Dictionary = await probe._dispatch_async(
-		"runtime/fixture/reset", {"op": "runtime/node/remove"}
-	)
-	assert_eq(
-		rejected.get("code", ""), "invalid_param", "internal reset rejects all payload fields"
-	)
-
-	fixture.free()

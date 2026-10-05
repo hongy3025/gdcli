@@ -18,7 +18,7 @@ func doc() -> GdApiRouteDoc:
 	return (
 		GdApiRouteDoc
 		. make("列出 TileMap 已用单元格")
-		. param("layer_path", "String", true, "TileMapLayer 路径", "")
+		. param("layer_path", "String", true, "TileMapLayer 路径（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. example('{"layer_path":"TileMapLayer"}')
 		. returns("单元格列表", {"cells": "Array"})
 	)

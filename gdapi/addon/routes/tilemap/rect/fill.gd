@@ -29,7 +29,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("填充 TileMap 矩形")
 		. mutates()
-		. param("layer_path", "String", true, "TileMapLayer 路径", "")
+		. param("layer_path", "String", true, "TileMapLayer 路径（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. param("from", "Vector2i", true, "起点", "")
 		. param("to", "Vector2i", true, "终点", "")
 		. example('{"layer_path":"TileMapLayer","from":{"x":0,"y":0},"to":{"x":1,"y":1}}')

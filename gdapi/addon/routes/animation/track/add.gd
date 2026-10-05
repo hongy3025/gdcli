@@ -24,7 +24,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("添加动画 value track")
 		. mutates()
-		. param("player_path", "String", true, "AnimationPlayer 路径", "")
+		. param("player_path", "String", true, "AnimationPlayer 路径（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. param("name", "String", true, "动画名", "")
 		. param("path", "String", true, "目标 NodePath", "")
 		. example('{"player_path":"AnimationPlayer","name":"idle","path":"Sprite:position"}')

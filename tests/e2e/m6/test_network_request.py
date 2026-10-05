@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from .conftest import audit_for_route, exec_error, exec_ok, latest_audit
+from .conftest import audit_cursor, audit_for_route, exec_error, exec_ok, latest_audit
 
 
 def test_network_request_unreachable_host(m6_editor_network):
@@ -250,7 +250,7 @@ def test_client_disconnect_cancels_network_request(m6_editor_network):
     server.release = threading.Event()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    before = len(audit_for_route(m6_editor_network, "network/http_request"))
+    before = audit_cursor(m6_editor_network, "network/http_request")
     meta = m6_editor_network["meta"]
     body = json.dumps({"url": f"http://127.0.0.1:{server.server_port}/wait"}).encode()
     try:
@@ -269,7 +269,7 @@ def test_client_disconnect_cancels_network_request(m6_editor_network):
         deadline = time.monotonic() + 5
         events = []
         while time.monotonic() < deadline:
-            events = audit_for_route(m6_editor_network, "network/http_request")[before:]
+            events = audit_for_route(m6_editor_network, "network/http_request", since=before)
             if events:
                 break
             time.sleep(0.05)
@@ -332,20 +332,22 @@ def test_response_cap_truncates_or_errors(m6_editor_network, local_http_server):
 
 
 def test_audit_redacts_body_and_headers(m6_editor_network, local_http_server):
+    before = audit_cursor(m6_editor_network, "network/http_request")
     exec_ok(m6_editor_network, "network/http_request", {
         "url": local_http_server.url("/ok"),
     })
-    event = latest_audit(m6_editor_network, "network/http_request")
+    event = latest_audit(m6_editor_network, "network/http_request", since=before)
     body = json.dumps(event)
     assert "payload-ok" not in body
 
 
 def test_failed_request_is_audited_as_failure(m6_editor_network, local_http_server):
+    before = audit_cursor(m6_editor_network, "network/http_request")
     error = exec_error(m6_editor_network, "network/http_request", {
         "url": local_http_server.url("/delay"), "timeout_ms": 500,
     })
     assert error["code"] == "timeout", error
-    event = latest_audit(m6_editor_network, "network/http_request")
+    event = latest_audit(m6_editor_network, "network/http_request", since=before)
     assert event["ok"] is False, event
     assert event["code"] == "timeout", event
 
@@ -361,11 +363,12 @@ def test_failed_request_is_audited_as_failure(m6_editor_network, local_http_serv
     ],
 )
 def test_rejected_url_credentials_are_not_readable_in_audit(m6_editor_network, url):
+    before = audit_cursor(m6_editor_network, "network/http_request")
     secret = "AUDIT_UNIQUE_URL_SECRET_7f32"
     raw_url = url.format(secret=secret)
     error = exec_error(m6_editor_network, "network/http_request", {"url": raw_url})
     assert error["code"] == "invalid_param"
-    event = latest_audit(m6_editor_network, "network/http_request")
+    event = latest_audit(m6_editor_network, "network/http_request", since=before)
     assert event["ok"] is False
     assert event["code"] == "invalid_param"
     serialized = json.dumps(event)

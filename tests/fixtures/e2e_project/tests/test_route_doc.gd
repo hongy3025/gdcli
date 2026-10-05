@@ -7,10 +7,10 @@
 ## - to_dict() 完整详情序列化
 ## - to_summary_dict() 简要序列化
 ##
-## 运行方式：godot --headless --path tests/fixture_project --script res://tests/test_route_doc.gd
+## 运行方式：共享编辑器中的 fixture suite runner。
 
 @tool
-extends SceneTree
+extends RefCounted
 
 var RouteDoc = preload("res://addons/gdapi/runtime/route_doc.gd")
 var Router = preload("res://addons/gdapi/runtime/router.gd")
@@ -23,7 +23,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	print("Running GdApiRouteDoc tests...\n")
 
 	test_param_doc_to_dict()
@@ -39,10 +39,7 @@ func _init() -> void:
 	test_route_doc_chained_call()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	if failed > 0:
-		quit(1)
-	else:
-		quit(0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual, expected, context: String = "") -> void:

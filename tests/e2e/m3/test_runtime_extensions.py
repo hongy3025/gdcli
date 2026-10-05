@@ -9,7 +9,7 @@ import zlib
 
 import pytest
 
-from .conftest import exec_error, exec_ok, runtime_counter, wait_for, reset_fixture, _fixture_hook_reset_once
+from .conftest import detach_game, exec_error, exec_ok, runtime_counter, wait_for
 
 TARGET = "/root/RuntimeMain/ProbeTarget"
 
@@ -27,13 +27,14 @@ def png(width=2, height=2, changed=None):
     return {"data_base64": base64.b64encode(raw).decode("ascii")}
 
 
-def test_record_real_input_reset_then_replay(m3_running):
+def test_record_real_input_then_replay_in_ongoing_game(m3_running):
     env = m3_running
+    before = runtime_counter(env, "input_keys")
     started = exec_ok(env, "runtime/recording/start", {"max_events": 4})
     for _ in range(2):
         exec_ok(env, "runtime/input/key", {"keycode": 32, "pressed": True})
         exec_ok(env, "runtime/input/key", {"keycode": 32, "pressed": False})
-    wait_for(lambda: runtime_counter(env, "input_keys") == 4)
+    wait_for(lambda: runtime_counter(env, "input_keys") == before + 4)
     stopped = exec_ok(env, "runtime/recording/stop")
     recorded = exec_ok(env, "runtime/recording/read", {"limit": 100})
     assert recorded["recording_id"] == started["recording_id"]
@@ -43,28 +44,27 @@ def test_record_real_input_reset_then_replay(m3_running):
     assert recorded["status"] == "limit_reached"
     page = exec_ok(env, "runtime/recording/read", {"after_cursor": 2, "limit": 1})
     assert page["items"] == [recorded["items"][2]]
-    _fixture_hook_reset_once(env)
-    assert exec_error(env, "runtime/recording/read")["code"] == "not_found"
     replay = exec_ok(env, "runtime/recording/replay", {"events": recorded["items"], "timeout_ms": 10000})
     assert replay["status"] == "completed"
     assert replay["completed_events"] == 4
     assert replay["elapsed_ms"] >= recorded["items"][-1]["at_ms"]
-    wait_for(lambda: runtime_counter(env, "input_keys") == 4)
+    wait_for(lambda: runtime_counter(env, "input_keys") == before + 8)
 
 
 def test_replay_timeout_and_cancellation_complete_real_requests(m3_running):
+    before = runtime_counter(m3_running, "input_keys")
     event = {"at_ms": 1000, "route": "runtime/input/key", "data": {"keycode": 32}}
     result = exec_ok(m3_running, "runtime/recording/replay", {"events": [event], "timeout_ms": 50})
     assert result["status"] == "timed_out"
     assert result["completed_events"] == 0
-    assert runtime_counter(m3_running, "input_keys") == 0
+    assert runtime_counter(m3_running, "input_keys") == before
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(exec_ok, m3_running, "runtime/recording/replay", {"events": [dict(event, at_ms=4000)], "timeout_ms": 10000})
         wait_for(lambda: exec_ok(m3_running, "runtime/recording/cancel")["changed"])
         result = future.result(timeout=15)
     assert result["status"] == "cancelled"
     assert result["completed_events"] == 0
-    assert runtime_counter(m3_running, "input_keys") == 0
+    assert runtime_counter(m3_running, "input_keys") == before
 
 
 @pytest.mark.parametrize("payload", [{"max_events": 0}, {"max_events": True}, {"max_events": 1001}])
@@ -72,24 +72,27 @@ def test_recording_event_bounds(m3_running, payload):
     assert exec_error(m3_running, "runtime/recording/start", payload)["code"] == "invalid_param"
 
 
-def test_monitor_real_cross_frame_typed_changes_cursor_stop_and_reset(m3_running):
+def test_monitor_real_cross_frame_typed_changes_cursor_and_stop(m3_running):
     env = m3_running
-    monitor = exec_ok(env, "runtime/monitor/start", {"node_path": TARGET, "property": "position", "interval_ms": 1})
+    path = exec_ok(env, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain", "type": "Node2D", "name": "MonitorChangesTarget",
+    })["node_path"]
+    monitor = exec_ok(env, "runtime/monitor/start", {"node_path": path, "property": "position", "interval_ms": 1})
     mid = monitor["monitor_id"]
     first = exec_ok(env, "runtime/monitor/read", {"monitor_id": mid})
     assert first["items"][0]["value"] == {"type": "Vector2", "value": [0, 0]}
     for value in ([4, 5], [8, 9]):
-        exec_ok(env, "runtime/node/set", {"node_path": TARGET, "property": "position", "value": {"type": "Vector2", "value": value}})
+        exec_ok(env, "runtime/node/set", {"node_path": path, "property": "position", "value": {"type": "Vector2", "value": value}})
         wait_for(lambda: exec_ok(env, "runtime/monitor/read", {"monitor_id": mid})["items"][-1].get("value") == {"type": "Vector2", "value": value})
     page = exec_ok(env, "runtime/monitor/read", {"monitor_id": mid, "after_cursor": first["next_cursor"]})
     assert [item["value"]["value"] for item in page["items"]] == [[4, 5], [8, 9]]
     assert page["items"][0]["frame"] < page["items"][1]["frame"]
     exec_ok(env, "runtime/monitor/stop", {"monitor_id": mid})
-    exec_ok(env, "runtime/node/set", {"node_path": TARGET, "property": "position", "value": {"type": "Vector2", "value": [10, 11]}})
+    exec_ok(env, "runtime/node/set", {"node_path": path, "property": "position", "value": {"type": "Vector2", "value": [10, 11]}})
     time.sleep(0.05)
     assert exec_ok(env, "runtime/monitor/read", {"monitor_id": mid, "after_cursor": page["next_cursor"]})["items"] == []
-    _fixture_hook_reset_once(env)
-    assert exec_error(env, "runtime/monitor/read", {"monitor_id": mid})["code"] == "not_found"
+    exec_ok(env, "runtime/node/remove", {"node_path": path})
+    assert exec_ok(env, "runtime/monitor/read", {"monitor_id": mid})["items"] == first["items"] + page["items"]
 
 
 def test_monitor_missing_target_terminates_subscription(m3_running):
@@ -112,8 +115,7 @@ def test_qa_json_scene_script_real_assertions_cleanup_and_report(m3_running):
     saved = exec_ok(m3_running, "runtime/test/report", {"report_id": result["report_id"]})
     assert saved["samples"] == result["samples"]
     assert exec_ok(m3_running, "runtime/node/find", {"name": "Scene"})["total"] == 0
-    _fixture_hook_reset_once(m3_running)
-    assert exec_error(m3_running, "runtime/test/report", {"report_id": result["report_id"]})["code"] == "not_found"
+    assert exec_ok(m3_running, "runtime/test/report", {"report_id": result["report_id"]})["samples"] == saved["samples"]
 
 
 def test_qa_failed_and_timeout_results_are_saved(m3_running):
@@ -140,11 +142,12 @@ def test_qa_does_not_bypass_capability_boundaries(m3_running, payload):
 
 
 def test_stress_actually_executes_concurrent_iterations(m3_running):
+    before = runtime_counter(m3_running, "counter")
     result = exec_ok(m3_running, "runtime/test/stress", {"iterations": 8, "concurrency": 4, "scenario": {"steps": [{"op": "runtime/node/call", "data": {"node_path": TARGET, "method": "increment", "args": [1]}}, {"op": "wait", "data": {"duration_ms": 20}}]}})
     assert result["status"] == "passed"
     assert result["completed_iterations"] == result["passed_iterations"] == 8
     assert result["failed_iterations"] == 0
-    assert runtime_counter(m3_running, "counter") == 8
+    assert runtime_counter(m3_running, "counter") == before + 8
     assert all(sample["passed"] and sample["elapsed_ms"] >= 20 for sample in result["samples"])
     assert exec_ok(m3_running, "runtime/test/report", {"report_id": result["report_id"]})["samples"] == result["samples"]
 
@@ -192,23 +195,23 @@ def test_screen_text_reads_controls_and_reports_real_timeout(m3_running):
 
 
 def test_stress_retains_actual_failure_samples(m3_running):
+    before = runtime_counter(m3_running, "counter")
     result = exec_ok(m3_running, "runtime/test/stress", {"iterations": 3, "concurrency": 2, "scenario": {"steps": [{"op": "runtime/node/call", "data": {"node_path": TARGET, "method": "queue_free"}}]}})
     assert result["status"] == "failed"
     assert result["completed_iterations"] == result["failed_iterations"] == 3
     assert result["passed_iterations"] == 0
     assert all(sample["steps"][0]["code"] == "permission_denied" for sample in result["samples"])
-    assert runtime_counter(m3_running, "counter") == 0
+    assert runtime_counter(m3_running, "counter") == before
 
 
-def test_reset_cancels_pending_qa_and_releases_signal_wait(m3_running):
+def test_stop_aborts_pending_qa_request_once(m3_running):
     with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(exec_ok, m3_running, "runtime/test/run", {"timeout_ms": 10000, "scenario": {"steps": [{"op": "runtime/assert/signal_received", "data": {"node_path": TARGET, "signal": "finished"}}]}})
+        future = pool.submit(exec_error, m3_running, "runtime/test/run", {"timeout_ms": 10000, "scenario": {"steps": [{"op": "runtime/assert/signal_received", "data": {"node_path": TARGET, "signal": "finished"}}]}})
         wait_for(lambda: any("GdApiTest_" in node["node_path"] for node in exec_ok(m3_running, "runtime/node/find", {"type": "Node", "limit": 200})["nodes"]))
-        _fixture_hook_reset_once(m3_running)
+        stopped = detach_game(m3_running)
         result = future.result(timeout=5)
-    assert result["status"] == "cancelled"
-    assert runtime_counter(m3_running, "counter") == 0
-    assert not any("GdApiTest_" in node["node_path"] for node in exec_ok(m3_running, "runtime/node/find", {"type": "Node", "limit": 200})["nodes"])
+    assert result["code"] == "conflict"
+    assert stopped["pending"] == 0
 
 
 def test_png_comparison_current_viewport_and_dimension_allocation_bound(m3_running):
@@ -224,7 +227,6 @@ def test_png_comparison_current_viewport_and_dimension_allocation_bound(m3_runni
 
 
 def test_particle_runtime_observes_both_gpu_types_in_game_process(m3_running):
-    reset_fixture(m3_running)
     for name, kind, amount, lifetime, draw in [
         ("GPU2D", "GPUParticles2D", 12, 2.5, "texture"),
         ("GPU3D", "GPUParticles3D", 18, 3.5, "draw_pass_1"),
@@ -245,8 +247,10 @@ def _tween_status(env, tween_id):
 
 
 def test_tween_intermediate_completion_and_cancellation(m3_running):
-    reset_fixture(m3_running)
-    request = {"node_path": TARGET, "property": "position", "from": {"type": "Vector2", "value": [0, 0]}, "to": {"type": "Vector2", "value": [100, 40]}, "duration": 1.5, "trans": 0, "ease": 0}
+    path = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain", "type": "Node2D", "name": "TweenCompletionTarget",
+    })["node_path"]
+    request = {"node_path": path, "property": "position", "from": {"type": "Vector2", "value": [0, 0]}, "to": {"type": "Vector2", "value": [100, 40]}, "duration": 1.5, "trans": 0, "ease": 0}
     started = exec_ok(m3_running, "runtime/tween/start", request)
     tween_id = started["id"]
     assert started["state"] == "running" and started["undoable"] is False
@@ -272,14 +276,17 @@ def test_tween_intermediate_completion_and_cancellation(m3_running):
     assert stopped["value"]["value"][0] < 500
     time.sleep(0.2)
     assert _tween_status(m3_running, second["id"])["value"] == stopped["value"]
-    assert exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"] == stopped["value"]
+    assert exec_ok(m3_running, "runtime/node/get", {"node_path": path, "property": "position"})["value"] == stopped["value"]
     assert exec_ok(m3_running, "runtime/tween/stop", {"id": second["id"]})["changed"] is False
+    exec_ok(m3_running, "runtime/node/remove", {"node_path": path})
 
 
 def test_tween_invalid_requests_conflicts_and_target_cleanup(m3_running):
-    reset_fixture(m3_running)
-    request = {"node_path": TARGET, "property": "position", "to": {"type": "Vector2", "value": [100, 40]}, "duration": 2.0}
-    baseline = exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"]
+    path = exec_ok(m3_running, "runtime/node/create", {
+        "parent_path": "/root/RuntimeMain", "type": "Node2D", "name": "TweenValidationTarget",
+    })["node_path"]
+    request = {"node_path": path, "property": "position", "to": {"type": "Vector2", "value": [100, 40]}, "duration": 2.0}
+    baseline = exec_ok(m3_running, "runtime/node/get", {"node_path": path, "property": "position"})["value"]
     for changes, code in [
         ({"duration": 0}, "invalid_param"),
         ({"duration": -1}, "invalid_param"),
@@ -290,10 +297,11 @@ def test_tween_invalid_requests_conflicts_and_target_cleanup(m3_running):
         ({"node_path": "/root/GdApiRuntimeProbe"}, "permission_denied"),
     ]:
         assert exec_error(m3_running, "runtime/tween/start", request | changes)["code"] == code
-        assert exec_ok(m3_running, "runtime/node/get", {"node_path": TARGET, "property": "position"})["value"] == baseline
+        assert exec_ok(m3_running, "runtime/node/get", {"node_path": path, "property": "position"})["value"] == baseline
     started = exec_ok(m3_running, "runtime/tween/start", request)
     assert exec_error(m3_running, "runtime/tween/start", request)["code"] == "conflict"
     exec_ok(m3_running, "runtime/tween/stop", {"id": started["id"]})
+    exec_ok(m3_running, "runtime/node/remove", {"node_path": path})
     created = exec_ok(m3_running, "runtime/node/create", {"parent_path": "/root/RuntimeMain", "type": "Node2D", "name": "TweenDisposable"})
     disposable = exec_ok(m3_running, "runtime/tween/start", request | {"node_path": created["node_path"]})
     exec_ok(m3_running, "runtime/node/remove", {"node_path": created["node_path"]})

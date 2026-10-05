@@ -26,7 +26,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("删除动画 track")
 		. mutates()
-		. param("player_path", "String", true, "AnimationPlayer 路径", "")
+		. param("player_path", "String", true, "AnimationPlayer 路径（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. param("name", "String", true, "动画名", "")
 		. param("track_index", "int", true, "track 索引", "")
 		. example('{"player_path":"AnimationPlayer","name":"idle","track_index":0}')

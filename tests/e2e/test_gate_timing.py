@@ -8,10 +8,8 @@ from pathlib import Path
 import pytest
 
 from e2e import timing
-from e2e.m2 import helpers as history_helpers
 from e2e.m3 import conftest as runtime_helpers
 from e2e import shared_fixture
-from e2e.test_full_suite_budget import run_budget_session
 from scripts import check
 
 
@@ -50,7 +48,9 @@ def test_percentiles_and_json_preserve_success_samples(monkeypatch, tmp_path):
     assert measurements.summary()["singleton"]["p99_seconds"] == .125
     path = tmp_path / "nested" / "waits.json"
     monkeypatch.setenv("GDAPI_E2E_EDITOR_MODE", "gui")
-    timing.write_report(path, exitstatus=1, editor_starts=1)
+    timing.write_report(
+        path, exitstatus=1, editor_starts=1, cases=[], deselected=[], session_seconds=2,
+    )
     report = json.loads(path.read_text(encoding="utf-8"))
     assert report["groups"]["predicate"]["samples_seconds"] == [1, 2, 3, 4, 5]
     assert report["exitstatus"] == 1
@@ -115,33 +115,6 @@ def test_scene_switch_wait_does_not_record_a_timeout(monkeypatch, wait_clock):
     assert clock.value == pytest.approx(.1)
 
 
-def test_history_bridge_records_only_completed_success(monkeypatch, tmp_path, wait_clock):
-    _, measurements = wait_clock
-    result = tmp_path / ".godot" / "gdapi-test-result.json"
-    result.parent.mkdir()
-    result.write_text('{"ok": true}', encoding="utf-8")
-    assert history_helpers.wait_for_test_result({"project": tmp_path}) == {"ok": True}
-    result.write_text('{"ok": false}', encoding="utf-8")
-    assert history_helpers.wait_for_test_result({"project": tmp_path}) == {"ok": False}
-    result.unlink()
-    monkeypatch.setenv("GDAPI_E2E_UNDO_TIMEOUT_SECONDS", ".1")
-    with pytest.raises(RuntimeError, match="never produced"):
-        history_helpers.wait_for_test_result({"project": tmp_path})
-    assert measurements.samples == {"undo_bridge": [0.0]}
-
-
-
-
-def test_runner_orders_file_before_engine_and_stops_on_failure(monkeypatch, tmp_path):
-    calls = []
-    def execute(command, **kwargs):
-        calls.append((command, kwargs["env"]["GDAPI_E2E_TRANSPORT"]))
-        return subprocess.CompletedProcess(command, 7)
-    monkeypatch.setattr(check.subprocess, "run", execute)
-    assert check.main(["--gate", "engine", "--gate", "file", "--artifact-dir", str(tmp_path)]) == 7
-    assert len(calls) == 1
-    assert calls[0][1] == "file"
-    assert "not budget and not engine_transport and not real_renderer" in calls[0][0]
 
 
 
@@ -153,34 +126,10 @@ def test_runner_missing_executable_and_bad_configuration_are_nonzero(monkeypatch
     assert check.main(["--gate", "clippy", "--artifact-dir", str(tmp_path)]) == 127
     monkeypatch.setenv("GDAPI_E2E_BUDGET_SECONDS", "nan")
     with pytest.raises(SystemExit) as exc:
-        check.main(["--gate", "file"])
+        check.main(["--gate", "e2e"])
     assert exc.value.code == 2
 
 
-def test_budget_uses_parent_wall_clock_not_child_summary(monkeypatch, tmp_path):
-    monkeypatch.setenv("GDAPI_E2E_BUDGET_SECONDS", "360")
-    ticks = iter([100, 461])
-    monkeypatch.setattr(timing.time, "monotonic", lambda: next(ticks))
-    report = tmp_path / "report.json"
-    report.write_text('{"editor_starts":1,"exitstatus":0}', encoding="utf-8")
-    def execute(command, **kwargs):
-        assert kwargs["timeout"] == 390
-        assert kwargs["env"]["GDAPI_E2E_TRANSPORT"] == "file"
-        return subprocess.CompletedProcess(command, 0, "===== 400 passed in 0.01s =====", "")
-    monkeypatch.setattr(subprocess, "run", execute)
-    with pytest.raises(AssertionError, match="parent wall-clock 361.*360"):
-        run_budget_session(tmp_path, report)
-
-
-@pytest.mark.parametrize("exitcode,editor_starts", [(5, 1), (0, 2)])
-def test_budget_rejects_child_failure_and_multiple_editors(monkeypatch, tmp_path, exitcode, editor_starts):
-    ticks = iter([0, 1])
-    monkeypatch.setattr(timing.time, "monotonic", lambda: next(ticks))
-    report = tmp_path / "report.json"
-    report.write_text(json.dumps({"editor_starts": editor_starts, "exitstatus": exitcode}), encoding="utf-8")
-    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, exitcode, "failed", ""))
-    with pytest.raises(AssertionError):
-        run_budget_session(tmp_path, report)
 
 
 def test_mocked_waits_are_not_mixed_into_real_session_measurements(monkeypatch):

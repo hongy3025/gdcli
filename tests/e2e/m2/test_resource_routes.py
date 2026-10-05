@@ -1,4 +1,4 @@
-"""Resource route acceptance tests."""
+"""Resource route acceptance; dependencies of persistent consumers stay on disk."""
 
 import pytest
 
@@ -33,7 +33,7 @@ def test_resource_search_finds_player(m2_editor):
     assert any("player" in p for p in page["items"])
 
 
-def test_resource_assign_rejects_non_resource_property(m2_editor):
+def test_resource_assign_rejects_non_resource_property(m2_editor, m2_main):
     """资源必须存在于项目中，失败必须来自「属性不是资源槽位」而非常量路径缺失。"""
     error = exec_error(m2_editor, "resource/assign", {
         "node_path": PLAYER,
@@ -44,14 +44,15 @@ def test_resource_assign_rejects_non_resource_property(m2_editor):
     assert "position" in error["error"], error
 
 
-def test_typed_properties_round_trip_and_survive_reopen(m2_editor):
+def test_typed_properties_round_trip_and_survive_reopen(m2_editor, m2_main):
+    target = exec_ok(m2_editor, "node/create", {"parent_path": "/root/Main", "type": "Node2D", "name": "TypedPropertyConsumer"})["node_path"]
     """Color / NodePath / Resource values must survive a real scene save + reload."""
     color_value = {"type": "Color", "value": [0.25, 0.5, 0.75, 1.0]}
     path_value = {"type": "NodePath", "value": "Player/Child"}
     material_path = "res://resources/typed_material.tres"
 
     set_color = exec_ok(m2_editor, "node/property/set", {
-        "node_path": PLAYER, "property": "modulate", "value": color_value,
+        "node_path": target, "property": "modulate", "value": color_value,
     })
     assert set_color["value"] == color_value
 
@@ -72,14 +73,14 @@ def test_typed_properties_round_trip_and_survive_reopen(m2_editor):
     assert material["saved"] is True
     resource_value = {"type": "Resource", "value": material_path}
     set_resource = exec_ok(m2_editor, "node/property/set", {
-        "node_path": PLAYER, "property": "material", "value": resource_value,
+        "node_path": target, "property": "material", "value": resource_value,
     })
     assert set_resource["value"] == resource_value
 
     expectations = (
-        (PLAYER, "modulate", color_value),
+        (target, "modulate", color_value),
         (typed_node, "root_node", path_value),
-        (PLAYER, "material", resource_value),
+        (target, "material", resource_value),
     )
     for node_path, property_name, expected in expectations:
         assert _get_property(m2_editor, node_path, property_name) == expected
@@ -91,7 +92,8 @@ def test_typed_properties_round_trip_and_survive_reopen(m2_editor):
         assert _get_property(m2_editor, node_path, property_name) == expected
 
 
-def test_resource_assign_persists_across_save_and_reopen(m2_editor):
+def test_resource_assign_persists_across_save_and_reopen(m2_editor, m2_main):
+    target = exec_ok(m2_editor, "node/create", {"parent_path": "/root/Main", "type": "Node2D", "name": "AssignedMaterialConsumer"})["node_path"]
     """resource/assign must really write the node property and survive a reload."""
     material_path = "res://resources/assigned_material.tres"
     created = exec_ok(m2_editor, "resource/create", {
@@ -104,31 +106,34 @@ def test_resource_assign_persists_across_save_and_reopen(m2_editor):
     expected = {"type": "Resource", "value": material_path}
     # A null Object property is encoded as "<Object#null>", never as the resource
     # we are about to assign; this proves `assign` actually changed the property.
-    assert _get_property(m2_editor, PLAYER, "material") != expected
+    assert _get_property(m2_editor, target, "material") != expected
     assigned = exec_ok(m2_editor, "resource/assign", {
-        "node_path": PLAYER, "property": "material", "path": material_path,
+        "node_path": target, "property": "material", "path": material_path,
     })
     assert assigned["undoable"] is True
     assert assigned["path"] == material_path
 
-    assert _get_property(m2_editor, PLAYER, "material") == expected
+    assert _get_property(m2_editor, target, "material") == expected
 
     exec_ok(m2_editor, "scene/current/save")
     _reopen_main_scene(m2_editor)
-    assert _get_property(m2_editor, PLAYER, "material") == expected
+    assert _get_property(m2_editor, target, "material") == expected
 
 
 def test_resource_overwrite_without_force(m2_editor):
+    path = "res://resources/overwrite_without_force.tres"
+    exec_ok(m2_editor, "resource/create", {"path": path, "type": "Resource", "properties": {"resource_name": "Before"}})
     overwritten = exec_ok(m2_editor, "resource/create", {
-        "path": "res://resources/player_data.tres",
+        "path": path,
         "type": "Resource",
         "properties": {"resource_name": "Other"},
     })
     assert overwritten["saved"] is True
+    assert exec_ok(m2_editor, "resource/info", {"path": path})["properties"]["resource_name"] == "Other"
 
 
-
-def test_resource_overwrite_refreshes_cache_for_assign_and_read(m2_editor):
+def test_resource_overwrite_refreshes_cache_for_assign_and_read(m2_editor, m2_main):
+    target = exec_ok(m2_editor, "node/create", {"parent_path": "/root/Main", "type": "Node2D", "name": "OverwriteMaterialConsumer"})["node_path"]
     path = "res://resources/overwrite_cache_material.tres"
     exec_ok(m2_editor, "resource/create", {
         "path": path,
@@ -151,20 +156,26 @@ def test_resource_overwrite_refreshes_cache_for_assign_and_read(m2_editor):
 
     expected = {"type": "Resource", "value": path}
     exec_ok(m2_editor, "resource/assign", {
-        "node_path": PLAYER, "property": "material", "path": path,
+        "node_path": target, "property": "material", "path": path,
     })
-    assert _get_property(m2_editor, PLAYER, "material") == expected
-    exec_ok(m2_editor, "resource/delete", {"path": path})
+    assert _get_property(m2_editor, target, "material") == expected
+    # The consumer remains in shared Main, so its external dependency must remain too.
+    exec_ok(m2_editor, "scene/current/save")
+    _reopen_main_scene(m2_editor)
+    assert _get_property(m2_editor, target, "material") == expected
+    assert exec_ok(m2_editor, "resource/info", {"path": path})["properties"][
+        "resource_name"
+    ] == "AfterOverwrite"
 
 def test_resource_create_assign_delete_round_trip(m2_editor):
     create_result = exec_ok(m2_editor, "resource/create", {
-        "path": "res://resources/generated.tres",
+        "path": "res://resources/m2_generated_resource.tres",
         "type": "Resource",
         "properties": {"resource_name": "Generated"},
     })
     assert create_result["saved"] is True
     deleted = exec_ok(m2_editor, "resource/delete", {
-        "path": "res://resources/generated.tres"
+        "path": "res://resources/m2_generated_resource.tres"
     })
     assert deleted["deleted"] is True
 
@@ -175,7 +186,7 @@ def test_resource_files_untouched_on_rejection(m2_editor):
     assert tree_digest(m2_editor["project"]) == before
 
 
-def test_resource_assign_checks_subclass_and_preserves_undo_redo_on_rejection(m2_editor):
+def test_resource_assign_checks_subclass_and_preserves_undo_redo_on_rejection(m2_editor, m2_main):
     material = "res://resources/assign_wrong_material.tres"
     texture = "res://resources/assign_texture.tres"
     exec_ok(m2_editor, "resource/create", {"path": material, "type": "StandardMaterial3D"})
@@ -214,7 +225,7 @@ def test_resource_assign_checks_subclass_and_preserves_undo_redo_on_rejection(m2
     assert _get_property(m2_editor, target, "texture") == expected
 
 
-def test_resource_assign_custom_script_inheritance_multiple_hints_and_setter_rejection(m2_editor):
+def test_resource_assign_custom_script_inheritance_multiple_hints_and_setter_rejection(m2_editor, m2_main):
     base_script = "res://scripts/assignment_data.gd"
     child_script = "res://scripts/assignment_child.gd"
     holder_script = "res://scripts/assignment_holder.gd"

@@ -22,9 +22,3 @@ func _process(_delta: float) -> void:
 	if pressed and not _previous_pressed:
 		_target.call("add_action")
 	_previous_pressed = pressed
-
-
-func reset_fixture() -> void:
-	Input.action_release("ui_accept")
-	_previous_pressed = false
-	_target = get_tree().root.get_node_or_null("RuntimeMain/ProbeTarget")

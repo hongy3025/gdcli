@@ -5,6 +5,7 @@ extends RefCounted
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
 const NodeEditor := preload("res://addons/gdapi/runtime/services/node_editor.gd")
+const NodePathResolver := preload("res://addons/gdapi/runtime/services/node_path_resolver.gd")
 const VariantCodec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 
 
@@ -90,33 +91,19 @@ static func _set_property(
 	return {"ok": true, "changed": true, "undoable": true}
 
 
+## node_path/body_path/parent_path 同时接受场景根相对路径与 node/* 回传的绝对用户路径。
 static func _find(path: String) -> Dictionary:
-	var root := EditorInterface.get_edited_scene_root()
-	if root == null:
-		return _error(ErrorCodes.NOT_FOUND, "no scene is currently open")
-	# 接受「/root/<场景根>/...」、场景根相对路径与裸节点名，返回统一绝对路径。
-	var absolute := _absolute(path)
-	var prefix := "/root/" + String(root.name)
-	var node: Node = null
-	if absolute == prefix:
-		node = root
-	elif absolute.begins_with(prefix + "/"):
-		node = root.get_node_or_null(NodePath(absolute.trim_prefix(prefix + "/")))
-	if node == null:
-		return _error(ErrorCodes.NOT_FOUND, "node not found")
-	return {"ok": true, "node": node, "path": absolute}
+	var found := NodePathResolver.resolve(path)
+	if not found.ok:
+		return _error(found.code, found.error)
+	return {"ok": true, "node": found.node, "path": found.path}
 
 
 static func _absolute(path: Variant) -> String:
-	var raw := String(path) if typeof(path) == TYPE_STRING else ""
-	if raw.begins_with("/root/"):
-		return raw
-	var root := EditorInterface.get_edited_scene_root()
-	if root == null:
-		return raw
-	if raw == String(root.name) or raw.is_empty():
-		return "/root/" + String(root.name)
-	return "/root/" + String(root.name) + "/" + raw.trim_prefix("/")
+	var found := NodePathResolver.resolve(path if typeof(path) == TYPE_STRING else "")
+	if found.ok:
+		return found.path
+	return String(path) if typeof(path) == TYPE_STRING else ""
 
 
 static func _error(code: String, message: String) -> Dictionary:

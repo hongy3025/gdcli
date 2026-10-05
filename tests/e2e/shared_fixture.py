@@ -1,18 +1,8 @@
-"""Shared E2E lifecycle: one Godot editor per pytest session.
+"""One persistent Godot project/editor session for the complete E2E workload.
 
-This module owns the canonical session-scoped fixture (`e2e_editor`) and the
-helpers every module uses to reach it:
-
-* `e2e_editor` — session-scoped; the only fixture that creates a
-  `subprocess.Popen`, copies the unified project, installs the addon, and
-  waits for gdapi readiness.
-* `reset_shared_state` — deterministic per-test reset that stops games,
-  clears runtime transport, clears the audit log, and restores the
-  selection.
-
-Legacy module fixtures (`m2_editor`, `m3_editor`, `m4_env`, `m5_editor`,
-`m6_editor*`) are session-scoped aliases that all resolve to the same
-`e2e_editor` environment.
+Tests observe and manipulate live state. They own their resources and explicit
+run/stop scenarios; the harness never restores a whole-project baseline or
+closes/reopens scenes between cases. Native suites use the editor's file bridge.
 """
 
 from __future__ import annotations
@@ -25,7 +15,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pytest
 
@@ -206,7 +196,7 @@ def _copy_native_library(env: dict[str, Any]) -> None:
 
 def build_editor_command(godot_bin: str, project: Path) -> list[str]:
     command = [godot_bin, "--editor"]
-    if os.environ.get("GDAPI_E2E_EDITOR_MODE", "headless") == "gui":
+    if os.environ.get("GDAPI_E2E_EDITOR_MODE", "gui") == "gui":
         command.extend(["--rendering-method", "gl_compatibility"])
     else:
         command.append("--headless")
@@ -277,13 +267,7 @@ def _start_editor(env: dict[str, Any]) -> subprocess.Popen:
     try:
         wait_for_godot_ready(env["project"])
     except BaseException:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=10)
+        _terminate_editor_process(process)
         log_handle.close()
         raise
     env["meta"] = meta
@@ -352,107 +336,6 @@ def _runtime_root(project: Path) -> Path:
     return runtime_root
 
 
-# ── reset contract ────────────────────────────────────────────────────
-
-
-RESTORE_ATTEMPTS = 6
-RESTORE_RETRY_DELAY_SECONDS = 0.1
-
-# Godot 自身维护的项目文件：编辑器会在 AudioServer 变化后自行写出或删除
-# （实测 default_bus_layout.tres 会在测试前后反复出现/消失），因此与 `.godot/`
-# 一样不纳入基线固定；路由写出的资源仍受基线约束。
-UNPINNED_PROJECT_FILES = {"default_bus_layout.tres"}
-
-
-def is_tracked_project_file(relative: str) -> bool:
-    """Whether a project-relative path is pinned by the file baseline.
-
-    例外（有意排除）：
-    - `.godot/`、`addons/gdapi/`：生成物与安装产物；
-    - `project.godot` 及 Godot 写入时生成的临时文件：由设置保存管理；
-    - `UNPINNED_PROJECT_FILES` 及原生保存临时文件：Godot 自身维护的文件。
-    """
-    if relative in UNPINNED_PROJECT_FILES:
-        return False
-    if relative.endswith(".tmp"):
-        for filename in ("project.godot", *UNPINNED_PROJECT_FILES):
-            if relative.startswith(filename) and relative[len(filename) : -len(".tmp")].isdigit():
-                return False
-    return not (
-        relative.startswith(".godot/")
-        or relative.startswith("addons/gdapi/")
-        or relative == "project.godot"
-    )
-
-
-def tracked_project_files(project: Path) -> dict[str, Path]:
-    """Enumerate pinned files without traversing generated or installed trees."""
-    files: dict[str, Path] = {}
-    for directory, subdirectories, names in os.walk(project):
-        base = Path(directory)
-        relative = base.relative_to(project)
-        subdirectories[:] = [
-            name for name in subdirectories
-            if is_tracked_project_file((relative / name).as_posix() + "/")
-        ]
-        for name in names:
-            rel = (relative / name).as_posix()
-            if is_tracked_project_file(rel):
-                path = base / name
-                if path.is_file():
-                    files[rel] = path
-    return files
-
-
-def _baseline_mismatches(project: Path, baseline: dict[str, bytes]) -> list[str]:
-    mismatched: list[str] = []
-    for rel, data in sorted(baseline.items()):
-        path = project / rel
-        try:
-            if not path.is_file() or path.read_bytes() != data:
-                mismatched.append(rel)
-        except OSError:
-            mismatched.append(rel)
-    return mismatched
-
-
-def restore_file_state(env: dict[str, Any], baseline: dict[str, bytes]) -> None:
-    """Restore every file that differs from the captured baseline.
-
-    Godot 可能在恢复期间异步重写项目文件（例如 AudioServer 重新保存
-    `default_bus_layout.tres`），因此写回后要校验并重试；仍不一致时报错，
-    不能静默吞掉失败（否则隔离缺陷会伪装成偶发断言失败）。
-    """
-    project = env["project"]
-    mismatched: list[str] = []
-    for _attempt in range(RESTORE_ATTEMPTS):
-        current_files = tracked_project_files(project)
-        for rel, path in current_files.items():
-            if rel not in baseline:
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-        for rel, data in baseline.items():
-            destination = project / rel
-            if rel in current_files and current_files[rel].read_bytes() == data:
-                continue
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                destination.write_bytes(data)
-            except OSError:
-                pass
-        mismatched = _baseline_mismatches(project, baseline)
-        if not mismatched:
-            return
-        time.sleep(RESTORE_RETRY_DELAY_SECONDS)
-    raise AssertionError(f"file baseline could not be restored: {mismatched}")
-
-
-def snapshot_files(env: dict[str, Any]) -> dict[str, bytes]:
-    """Snapshot every non-generated file in the project for later restore."""
-    project = env["project"]
-    return {rel: path.read_bytes() for rel, path in tracked_project_files(project).items()}
 
 
 def _current_scene_path(env: dict[str, Any]) -> str:
@@ -485,55 +368,9 @@ def wait_for_scene(
     return False
 
 
-def reset_shared_state(env: dict[str, Any], *, reason: str) -> None:
-    """Deterministically restore the shared editor to a known baseline.
-
-    Always called between tests; failure raises `AssertionError` with the
-    phase name, command, runtime status, and Godot log tail so the test
-    output can drive a fix.
-    """
-    project = env["project"]
-    failures: list[str] = []
-
-    def _run(phase: str, route: str, data: dict | None = None) -> bool:
-        try:
-            gdcli_call(env, route, data)
-            return True
-        except BaseException as exc:
-            failures.append(
-                f"[{phase}] {route}: {exc}\n"
-                f"godot log tail:\n{_read_log_tail(env.get('godot_log_path', project / '.godot' / 'godot.log'))}"
-            )
-            return False
-
-    # M2/M4/M5 only run the game through lifecycle helpers that maintain this
-    # flag. Avoid an unnecessary stop RPC when those helpers prove it detached;
-    # environments without the flag retain the conservative stop behavior.
-    if env.get("game_attached") is not False:
-        if _run("project/stop", "project/stop", None):
-            env["game_attached"] = False
-    # Close and re-open the M2 baseline scene so signal connections and
-    # other in-memory mutations from a previous test do not survive.
-    try:
-        gdcli_call(env, "scene/close", None)
-    except BaseException:
-        pass
-    _run("scene/open", "scene/open", {"path": E2E_BASELINE_SCENE})
-    if not wait_for_scene(env, E2E_BASELINE_SCENE):
-        failures.append(
-            f"[scene/open] editor never switched to {E2E_BASELINE_SCENE} "
-            f"(current={_current_scene_path(env) or '<none>'})"
-        )
-    _run("editor/selection/set", "editor/selection/set", {"nodes": []})
-    _run("gdapi/audit/clear", "gdapi/audit/clear", {})
-
-    if failures:
-        raise AssertionError(
-            f"reset_shared_state failed (reason={reason}):\n" + "\n".join(failures)
-        )
 
 
-# ── environment construction (pure function) ──────────────────────────
+# ── one-time environment construction ──────────────────────────────────
 
 
 def build_environment(
@@ -541,11 +378,7 @@ def build_environment(
     *,
     godot_bin: str | None = None,
 ) -> dict[str, Any]:
-    """Create the shared environment; pure logic behind `e2e_editor`.
-
-    Tests can call this directly (without invoking the pytest fixture
-    machinery) to verify the start-up contract.
-    """
+    """Build/install once and start the only project/editor for this session."""
     godot_bin = godot_bin or resolve_godot_bin()
     godot_version = require_godot_47(godot_bin)
     root = repo_root()
@@ -577,53 +410,33 @@ def build_environment(
         "godot_version": godot_version,
         "gdcli": gdcli_bin(),
         "game_attached": False,
-        # M3 harness counters and recovery state — initialised here so
-        # the M3 tests can read/write them through the shared env.
-        "build_count": 1,
-        "install_count": 1,
-        "editor_start_count": 1,
+        # Explicit lifecycle operations update these counters; no reset recovery.
         "game_run_count": 0,
         "game_stop_count": 0,
-        "fixture_reset_count": 0,
-        "fixture_reset_restarts": 0,
-        "recovery_markers": [],
-        "recovery_events": [],
-        "setup_events": ["build", "install", "editor_start"],
-        "pre_attach_stale_removed": True,
-        "editor_pids": set(),
     }
 
     _copy_native_library(env)
     process = _start_editor(env)
     _record_editor_start(process.pid, env["project"])
-    env.setdefault("editor_pids", set()).add(process.pid)
-    env["file_baseline"] = snapshot_files(env)
-    # Open the M2 baseline scene so editor-state assertions like
-    # `test_editor_starts_with_main_scene` see the same root scene the
-    # M2 fixture used to provide.
+    # Establish the initial editor context once, not before/after each case.
     try:
         gdcli_call(env, "scene/open", {"path": E2E_BASELINE_SCENE})
-        wait_for_scene(env, E2E_BASELINE_SCENE)
-    except AssertionError:
-        pass
+        if not wait_for_scene(env, E2E_BASELINE_SCENE):
+            raise RuntimeError("initial editor scene did not become current")
+    except BaseException:
+        _stop_editor(env)
+        raise
     return env
 
 
-def teardown_environment(env: dict[str, Any], *, reset: bool = True) -> None:
-    """Stop the editor and clear the runtime transport; mirrors fixture finally.
-
-    重置失败不再静默丢弃：先确保编辑器已停止，再把失败暴露为会话级错误。
-    `reset=False` 供 mock 环境的单元用例使用（没有真实编辑器可重置）。
-    """
-    failure: BaseException | None = None
-    if reset:
-        try:
-            reset_shared_state(env, reason="session teardown")
-        except BaseException as exc:
-            failure = exc
-    _stop_editor(env)
-    if failure is not None:
-        raise AssertionError(f"session teardown reset failed: {failure}") from failure
+def teardown_environment(env: dict[str, Any]) -> None:
+    """Stop the actual game/editor once, without resetting project or scene state."""
+    try:
+        if env.get("game_attached"):
+            from e2e.m3.conftest import detach_game
+            detach_game(env)
+    finally:
+        _stop_editor(env)
 
 
 def assert_single_editor_session() -> None:
@@ -655,6 +468,12 @@ def e2e_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
     try:
         yield env
+        expected = env.get("persistent_session_marker")
+        if expected is not None:
+            actual = gdcli_call(env, "filesystem/read", {"path": expected["path"]})
+            assert actual["content"] == expected["content"], (
+                "live project state was reset or overwritten during the shared session"
+            )
     finally:
         from .timing import TIMINGS
         TIMINGS.enabled = True
@@ -677,10 +496,7 @@ def e2e_editor(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 # (file path substring, test function name) → bucket index
 _BUCKET_RULES: tuple[tuple[str, str | None, int], ...] = (
     # Bucket 0: repository/fixture lifecycle checks that run first
-    ("test_unified_fixture_contract.py", None, 0),
-    ("test_shared_editor_lifecycle.py", None, 0),
     ("test_shared_editor_contract.py", None, 0),
-    ("test_collection_order.py", None, 0),
     # Bucket 4: slow paths — collected last
     ("m5/test_export.py", None, 4),
     ("m6/test_process_run.py", None, 4),
@@ -724,137 +540,73 @@ def _classify(path: str) -> int:
     return 2
 
 
-# ── module-scoped alias fixtures ──────────────────────────────────────
+# ── session-scoped domain fixtures ─────────────────────────────────────
 #
-# Each of these returns the same `e2e_editor` env so the existing
-# per-module test files can keep their original fixture names. They are
-# `module`-scoped (not `session`) so that the autouse per-test reset
-# fixture in each module's conftest.py still fires once per test, but
-# no extra process is ever started.
+# Every domain uses the same editor/environment. None captures a baseline
+# or supplies a per-case cleanup finalizer.
 
 
 @pytest.fixture(scope="session")
 def m2_editor(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias of `e2e_editor` for M2 tests."""
+    """Persistent editor used by M2 tests."""
     return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m3_editor(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias of `e2e_editor` for M3 tests."""
+    """Persistent editor used by runtime tests."""
     return e2e_editor
 
 
-@pytest.fixture(scope="package")
-def m3_running(m3_editor) -> Any:
-    """Share one runtime game across M3 data-plane modules."""
-    from e2e.m3.conftest import attach_game, detach_game
-    if not m3_editor.get("game_attached"):
-        attach_game(m3_editor)
-    try:
-        yield m3_editor
-    finally:
-        if m3_editor.get("game_attached"):
-            detach_game(m3_editor)
+@pytest.fixture()
+def m3_running(m3_editor) -> dict[str, Any]:
+    """Reuse the live game; only start after an explicit lifecycle operation stopped it."""
+    from e2e.m3.conftest import ensure_running
+    ensure_running(m3_editor)
+    return m3_editor
 
 
-@pytest.fixture(scope="session")
-def m3_lifecycle(e2e_editor) -> dict[str, Any]:
-    """Run the single status lifecycle scenario: initial stopped, then run/stop twice.
-
-    Returns a dict with `initial` and `cycles` keys matching the original
-    M3 fixture contract. Failures abort the scenario and the env is left
-    in a stopped state; pytest will surface the diagnostic.
-    """
-    from e2e.m3.conftest import (  # late import to avoid cycles
-        exec_ok, project_run, _runtime_root, _runtime_entries,
-        wait_for_connected, wait_for_editor_playing, detach_game, reset_fixture,
-    )
-
-    if e2e_editor.get("game_attached"):
-        detach_game(e2e_editor)
-    initial = exec_ok(e2e_editor, "runtime/status")
-    cycles: list[dict[str, Any]] = []
-    scenario_error: BaseException | None = None
-    try:
-        for cycle_index in range(2):
-            started = project_run(e2e_editor)
-            wait_for_editor_playing(e2e_editor)
-            connected = wait_for_connected(e2e_editor, timeout=60.0)
-            active = exec_ok(e2e_editor, "runtime/status")
-            stale = (
-                _runtime_root(e2e_editor)
-                / f"stale-lifecycle-{cycle_index}"
-                / "reply.json"
-            )
-            stale.parent.mkdir(parents=True, exist_ok=True)
-            stale.write_text("stale", encoding="utf-8")
-            stopped_status = detach_game(e2e_editor)
-            stopped = {"ok": True, "runtime_state": stopped_status["state"]}
-            cycles.append({
-                "cycle": cycle_index,
-                "started": started,
-                "connected": connected,
-                "active": active,
-                "stopped": stopped,
-                "stopped_status": stopped_status,
-                "runtime_entries": _runtime_entries(e2e_editor),
-                "stale_removed": not stale.exists(),
-            })
-    except BaseException as exc:
-        scenario_error = exc
-        raise
-    finally:
-        try:
-            if e2e_editor.get("game_attached"):
-                detach_game(e2e_editor)
-            else:
-                reset_fixture(e2e_editor)
-        except BaseException:
-            if scenario_error is None:
-                raise
-    return {"initial": initial, "cycles": cycles}
 
 
 @pytest.fixture(scope="session")
 def m4_env(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias of `e2e_editor` for M4 tests."""
+    """Persistent editor used by game-system tests."""
     return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m5_editor(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias of `e2e_editor` for M5 tests."""
+    """Persistent editor used by project/resource tests."""
     return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m6_editor(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias of `e2e_editor` for M6 tests."""
+    """Persistent editor used by M6 tests."""
     return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m6_editor_process(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias used by M6 process tests."""
+    """Persistent editor used by M6 process tests."""
     return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m6_editor_eval(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias used by M6 eval tests."""
+    """Persistent editor used by M6 eval tests."""
     return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m6_editor_bulk(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias used by M6 bulk tests."""
+    """Persistent editor used by M6 bulk-file tests."""
     return e2e_editor
 
 
 @pytest.fixture(scope="session")
 def m6_editor_network(e2e_editor) -> dict[str, Any]:
-    """Module-scoped alias used by M6 network tests."""
+    """Persistent editor used by M6 network tests."""
     return e2e_editor
 
 
@@ -868,8 +620,5 @@ __all__ = [
     "e2e_editor",
     "gdcli_call",
     "gdcli_expect_failure",
-    "reset_shared_state",
-    "restore_file_state",
-    "snapshot_files",
     "teardown_environment",
 ]

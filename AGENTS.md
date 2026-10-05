@@ -53,23 +53,23 @@ cargo test -p gdapi
 
 #### 2. E2E 测试集（需要 Godot）
 
-pytest E2E 测试，需要 Godot 编辑器运行（用 uv 管理 Python venv）。预算测试默认排除。
+pytest E2E 测试使用单一持久 GUI 编辑器和项目（用 uv 管理 Python venv），包含 file transport、EngineDebugger、真实渲染器及编辑器内原生套件。预算验收在外层门禁中显式启用。
 
 ```bash
-# 运行核心 E2E 套件（排除预算测试）
+# 运行完整共享实例 E2E 套件
 uv run pytest tests/e2e/ -v
 
 # 仅运行 e2e 标记的测试
 uv run pytest tests/e2e/ -v -m e2e
 ```
 
-#### 3. 预算测试集（需要 Godot，耗时约 6 分钟）
+#### 3. 预算验收（需要 Godot）
 
-全套件 walltime 验收测试，嵌套运行核心 E2E 套件并检查耗时不超过 360 秒。
+外层门禁测量完整 pytest 子进程从启动到退出的真实 walltime，检查不超过 360 秒；不嵌套 pytest，不额外启动编辑器。
 
 ```bash
 # 运行预算验收测试
-uv run pytest tests/e2e/test_full_suite_budget.py -m budget -v
+uv run python scripts/check.py --gate e2e --gate budget
 ```
 
 ## GDScript 格式化与 lint 强制门禁

@@ -4,15 +4,33 @@ from __future__ import annotations
 
 import pytest
 
-from .helpers import editor_redo, editor_undo, exec_error, exec_ok, save_reopen
+from .helpers import editor_redo, editor_undo, exec_error, exec_ok, save_scene, select_domain
 
 
 SCENE = "res://scenes/animation.tscn"
 TREE = {"tree_path": "AnimationTree"}
 
 
+def _authored_tree(env, name):
+    """Create a scenario-owned graph, leaving other authored trees intact.
+
+    ``tree_path`` is node/create's absolute user path (``/root/<root>/<name>``),
+    which animation_tree routes resolve to the same node as the scene-relative
+    form; generic node/property/set stays absolute per the node/* contract.
+    """
+    created = exec_ok(env, "node/create", {
+        "parent_path": "/root/AnimationDomain", "type": "AnimationTree", "name": name,
+    })
+    tree = {"tree_path": created["node_path"]}
+    exec_ok(env, "node/property/set", {
+        "node_path": created["node_path"], "property": "anim_player",
+        "value": {"type": "NodePath", "value": "../AnimationPlayer"},
+    })
+    return tree
+
+
 def test_audio_bus_properties_effects_persist_and_undo(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": "res://scenes/audio.tscn"})
+    select_domain(m4_env, "audio")
     exec_ok(m4_env, "audio/bus/add", {"name": "AuthoredAudio"})
     properties = {"volume_db": -7.5, "mute": True, "solo": True, "bypass": True, "send": "Master"}
     changed = exec_ok(m4_env, "audio/bus/set", {"name": "AuthoredAudio", "properties": properties})
@@ -78,7 +96,7 @@ def test_audio_send_cycles_and_invalid_effects_are_atomic(m4_env):
 
 
 def test_animation_state_removal_cleans_transitions_and_undo(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": SCENE})
+    select_domain(m4_env, "animation")
     exec_ok(m4_env, "animation_tree/state/add", TREE | {"name": "remove_me"})
     edge = TREE | {"from": "Start", "to": "remove_me"}
     exec_ok(m4_env, "animation_tree/transition/add", edge)
@@ -92,18 +110,20 @@ def test_animation_state_removal_cleans_transitions_and_undo(m4_env):
     editor_undo(m4_env)
     assert exec_error(m4_env, "animation_tree/transition/add", edge)["code"] == "conflict"
     editor_redo(m4_env)
-    save_reopen(m4_env, SCENE)
+    content = save_scene(m4_env, SCENE)
+    assert "remove_me" not in content
     exec_ok(m4_env, "animation_tree/state/add", TREE | {"name": "remove_me"})
     assert exec_error(m4_env, "animation_tree/state/remove", TREE | {"name": "Start"})["code"] == "invalid_param"
 
 
 def test_blend_tree_authoring_serialization_and_undo(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": SCENE})
-    exec_ok(m4_env, "animation/create", {"player_path": "AnimationPlayer", "name": "idle"})
+    select_domain(m4_env, "animation")
+    TREE = _authored_tree(m4_env, "SerializationTree")
+    exec_ok(m4_env, "animation/create", {"player_path": "AnimationPlayer", "name": "graph_idle"})
     created = exec_ok(m4_env, "animation_tree/blend_tree/create", TREE)
     assert created["undoable"] is True
     exec_ok(m4_env, "animation_tree/blend_tree/add", TREE | {
-        "name": "idle", "type": "AnimationNodeAnimation", "properties": {"animation": "idle"},
+        "name": "idle", "type": "AnimationNodeAnimation", "properties": {"animation": "graph_idle"},
     })
     exec_ok(m4_env, "animation_tree/blend_tree/add", TREE | {"name": "blend", "type": "AnimationNodeBlend2", "parameters": {"blend_amount": 0.25}})
     exec_ok(m4_env, "animation_tree/blend_tree/add", TREE | {"name": "scale", "type": "AnimationNodeTimeScale", "parameters": {"scale": 1.5}})
@@ -112,12 +132,16 @@ def test_blend_tree_authoring_serialization_and_undo(m4_env):
     authored = exec_ok(m4_env, "animation_tree/blend_tree/get", TREE)
     assert authored["parameters"]["parameters/blend/blend_amount"] == 0.25
     assert authored["parameters"]["parameters/scale/scale"] == 1.5
-    save_reopen(m4_env, SCENE)
-    reopened = exec_ok(m4_env, "animation_tree/blend_tree/get", TREE)
-    assert reopened["connections"] == authored["connections"]
-    assert reopened["parameters"] == authored["parameters"]
-    idle = next(node for node in reopened["nodes"] if node["name"] == "idle")
-    assert idle["properties"]["animation"] == "idle"
+    content = save_scene(m4_env, SCENE)
+    assert 'animation = &"graph_idle"' in content
+    assert 'name="SerializationTree"' in content
+    assert "parameters/blend/blend_amount = 0.25" in content
+    assert "parameters/scale/scale = 1.5" in content
+    saved_state = exec_ok(m4_env, "animation_tree/blend_tree/get", TREE)
+    assert saved_state["connections"] == authored["connections"]
+    assert saved_state["parameters"] == authored["parameters"]
+    idle = next(node for node in saved_state["nodes"] if node["name"] == "idle")
+    assert idle["properties"]["animation"] == "graph_idle"
     exec_ok(m4_env, "animation_tree/blend_tree/set", TREE | {"name": "blend", "parameters": {"blend_amount": 0.75}})
     editor_undo(m4_env)
     assert exec_ok(m4_env, "animation_tree/blend_tree/get", TREE)["parameters"]["parameters/blend/blend_amount"] == 0.25
@@ -142,7 +166,8 @@ def test_blend_tree_authoring_serialization_and_undo(m4_env):
     ("AnimationNodeSub2", {"sub_amount": 0.5}),
 ])
 def test_common_blend_nodes_have_real_typed_parameters(m4_env, node_type, parameters):
-    exec_ok(m4_env, "scene/open", {"path": SCENE})
+    select_domain(m4_env, "animation")
+    TREE = _authored_tree(m4_env, "Typed" + node_type)
     exec_ok(m4_env, "animation_tree/blend_tree/create", TREE)
     result = exec_ok(m4_env, "animation_tree/blend_tree/add", TREE | {"name": "authored", "type": node_type, "parameters": parameters})
     assert next(node for node in result["nodes"] if node["name"] == "authored")["type"] == node_type
@@ -151,7 +176,8 @@ def test_common_blend_nodes_have_real_typed_parameters(m4_env, node_type, parame
 
 
 def test_blend_tree_invalid_graph_and_parameters_are_atomic(m4_env):
-    exec_ok(m4_env, "scene/open", {"path": SCENE})
+    select_domain(m4_env, "animation")
+    TREE = _authored_tree(m4_env, "AtomicGraphTree")
     exec_ok(m4_env, "animation_tree/blend_tree/create", TREE)
     for name in ["a", "b"]:
         exec_ok(m4_env, "animation_tree/blend_tree/add", TREE | {"name": name, "type": "AnimationNodeBlend2"})

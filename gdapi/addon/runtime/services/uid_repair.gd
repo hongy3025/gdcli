@@ -86,10 +86,26 @@ static func repair(body: Dictionary) -> Dictionary:
 				if change.uid_sidecar_existed
 				else PackedByteArray()
 			)
+			if _uses_uid_sidecar(change.path):
+				var sidecar_checked := PathGuard.validate(uid_path, "write")
+				if not sidecar_checked.ok:
+					return sidecar_checked
+				if change.uid_sidecar_existed:
+					var sidecar_probe: FileAccess = null
+					if not FileAccess.get_read_only_attribute(uid_path):
+						sidecar_probe = FileAccess.open(uid_path, FileAccess.READ_WRITE)
+					if sidecar_probe == null:
+						return {
+							"ok": false,
+							"code": ErrorCodes.PERMISSION_DENIED,
+							"error": "UID sidecar is not writable",
+							"details": {"failed_path": uid_path, "applied": 0}
+						}
+					sidecar_probe.close()
 		var attempted: Array = []
 		for change in planned:
 			attempted.append(change)
-			var error := ResourceSaver.set_uid(change.path, int(change.new_uid))
+			var error := _set_uid(change.path, int(change.new_uid))
 			var written_uid := int(ResourceLoader.get_resource_uid(change.path))
 			if error != OK or written_uid != int(change.new_uid):
 				var rollback_failures := _rollback_targets(attempted)
@@ -125,6 +141,12 @@ static func repair(body: Dictionary) -> Dictionary:
 						"rollback_failures": rollback_failures
 					}
 				}
+			if _uses_uid_sidecar(change.path):
+				var new_id := int(change.new_uid)
+				if ResourceUID.has_id(new_id):
+					ResourceUID.set_id(new_id, change.path)
+				else:
+					ResourceUID.add_id(new_id, change.path)
 		for change in planned:
 			change.erase("original_bytes")
 			change.erase("uid_sidecar_existed")
@@ -146,6 +168,25 @@ static func repair(body: Dictionary) -> Dictionary:
 		"changed": not dry_run and not changes.is_empty(),
 		"undoable": false
 	}
+
+
+static func _uses_uid_sidecar(path: String) -> bool:
+	return path.get_extension().to_lower() == "gdshader"
+
+
+static func _set_uid(path: String, uid: int) -> int:
+	# Text shaders have no ResourceFormatSaver.set_uid implementation. Their
+	# ResourceFormatLoader reads the UID from a sidecar instead of source bytes.
+	if not _uses_uid_sidecar(path):
+		return ResourceSaver.set_uid(path, uid)
+	var file := FileAccess.open(path + ".uid", FileAccess.WRITE)
+	if file == null:
+		return FileAccess.get_open_error()
+	file.store_line(ResourceUID.id_to_text(uid))
+	file.flush()
+	var error := file.get_error()
+	file.close()
+	return error
 
 
 static func _rollback_targets(attempted: Array) -> Array:

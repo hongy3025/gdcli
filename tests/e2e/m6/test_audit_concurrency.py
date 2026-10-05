@@ -11,7 +11,8 @@ def test_concurrent_process_network_and_mutation_audit_once(
     m6_editor_process, local_http_server,
 ):
     env = m6_editor_process
-    exec_ok(env, "gdapi/audit/clear")
+    baseline = exec_ok(env, "gdapi/audit/list", {"limit": 1000})["entries"]
+    since = max((entry["seq"] for entry in baseline), default=0)
     with ThreadPoolExecutor(max_workers=4) as pool:
         timeout = pool.submit(_exec_raw, env, "process/run", {
             "executable": "sleep.cmd", "args": ["10"], "cwd": "res://tools",
@@ -33,7 +34,7 @@ def test_concurrent_process_network_and_mutation_audit_once(
     assert "audit-concurrency" in success_reply["stdout"], success_reply
     assert network_reply["ok"] is True and network_reply["status"] == 200, network_reply
     assert failed_reply["code"] == "missing_param", failed_reply
-    entries = exec_ok(env, "gdapi/audit/list", {"limit": 1000})["entries"]
+    entries = exec_ok(env, "gdapi/audit/list", {"since": since, "limit": 1000})["entries"]
     process = [entry for entry in entries if entry["route"] == "process/run"]
     assert len(process) == 2, process
     assert {(entry["ok"], entry["code"]) for entry in process} == {(True, ""), (False, "timeout")}
@@ -49,4 +50,4 @@ def test_concurrent_process_network_and_mutation_audit_once(
         assert len(matching) == 1, matching
         assert (matching[0]["safety"], matching[0]["ok"], matching[0]["code"]) == (safety, ok, code)
     # A later read must not trigger the obsolete deferred finish duplicate.
-    assert exec_ok(env, "gdapi/audit/list", {"limit": 1000})["entries"] == entries
+    assert exec_ok(env, "gdapi/audit/list", {"since": since, "limit": 1000})["entries"] == entries

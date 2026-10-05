@@ -8,6 +8,7 @@
 - `scene/list_open` 返回全部打开场景（此前只返回当前场景）；`scene/close` 明确为「仅当前场景」。
 - `resource/assign` 校验目标属性必须是资源槽位，否则返回 `invalid_param`（与 `doc()` 一致）。
 - 移除 Android 平台能力：删除 `export/android/{devices,deploy,deploy_many}` 路由、`android_bridge` 与 `bulk_deploy_service` 服务及其测试/fixture。`export/run` 统一使用 `--export-pack`，`export/presets` 响应不再包含 `templates` 字段。Android 不再属于本分支目标与验收范围。
+- 测试门禁收口为 `format|clippy|unit|e2e|budget`；移除独立 `file/engine/render` 门禁及嵌套 pytest 预算入口。预算改用 `uv run python scripts/check.py --gate budget`，与 `--gate e2e` 同次选择时不重复运行。
 
 ### Features
 - `gdcli exec` 支持 TOON 输出，自动根据响应数据结构选择表格/键值/树状形态
@@ -20,8 +21,11 @@
 ### Fixes
 - E2E Undo/Redo 文件桥改用同目录临时文件关闭后的原子发布，消除编辑器读取半写 JSON 并删除命令所触发的 10 秒等待；保留等待期限、重投次数与请求幂等语义，清理失败遗留的临时文件。真实编辑器烟测复现修复前的命令丢失并验证修复后一次完成；动画 Undo/Redo 回归同时检查写入过程中正式命令不会暴露半写 JSON。
 - E2E Undo/Redo 结果发布遭遇 Windows 读句柄共享冲突时，插件保留已写好的临时结果并在后续帧继续发布，避免结果丢失后白等 10 秒再重投；不重写内容或重做历史操作。真实文件锁烟测及动画历史回归验证解锁后的快速恢复与只执行一次。
-- E2E 文件基线将 Godot 自身维护的根目录音频布局原生保存临时文件与正式布局一并排除，避免自动保存重命名期间快照读取已消失文件；仍跟踪嵌套同名文件、非数字后缀备份及其他用户资源，不泛化忽略 `.tmp` 文件。
 - 修复 `uid/repair` 将扫描容器误当文件写入目标的问题：默认 `res://` 与规范化根别名现在可扫描并实际修复 UID；仍拒绝显式受保护根、跳过受保护子树，并保留资源写入预检和全局根目录写入禁令。回归覆盖默认根、根别名去重、真实 UID 落盘及点段保护路径。
+- `node/signal/list` 不再因连接目标不是场景内节点而中断响应：编辑器会给被选中节点接上内部对象（如 `EditorSelection`），此前这类连接会让处理函数抛出脚本类型错误、CLI 只能等到 30 秒超时。现在场景内目标回传 `/root/<场景根>/...` 用户路径，场景外节点回传真实树路径，非节点目标留空并给出 `target_class`；同时删除该路由中未使用的占位代码。
+- M4 域路由的节点路径统一由一个共享解析器处理：既接受路由文档里的场景根相对路径（如 `"AnimationTree"`），也接受 `node/*` 响应回传的绝对用户路径 `/root/<场景根>/...`，两者解析到同一真实节点并回传规范路径；此前绝对路径会被当作 SceneTree 绝对 NodePath 解析而找不到编辑场景内的节点。通用 `node/*` 路由仍只接受绝对路径。
+- 修复 `scene/current` 与 `scene/delete` 的未保存判断在 save-as 后的误判：编辑器对 save-as tab 仍登记旧路径，按路径归属判断会把另一个同路径 tab 误判成脏，导致保存被拒绝、回滚又把该场景真正标记为未保存。现按场景 tab 索引读取编辑器自身的未保存标记（回退到 `get_unsaved_scenes()` 的有序子序列解码），并用场景 root 识别当前场景；原生套件覆盖重复路径、空路径、null root 映射，并用自建场景验证真实编辑→保存的标记闭环。
+- `uid/repair` 对 `.gdshader` 使用 Godot 支持的 UID sidecar，保持 shader 源码字节不变；补齐 shader UID 落盘读回、重复 UID 修复、只读 sidecar 的整批预检及资源/sidecar/注册表原子回滚，修复持久项目广域扫描遇到新 shader 时的失败。
 - HTTP 响应的 RFC 8259 转义修正改用缓存的原生正则扫描与一次性分段合并，移除逐字符字符串累加的二次复杂度；数 MB 截图响应不再长时间卡住编辑器主线程并引发后续 E2E 恢复超时。保留 C0 控制字符修正，新增字面反斜杠、混合转义、Unicode 与嵌套值往返回归。
 - 修复合并审查 R01/R02/R09：跨 origin 重定向永久剥离认证/Cookie 等敏感头；受限 eval 在 Variant 解码/资源加载前递归拒绝危险输入；通用审计摘要清除 URL userinfo，包括错误路径及嵌套字段。
 - 修复 R03 与 Unix 任务生命周期：保持生产默认 30 秒期限，用请求级绝对期限/取消原因协调 HTTP、实际进程和审计；超时、断连、shutdown、drop 先清理后返回失败。Unix 原子创建独立进程组，Windows 保留 Job Object；自然退出也清理持有管道的后代，输出线程可停止并有界排空。
@@ -57,12 +61,12 @@
 - JSON 字符串中的 C0 控制字符现在按 RFC 8259 兼容形式转义；`network/http_request` 将 HTTP 304 视为正常响应，而非重定向。
 
 ### Maintenance
-- E2E 测试专用插件将编辑器聚焦/失焦帧间休眠统一为 2ms，并在退出时恢复设置与当前 OS 休眠值；保留真实 CLI 调用、场景同步屏障、每测试隔离、生产请求期限与现有测试选择，不用零休眠或时间缩放换取 walltime。
-- CLI 的同步 HTTP/install 路径不再创建 Tokio 多线程池，LSP 按需创建单线程运行时；E2E 文件隔离在遍历前剪枝 `.godot` 和安装目录，保留相同文件基线与实际字节核验。
-- 完整门禁的 file/budget 共用同一次新鲜父进程计时，移除重复全套运行；独立 budget 命令仍执行完整套件。E2E 不再覆盖生产 handler 期限；格式/lint 合并有命令行长度上限的批次，去重 junction 的同一物理源码，不减少检查覆盖。
-- 修正 E2E 隔离：`default_bus_layout.tres` 由 Godot 自身维护，不再纳入文件基线（此前导致 M2/M4 隔离断言间歇失败）；`restore_file_state` 写回后校验并在失败时重试，仍不一致则报错而不是静默吞掉。
-- E2E 项目基线排除 Godot 保存 `project.godot` 时生成的瞬态 `.tmp` 文件，避免快照读取到已被重命名的中间文件。
-- E2E harness 收口：会话级断言「只允许启动一个编辑器」（并打印 pid/时间线/调用栈），修掉测试模块导入 fixture 函数导致的重复定义（实测会真的启动两个编辑器）；`scene/open` 之后等待场景切换完成（避免 UndoRedo 绑到旧场景）；M6 增加每测试文件恢复；`teardown_environment` 不再吞掉重置失败；只有缺少 cargo 才 skip；undo 桥等待放宽到 10s（m2/m4 两份）、`wait_for` 默认与 m3 输入等待放宽；budget 测试默认排除（`pyproject.toml` 与文档一致）；`attach_game` 握手失败时打印 status/运行期目录/编辑器 console 诊断。
+- 完整 E2E 切换为单一持久 GUI 编辑器/项目，file、EngineDebugger、真实渲染器和 24 个原生 GDScript 套件共用该会话；移除模块/用例级全项目快照、文件回滚、通用场景/运行时 reset 及每套件 `--script` Godot 进程。普通游戏查询复用组合后的 RuntimeMain；仅真实生命周期/导出行为启动或停止其产品子进程。
+- 测试使用场景自有名称、资源和实时前后状态；审计改用 sequence 游标，输入/日志/计数器不假设初始为零。持续服务中的意外断连报错，不自动重启或伪造成功。真实 CLI 创建的会话资源在全部剩余用例结束后仍需完整读回。
+- 每次完整门禁记录逐 case 的 setup/call/teardown 与精确父进程 wall time；预算仅消费本次新鲜单编辑器证据。生产 handler 默认期限保持 30 秒；格式/lint 保留全覆盖、junction 去重与命令行长度受限批次。
+- E2E 测试插件保留正数 2ms 帧间休眠并在退出时恢复，不使用忙循环或游戏时间缩放；CLI 同步 HTTP/install 不创建 Tokio 多线程池，LSP 按需使用单线程运行时。
+- 完整门禁实测：`uv run python scripts/check.py --gate e2e --gate budget` → 单编辑器（`GODOT_EDITOR_STARTS=1`）584 passed / 1 skipped / 0 failed，pytest 会话 276.4s，父进程 wall-clock **277.2s**（预算 360s）。逐 case 的 setup/call/teardown 与等待样本写入 `.pytest-artifacts/e2e-waits.json`（含 transport、editor mode、单编辑器证据），JUnit 报告为 `e2e.xml`。
+- E2E 会话结束断言只启动一个编辑器，并保留 pid/时间线/调用栈诊断；修复 fixture 重复注册，场景导航等待真正生效以保持 UndoRedo history 归属，失败退出终止整棵编辑器进程树。undo 桥等待为 10s，`attach_game` 握手失败保留 status/运行目录/console 诊断。
 - undo/redo 文件桥改为带 `request_id` 的幂等协议：插件对同一 id 只执行一次并重发结果，harness 超时后重投命令即可覆盖「命令在编辑器读取前被上一帧删除」的竞态与编辑器短暂卡顿，读取结果容忍 Windows rename 共享冲突；m5 InputMap 用例自建动作后自行清理，不再依赖文件基线回滚运行时状态。编辑器终止改为整棵进程树（Windows 的 `godot_console.exe` 会以子进程启动真正的 `godot.exe`，只终止 wrapper 会留下编辑器占用内存/端口/项目目录）。
 - 新增 `GDAPI_E2E_TRANSPORT=engine_debugger`：让整套 E2E 走 EngineDebugger 数据面（默认仍是确定性的 file transport），并补 [外部 godot-mcp 能力对比](docs/reports/2026-10-03-external-parity-comparison.md) 与 [遗留问题清单](docs/todos/2026-10-03-open-issues.md)。
 - 里程碑 route manifest 调整为 M5 = 25、M6 = 7；新增桌面导出验收 `tests/e2e/m5/test_export.py`。

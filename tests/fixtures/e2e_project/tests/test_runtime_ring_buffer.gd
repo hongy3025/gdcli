@@ -3,7 +3,7 @@
 ## 测试有界 ring buffer 的 wraparound、cursor 单调递增、dropped count 等。
 
 @tool
-extends SceneTree
+extends RefCounted
 
 const RingBuffer := preload("res://addons/gdapi/runtime/runtime_ring_buffer.gd")
 
@@ -11,7 +11,7 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	print("Running GdApiRuntimeRingBuffer tests...\n")
 
 	test_init_default_capacity()
@@ -27,10 +27,7 @@ func _init() -> void:
 	test_clear_resets_state()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	if failed > 0:
-		quit(1)
-	else:
-		quit(0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual, expected, context: String = "") -> void:

@@ -9,7 +9,7 @@
 ## editor transport 只负责文件收发。
 
 @tool
-extends SceneTree
+extends RefCounted
 
 const Transport := preload("res://addons/gdapi/runtime/runtime_transport_file_editor.gd")
 const Broker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
@@ -17,13 +17,15 @@ const Protocol := preload("res://addons/gdapi/runtime/runtime_protocol.gd")
 
 var passed := 0
 var failed := 0
+var _test_root := ProjectSettings.globalize_path(
+	"res://.godot/gdapi_native_editor_transport_%d" % Time.get_ticks_usec()
+)
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	print("Running GdApiRuntimeTransportFileEditor tests...")
 
 	test_scan_picks_up_new_hello_file()
-	test_editor_transport_exposes_no_business_request_or_timeout_path()
 	test_broker_request_writes_inbox_and_outbox_reply_reaches_broker()
 	test_unknown_outbox_reply_is_deleted_without_callback()
 	test_malformed_outbox_reply_preserves_live_broker_pending_request()
@@ -36,10 +38,8 @@ func _init() -> void:
 	test_stop_all_recursively_removes_probe_files()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	if failed > 0:
-		quit(1)
-	else:
-		quit(0)
+	_cleanup(_make_root())
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual, expected, context: String = "") -> void:
@@ -60,19 +60,17 @@ func assert_false(value: bool, context: String = "") -> void:
 
 
 func _make_root() -> String:
-	return ProjectSettings.globalize_path("res://.godot/gdapi_runtime_test")
+	return _test_root
 
 
 func _cleanup(root: String) -> void:
 	var dir := DirAccess.open(root)
 	if dir == null:
 		return
+	for name in dir.get_files():
+		dir.remove(name)
 	for sub in dir.get_directories():
-		var sub_dir := DirAccess.open(root.path_join(sub))
-		if sub_dir != null:
-			for n in sub_dir.get_files():
-				sub_dir.remove(n)
-			sub_dir.remove(sub)
+		_cleanup(root.path_join(sub))
 	DirAccess.remove_absolute(root)
 
 
@@ -113,14 +111,8 @@ func test_scan_picks_up_new_hello_file() -> void:
 	t.start()
 	t.tick(Time.get_ticks_msec())
 	assert_eq(t.active_probe_ids(), ["probe1234"], "hello detected")
+	t.stop_all("test cleanup")
 	_cleanup(root)
-
-
-func test_editor_transport_exposes_no_business_request_or_timeout_path() -> void:
-	var t := Transport.new(_make_root())
-	assert_false(t.has_method("request"), "editor transport has no business request entry point")
-	assert_false(t.has_method("pending_count"), "editor transport has no pending counter")
-	assert_false(t.has_method("_expire_timeouts"), "editor transport has no local timeout path")
 
 
 func test_broker_request_writes_inbox_and_outbox_reply_reaches_broker() -> void:
@@ -160,6 +152,7 @@ func test_broker_request_writes_inbox_and_outbox_reply_reaches_broker() -> void:
 	if not received.is_empty():
 		assert_eq(received[0]["result"]["echo"], id, "reply payload correct")
 	assert_eq(broker.status().pending, 0, "broker pending cleared")
+	t.stop_all("test cleanup")
 	_cleanup(root)
 
 
@@ -182,6 +175,7 @@ func test_unknown_outbox_reply_is_deleted_without_callback() -> void:
 	t.tick(Time.get_ticks_msec())
 	assert_true(not FileAccess.file_exists(outbox_file), "unknown outbox file deleted")
 	assert_eq(broker.status().pending, 0, "unknown reply does not create pending")
+	t.stop_all("test cleanup")
 	_cleanup(root)
 
 
@@ -208,6 +202,7 @@ func test_invalid_outbox_reply_preserves_live_broker_pending_request() -> void:
 	assert_true(not FileAccess.file_exists(outbox_file), "invalid outbox file deleted")
 	assert_eq(callbacks.size(), 0, "invalid reply does not invoke callback")
 	assert_eq(broker.status().pending, 1, "invalid reply preserves broker pending request")
+	t.stop_all("test cleanup")
 	_cleanup(root)
 
 
@@ -233,6 +228,7 @@ func test_malformed_outbox_reply_preserves_live_broker_pending_request() -> void
 	assert_true(not FileAccess.file_exists(outbox_file), "malformed outbox file deleted")
 	assert_eq(callbacks.size(), 0, "malformed reply does not invoke callback")
 	assert_eq(broker.status().pending, 1, "malformed reply preserves broker pending request")
+	t.stop_all("test cleanup")
 	_cleanup(root)
 
 

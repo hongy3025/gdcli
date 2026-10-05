@@ -6,7 +6,7 @@
 ## 不依赖真实 Godot 调试器，使用 SceneTreeTimer + 内存发件箱/收件箱。
 
 @tool
-extends SceneTree
+extends RefCounted
 
 const Broker := preload("res://addons/gdapi/runtime/runtime_broker.gd")
 
@@ -18,14 +18,16 @@ var failed := 0
 # 模拟的发送回调：把消息推进 mailbox,供测试断言。
 # 真实路径中这就是 EditorDebuggerSession.send_message 包成的 Callable。
 var sent: Array = []
+var _tree: SceneTree
 
 
-func _init() -> void:
+func run(tree: SceneTree) -> Dictionary:
+	_tree = tree
 	print("Running GdApiRuntimeBroker tests...\n")
 
 	test_initial_state_is_stopped()
 	test_attach_transitions_to_connecting()
-	test_first_request_transitions_to_connected()
+	await test_first_request_transitions_to_connected()
 	test_detach_completes_pending_with_conflict()
 	test_detach_clears_transport_before_reentrant_callback()
 	test_detach_is_idempotent()
@@ -51,10 +53,7 @@ func _init() -> void:
 	test_stale_transport_generation_cannot_attach()
 
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	if failed > 0:
-		quit(1)
-	else:
-		quit(0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func assert_eq(actual, expected, context: String = "") -> void:
@@ -80,10 +79,9 @@ func _make_send() -> Callable:
 		return true
 
 
-func _wait(_frames: int) -> void:
-	# SceneTree 中 signals/timer 推进需要 process_frame。
-	# 测试里我们沿用 process_frame 信号挂起,直到 _test_tick 触发。
-	await process_frame
+func _wait(frames: int) -> void:
+	for _frame in range(frames):
+		await _tree.process_frame
 
 
 func test_initial_state_is_stopped() -> void:

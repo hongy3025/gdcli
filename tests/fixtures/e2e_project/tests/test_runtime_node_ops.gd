@@ -1,7 +1,7 @@
 ## GdApiRuntimeNodeOps dedicated-node safety tests.
 
 @tool
-extends SceneTree
+extends RefCounted
 
 const NodeOps := preload("res://addons/gdapi/runtime/runtime_node_ops.gd")
 
@@ -9,15 +9,12 @@ var passed := 0
 var failed := 0
 
 
-func _init() -> void:
-	_run.call_deferred()
-
-
-func _run() -> void:
+func run(tree: SceneTree) -> Dictionary:
+	var original_scene := tree.current_scene
 	var scene := Node2D.new()
 	scene.name = "Task9Scene"
-	root.add_child(scene)
-	current_scene = scene
+	tree.root.add_child(scene)
+	tree.current_scene = scene
 
 	var target := Node2D.new()
 	target.name = "ProbeTarget"
@@ -325,9 +322,10 @@ func _run() -> void:
 	)
 	_assert_true(collision_removed.get("ok", false), "nested same-name runtime node can remove")
 
+	tree.current_scene = original_scene
 	scene.free()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func _assert_permission(result: Dictionary, context: String) -> void:

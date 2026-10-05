@@ -1,5 +1,5 @@
 @tool
-extends SceneTree
+extends RefCounted
 
 const GdApiResponse := preload("res://addons/gdapi/runtime/response.gd")
 
@@ -34,7 +34,11 @@ class FakePlugin:
 		events.append(event)
 
 
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
+	var had_plugin := Engine.has_meta("gdapi_plugin")
+	var original_plugin: Variant = Engine.get_meta("gdapi_plugin") if had_plugin else null
+	if had_plugin:
+		Engine.remove_meta("gdapi_plugin")
 	test_rejected_send_does_not_complete_audit()
 	test_accepted_send_completes_audit()
 	test_disconnected_failure_completes_audit()
@@ -42,8 +46,10 @@ func _init() -> void:
 	test_json_controls_are_valid_for_success_and_error_responses()
 	test_json_controls_are_valid_for_cancellation_response()
 	test_json_escape_pairs_and_unicode_preserve_values()
+	if had_plugin:
+		Engine.set_meta("gdapi_plugin", original_plugin)
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func test_rejected_send_does_not_complete_audit() -> void:

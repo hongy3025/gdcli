@@ -1,6 +1,6 @@
 from e2e.route_manifests import M5_ROUTES
 
-from .conftest import command_doc, exec_error, exec_ok
+from .conftest import command_doc, exec_ok
 
 
 def test_m5_route_families_are_registered(m5_editor):
@@ -11,9 +11,11 @@ def test_m5_route_families_are_registered(m5_editor):
         assert doc["summary"] and doc["returns"]["fields"]
 
 
-def test_m5_queries_uid_apply_and_safety_contracts(m5_editor):
+def test_m5_queries_uid_apply_and_safety_contracts(m5_editor, uid_workspace):
     assert exec_ok(m5_editor, "classdb/class", {"class": "Node2D"})["parent"] == "CanvasItem"
     assert exec_ok(m5_editor, "diagnostics/cycle_deps", {"roots": ["res://fixtures"]})["items"]
     assert exec_ok(m5_editor, "diagnostics/script_errors", {"roots": ["res://fixtures"]})["items"]
     assert exec_ok(m5_editor, "export/presets")["presets"]
-    assert exec_ok(m5_editor, "uid/repair", {"roots": ["res://fixtures"], "dry_run": False})["ok"] is True
+    (uid_workspace / "smoke.tres").write_bytes(b'[gd_resource type="Resource" format=3]\n\n[resource]\n')
+    root = "res://" + uid_workspace.relative_to(m5_editor["project"]).as_posix()
+    assert exec_ok(m5_editor, "uid/repair", {"roots": [root], "dry_run": False})["ok"] is True

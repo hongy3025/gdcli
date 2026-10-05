@@ -3,8 +3,8 @@ class_name GdApiAnimationTreeEditor
 extends RefCounted
 
 const ErrorCodes := preload("res://addons/gdapi/runtime/error_codes.gd")
-const SceneEditor := preload("res://addons/gdapi/runtime/services/scene_editor.gd")
 const EditAction := preload("res://addons/gdapi/runtime/edit_action.gd")
+const NodePathResolver := preload("res://addons/gdapi/runtime/services/node_path_resolver.gd")
 const Codec := preload("res://addons/gdapi/runtime/variant_codec.gd")
 const BLEND_TYPES := [
 	"AnimationNodeAnimation",
@@ -19,14 +19,14 @@ const BLEND_TYPES := [
 ]
 
 
+## tree_path 同时接受场景根相对路径与 node/* 回传的绝对用户路径。
 static func tree(path: String) -> Dictionary:
-	var root := SceneEditor.current_root()
-	if root == null:
-		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "no scene is currently open"}
-	var node := root.get_node_or_null(NodePath(path))
-	if not node is AnimationTree:
+	var found := NodePathResolver.resolve(path)
+	if not found.ok:
+		return {"ok": false, "code": found.code, "error": found.error}
+	if not found.node is AnimationTree:
 		return {"ok": false, "code": ErrorCodes.NOT_FOUND, "error": "AnimationTree not found"}
-	return {"ok": true, "tree": node}
+	return {"ok": true, "tree": found.node}
 
 
 static func set_blend(path: String, parameter: String, value: Variant) -> Dictionary:

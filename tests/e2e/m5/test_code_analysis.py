@@ -1,4 +1,6 @@
 from pathlib import Path
+import shutil
+from uuid import uuid4
 
 import pytest
 
@@ -106,31 +108,43 @@ def test_script_references_preserve_locations_and_ignore_comment_string_code(m5_
 
 def test_analysis_recomputes_after_removing_reference_and_adding_node(m5_editor):
     project = Path(m5_editor["project"])
-    script = project / "analysis/flow.gd"
-    scene = project / "analysis/deep.tscn"
-    script_before = script.read_bytes()
-    scene_before = scene.read_bytes()
+    relative = "analysis_cases/" + uuid4().hex
+    work = project / relative
+    work.mkdir(parents=True)
+    script = work / "flow.gd"
+    scene = work / "deep.tscn"
+    script_path = "res://" + relative + "/flow.gd"
+    scene_path = "res://" + relative + "/deep.tscn"
+    script_source = (project / "analysis/flow.gd").read_text(encoding="utf-8").replace(
+        "class_name AnalysisFixtureFlow\n", "",
+    )
+    scene_source = (project / "analysis/deep.tscn").read_text(encoding="utf-8").replace(
+        FLOW, script_path,
+    )
     try:
-        script.write_text(script_before.decode().replace(
-            'const DATA = preload("res://analysis/data.tres")',
-            'const DATA = null',
+        script.write_text(script_source, encoding="utf-8")
+        scene.write_text(scene_source, encoding="utf-8")
+        before = analyze(m5_editor, "scene_complexity", path=scene_path)["items"][0]
+        refs_before = analyze(m5_editor, "script_references", path=script_path)["items"]
+        assert any(item["kind"] == "preload" for item in refs_before)
+        script.write_text(script_source.replace(
+            'const DATA = preload("res://analysis/data.tres")', 'const DATA = null',
         ), encoding="utf-8")
-        refs = analyze(m5_editor, "script_references", path=FLOW)["items"]
+        refs = analyze(m5_editor, "script_references", path=script_path)["items"]
         assert not any(item["kind"] == "preload" for item in refs)
-        scene.write_text(scene_before.decode() + '\n[node name="Deeper" type="Node" parent="Branch/Leaf/Timer/Tip"]\n', encoding="utf-8")
-        metrics = analyze(m5_editor, "scene_complexity", path=SCENE)["items"][0]
-        assert metrics["node_count"] == 6
-        assert metrics["max_depth"] == 5
-        assert metrics["type_counts"]["Node"] == 3
+        scene.write_text(scene_source + '\n[node name="Deeper" type="Node" parent="Branch/Leaf/Timer/Tip"]\n', encoding="utf-8")
+        metrics = analyze(m5_editor, "scene_complexity", path=scene_path)["items"][0]
+        assert metrics["node_count"] == before["node_count"] + 1
+        assert metrics["max_depth"] == before["max_depth"] + 1
+        assert metrics["type_counts"]["Node"] == before["type_counts"]["Node"] + 1
         connection = '[connection signal="pulse" from="." to="." method="_on_pulse"]'
-        scene.write_text(scene_before.decode().replace(connection, ""), encoding="utf-8")
-        metrics = analyze(m5_editor, "scene_complexity", path=SCENE)["items"][0]
-        assert metrics["connection_count"] == 0
-        flow = analyze(m5_editor, "signal_flow", path=SCENE)
+        scene.write_text(scene_source.replace(connection, ""), encoding="utf-8")
+        metrics = analyze(m5_editor, "scene_complexity", path=scene_path)["items"][0]
+        assert metrics["connection_count"] == before["connection_count"] - 1
+        flow = analyze(m5_editor, "signal_flow", path=scene_path)
         assert not any(item["kind"] == "scene_connection" for item in flow["items"])
     finally:
-        script.write_bytes(script_before)
-        scene.write_bytes(scene_before)
+        shutil.rmtree(work)
 
 
 def test_project_statistics_use_source_bytes_and_loader_types(m5_editor):

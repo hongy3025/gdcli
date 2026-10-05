@@ -12,7 +12,7 @@
 ## 运行方式：在 Godot 编辑器中执行此脚本
 
 @tool
-extends SceneTree
+extends RefCounted
 
 ## 请求类预加载引用
 var GdApiRequest = preload("res://addons/gdapi/runtime/request.gd")
@@ -23,7 +23,7 @@ var failed := 0
 
 
 ## 初始化测试环境并运行所有测试
-func _init() -> void:
+func run(_tree: SceneTree) -> Dictionary:
 	print("Running GdApiRequest tests...\n")
 
 	# 运行所有测试用例
@@ -55,10 +55,7 @@ func _init() -> void:
 
 	# 输出测试结果
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	if failed > 0:
-		quit(1)
-	else:
-		quit(0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 ## 断言相等

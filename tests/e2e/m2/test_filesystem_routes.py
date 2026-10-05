@@ -36,7 +36,7 @@ def test_filesystem_search_and_read_round_trip(m2_editor):
 
 
 def test_filesystem_write_overwrites_without_force(m2_editor):
-    path = "res://notes/test.md"
+    path = "res://notes/filesystem_overwrite.txt"
     exec_ok(m2_editor, "filesystem/write", {"path": path, "content": "first"})
     written = exec_ok(m2_editor, "filesystem/write", {"path": path, "content": "second"})
     assert written["written"] is True
@@ -44,7 +44,7 @@ def test_filesystem_write_overwrites_without_force(m2_editor):
 
 
 def test_filesystem_write_atomic(m2_editor):
-    target = "res://notes/test.md"
+    target = "res://notes/filesystem_atomic.txt"
     write1 = exec_ok(m2_editor, "filesystem/write", {
         "path": target, "content": "first"
     })
@@ -85,13 +85,14 @@ def test_filesystem_write_read_only_target_fails_cleanly(m2_editor):
     exec_ok(m2_editor, "filesystem/write", {"path": path, "content": "original bytes"})
     target.chmod(stat.S_IREAD)
     try:
-        exec_ok(m2_editor, "gdapi/audit/clear")
+        before = exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
+        seq = max((entry["seq"] for entry in before), default=0)
         error = exec_error(m2_editor, "filesystem/write", {"path": path, "content": "replacement"})
         assert error["code"] == "godot_error", error
         assert target.read_bytes() == b"original bytes"
         assert not Path(str(target) + ".gdcli-tmp").exists()
         entries = [
-            entry for entry in exec_ok(m2_editor, "gdapi/audit/list", {"limit": 1000})["entries"]
+            entry for entry in exec_ok(m2_editor, "gdapi/audit/list", {"since": seq, "limit": 1000})["entries"]
             if entry.get("route") == "filesystem/write"
         ]
         assert len(entries) == 1, entries

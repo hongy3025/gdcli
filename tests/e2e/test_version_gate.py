@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-import conftest
+from e2e.m2 import helpers as version_gate
 
 
 @pytest.mark.parametrize(
@@ -14,12 +14,12 @@ import conftest
     ],
 )
 def test_parse_godot_47_versions(text, expected):
-    assert conftest.parse_godot_version(text) == expected
+    assert version_gate.parse_godot_version(text) == expected
 
 
 @pytest.mark.parametrize("text", ["4.6.3.stable", "3.6.2", "not-a-version"])
 def test_require_godot_47_rejects_old_or_invalid(monkeypatch, text):
     completed = subprocess.CompletedProcess(["godot", "--version"], 0, text, "")
-    monkeypatch.setattr(conftest.subprocess, "run", lambda *args, **kwargs: completed)
+    monkeypatch.setattr(version_gate.subprocess, "run", lambda *args, **kwargs: completed)
     with pytest.raises(RuntimeError, match="Godot 4.7.x is required"):
-        conftest.require_godot_47("godot")
+        version_gate.require_godot_47("godot")

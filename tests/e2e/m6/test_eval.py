@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from .conftest import exec_error, exec_ok, latest_audit
+from .conftest import audit_cursor, exec_error, exec_ok, latest_audit
 
 ALLOWED_EDITOR: list[tuple[str, dict[str, Any], Any]] = [
     ("a + b", {"a": 1, "b": 2}, 3),
@@ -47,9 +47,10 @@ def test_editor_eval_deny(
 
 
 def test_eval_source_never_appears_in_audit(m6_editor_eval: dict[str, Any]) -> None:
+    before = audit_cursor(m6_editor_eval, "editor/eval")
     secret = "41 + 1"
     exec_ok(m6_editor_eval, "editor/eval", {"source": secret})
-    event = latest_audit(m6_editor_eval, "editor/eval")
+    event = latest_audit(m6_editor_eval, "editor/eval", since=before)
     assert secret not in json.dumps(event)
     assert event["ok"] is True
 

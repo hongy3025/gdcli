@@ -21,7 +21,9 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("播放动画")
 		. mutates()
-		. param("player_path", "String", true, "AnimationPlayer 节点路径", "")
+		. param(
+			"player_path", "String", true, "AnimationPlayer 节点路径（场景内相对或 /root/<场景根>/... 绝对）", ""
+		)
 		. param("name", "String", true, "动画名", "")
 		. example('{"player_path":"AnimationPlayer","name":"idle"}')
 		. returns("播放结果", {"changed": "bool", "undoable": "false"})

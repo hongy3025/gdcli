@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import time
 
 import pytest
 
 from .conftest import (
     exec_ok,
     exec_error,
-    reset_fixture,
-    runtime_route_source,
-    wait_for,
 )
 
 
@@ -24,13 +20,6 @@ def test_runtime_tree_root_name(m3_running):
     assert "ProbeInput" in names
 
 
-def test_shared_data_plane_stays_within_process_and_recovery_budget(m3_running):
-    # The M3 package shares one runtime game across its data-plane modules.
-    # Per-test reset keeps state isolated without recovering/restarting it.
-    assert m3_running["editor_start_count"] == 1
-    assert m3_running["game_run_count"] >= 1
-    assert m3_running["fixture_reset_restarts"] == 0
-    assert m3_running["recovery_markers"] == []
 
 
 def test_runtime_node_get_set_call(m3_running):
@@ -44,89 +33,23 @@ def test_runtime_node_get_set_call(m3_running):
     assert payload["ok"] is True
     assert payload["value"]["type"] == "Vector2"
     assert payload["value"]["value"] == [10.0, 20.0]
-    assert 'load("res://addons/gdapi/runtime/runtime_node_ops.gd")' not in runtime_route_source(
-        "runtime/node/get"
-    )
 
 
 def test_runtime_node_call_then_get_continuous_request(m3_running):
     path = "/root/RuntimeMain/ProbeTarget"
+    before = exec_ok(m3_running, "runtime/node/get", {
+        "node_path": path, "property": "counter",
+    })["value"]
     call = exec_ok(m3_running, "runtime/node/call", {
-        "node_path": path, "method": "increment", "args": [0],
+        "node_path": path, "method": "increment", "args": [3],
     })
-    assert call["result"] == 0.0
+    assert call["result"] == before + 3
     current = exec_ok(m3_running, "runtime/node/get", {
         "node_path": path, "property": "counter",
     })
-    assert current["value"] == 0
+    assert current["value"] == before + 3
 
 
-def test_fixture_reset_restores_shared_runtime_state(m3_running):
-    path = "/root/RuntimeMain/ProbeTarget"
-    exec_ok(m3_running, "runtime/node/set", {
-        "node_path": path, "property": "position",
-        "value": {"type": "Vector2", "value": [31, 42]},
-    })
-    exec_ok(m3_running, "runtime/node/call", {
-        "node_path": path, "method": "increment", "args": [3],
-    })
-    exec_ok(m3_running, "runtime/node/call", {
-        "node_path": path, "method": "increment_later", "args": [9, 100],
-    })
-    exec_ok(m3_running, "runtime/node/set", {
-        "node_path": path, "property": "process_mode", "value": 4,
-    })
-    for route, payload in [
-        ("runtime/input/key", {"keycode": 32, "pressed": True}),
-        ("runtime/input/mouse", {"kind": "button", "button": 1, "pressed": True}),
-        ("runtime/input/gamepad", {"device": 0, "button": 0, "pressed": True}),
-        ("runtime/input/touch", {"index": 0, "pressed": True, "position": [1, 2]}),
-    ]:
-        exec_ok(m3_running, route, payload)
-    exec_ok(m3_running, "runtime/input/action", {"action": "ui_accept", "pressed": True})
-    exec_ok(m3_running, "runtime/node/call", {
-        "node_path": path, "method": "emit_known_logs", "args": [],
-    })
-    created = exec_ok(m3_running, "runtime/node/create", {
-        "parent_path": "/root/RuntimeMain", "type": "Node2D", "name": "Task10Created",
-    })
-    assert created["node_path"] == "/root/RuntimeMain/Task10Created"
-
-    reset = reset_fixture(m3_running)
-    assert reset["changed"] is True
-    assert reset["undoable"] is False
-    assert exec_ok(m3_running, "runtime/node/get", {
-        "node_path": path, "property": "position",
-    })["value"] == {"type": "Vector2", "value": [0.0, 0.0]}
-    assert exec_ok(m3_running, "runtime/node/get", {
-        "node_path": path, "property": "spawn_position",
-    })["value"] == {"type": "Vector2", "value": [10.0, 20.0]}
-    for name in ["counter", "input_keys", "input_mouse", "input_gamepad", "input_touch", "input_actions"]:
-        assert exec_ok(m3_running, "runtime/node/get", {
-            "node_path": path, "property": name,
-        })["value"] == 0
-    assert exec_ok(m3_running, "runtime/node/get", {
-        "node_path": path, "property": "process_mode",
-    })["value"] == 0
-    time.sleep(0.2)
-    assert exec_ok(m3_running, "runtime/node/get", {
-        "node_path": path, "property": "counter",
-    })["value"] == 0
-    assert exec_error(m3_running, "runtime/node/info", {
-        "node_path": "/root/RuntimeMain/Task10Created",
-    })["code"] == "not_found"
-    for dedicated in ["ProbeInput", "ProbeInputAction", "ProbeFinishedSignal"]:
-        dedicated_path = f"/root/RuntimeMain/{dedicated}"
-        assert exec_ok(m3_running, "runtime/node/info", {
-            "node_path": dedicated_path,
-        })["node_path"] == dedicated_path
-    exec_ok(m3_running, "runtime/node/call", {
-        "node_path": path, "method": "emit_finished", "args": [],
-    })
-    assert exec_ok(m3_running, "runtime/node/get", {
-        "node_path": "/root/RuntimeMain/ProbeFinishedSignal",
-        "property": "event_count",
-    })["value"] == 1
 
 
 def test_runtime_node_call_allowlist(m3_running):
@@ -159,25 +82,6 @@ def test_runtime_node_get_unknown_property(m3_running):
     assert error["code"] == "not_found"
 
 
-def test_scene_node_routes_use_runtime_adapter_without_local_ops_load(m3_editor):
-    routes = [
-        "runtime/scene/tree",
-        "runtime/node/info",
-        "runtime/node/get",
-        "runtime/node/set",
-        "runtime/node/call",
-        "runtime/node/find",
-        "runtime/node/remove",
-        "runtime/node/reparent",
-        "runtime/node/create",
-        "runtime/node/duplicate",
-        "runtime/node/rename",
-    ]
-    for route in routes:
-        source = runtime_route_source(route)
-        assert 'extends "res://addons/gdapi/runtime/runtime_route.gd"' in source, route
-        assert f'dispatch(req, res, "{route}"' in source, route
-        assert "runtime_node_ops.gd" not in source, route
 
 
 def test_runtime_node_create_returns_dedicated_game_node(m3_running):

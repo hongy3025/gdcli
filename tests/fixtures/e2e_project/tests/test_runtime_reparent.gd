@@ -1,6 +1,6 @@
 ## GdApiRuntimeNodeOps reparent safety closure tests.
 @tool
-extends SceneTree
+extends RefCounted
 
 const NodeOps := preload("res://addons/gdapi/runtime/runtime_node_ops.gd")
 
@@ -9,28 +9,29 @@ var failed := 0
 var scene: Node
 var parent_node: Node
 var child_node: Node
+var _tree: SceneTree
 
 
-func _init() -> void:
+func run(tree: SceneTree) -> Dictionary:
+	_tree = tree
+	var original_scene := tree.current_scene
 	print("Running GdApiRuntimeNodeOps reparent closure tests...\n")
-	call_deferred("_run")
-
-
-func _run() -> void:
 	_setup_tree()
-	await process_frame
+	await tree.process_frame
 	test_reparent_rejects_self_without_mutation()
 	test_reparent_rejects_descendant_without_mutation()
 	test_reparent_rejects_scene_root_without_mutation()
+	tree.current_scene = original_scene
+	scene.free()
 	print("\n=== Results: %d passed, %d failed ===" % [passed, failed])
-	quit(1 if failed > 0 else 0)
+	return {"ok": failed == 0, "passed": passed, "failed": failed}
 
 
 func _setup_tree() -> void:
 	scene = Node.new()
 	scene.name = "Task15Scene"
-	root.add_child(scene)
-	current_scene = scene
+	_tree.root.add_child(scene)
+	_tree.current_scene = scene
 	parent_node = Node.new()
 	parent_node.name = "Task15Parent"
 	parent_node.set_meta("gdapi_runtime_dedicated", true)

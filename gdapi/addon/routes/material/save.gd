@@ -20,7 +20,7 @@ func doc() -> GdApiRouteDoc:
 		GdApiRouteDoc
 		. make("保存节点材质到项目资源")
 		. mutates()
-		. param("node_path", "String", true, "目标节点", "")
+		. param("node_path", "String", true, "目标节点（场景内相对或 /root/<场景根>/... 绝对）", "")
 		. param("path", "String", true, "目标 res:// .tres/.res 路径", "")
 		. example('{"node_path":"Sprite","path":"res://materials/sprite.tres"}')
 		. returns("保存结果", {"path": "String", "saved": "bool", "undoable": "bool, false"})

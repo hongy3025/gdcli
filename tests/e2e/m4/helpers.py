@@ -1,13 +1,12 @@
-"""Stable M4 E2E helpers shared by every game-system domain test."""
+"""M4 helpers navigate live tabs and use absolute scene-root paths for node APIs."""
 
 from __future__ import annotations
 
 import hashlib
-import time
 from pathlib import Path
 from typing import Any
 
-from e2e.m3.conftest import command_doc, exec_error, exec_ok, wait_for_connected, wait_stopped
+from e2e.m3.conftest import command_doc, exec_error, exec_ok
 from e2e.m2.helpers import history_action
 
 
@@ -22,32 +21,18 @@ DOMAIN_SCENES = {
 }
 
 
-def open_domain(env: dict[str, Any], domain: str) -> None:
-    """Open a domain by running its fixed scene through the editor."""
-    run_domain(env, domain)
-
-
-def run_domain(env: dict[str, Any], domain: str) -> None:
-    """Start a fixed M4 scene and wait for its runtime broker connection."""
+def select_domain(env: dict[str, Any], domain: str) -> None:
+    """Keep the current live tab, otherwise select it and await navigation."""
     scene_path = DOMAIN_SCENES[domain]
-    exec_ok(env, "project/run", {"scene_path": scene_path})
-    env["game_attached"] = True
-    wait_for_connected(env, timeout=60.0)
-    time.sleep(0.1)
+    if exec_ok(env, "scene/current")["path"] != scene_path:
+        # exec_ok waits for scene/open to become current before returning.
+        exec_ok(env, "scene/open", {"path": scene_path})
 
 
-def stop_domain(env: dict[str, Any], domain: str) -> None:
-    """Stop an M4 domain and require the broker to drain completely."""
-    del domain
-    exec_ok(env, "project/stop")
-    status = wait_stopped(env, timeout=15.0)
-    assert status["pending"] == 0
-    env["game_attached"] = False
-
-
-def save_reopen(env: dict[str, Any], scene_path: str) -> None:
+def save_scene(env: dict[str, Any], scene_path: str) -> str:
+    """Save ongoing editor state and return its actual persisted scene text."""
     exec_ok(env, "scene/current/save")
-    exec_ok(env, "scene/open", {"path": scene_path})
+    return exec_ok(env, "filesystem/read", {"path": scene_path})["content"]
 
 
 def editor_undo(env: dict[str, Any]) -> None:
@@ -68,7 +53,12 @@ def source_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def audit_cursor(env: dict[str, Any]) -> int:
+    entries = exec_ok(env, "gdapi/audit/list", {"limit": 1000})["entries"]
+    return max((entry["seq"] for entry in entries), default=0)
+
+
 __all__ = [
-    "command_doc", "editor_redo", "editor_undo", "exec_error", "exec_ok",
-    "open_domain", "run_domain", "save_reopen", "source_digest", "stop_domain",
+    "audit_cursor", "command_doc", "editor_redo", "editor_undo", "exec_error", "exec_ok",
+    "select_domain", "save_scene", "source_digest",
 ]

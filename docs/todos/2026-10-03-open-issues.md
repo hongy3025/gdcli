@@ -157,18 +157,16 @@ T1–T8 已按各自范围完成实现与验收；T2–T8 的接口与回归入�
 ## 附：复现命令
 
 ```bash
-# 完整顺序门禁：格式、lint、Rust、file E2E、EngineDebugger、renderer、budget
+# 完整顺序门禁：格式、lint、Rust、持久编辑器完整 E2E、父进程 budget
 uv run python scripts/check.py
 
 # 分段执行
 uv run python scripts/check.py --gate format --gate clippy --gate unit
-uv run python scripts/check.py --gate file
-uv run python scripts/check.py --gate engine
-uv run python scripts/check.py --gate render
+uv run python scripts/check.py --gate e2e
 uv run python scripts/check.py --gate budget
 
 # EngineDebugger 数据面（T2）
-GDAPI_E2E_TRANSPORT=engine_debugger uv run pytest tests/e2e/m3/test_runtime_status.py tests/e2e/m3/test_runtime_nodes.py -q
+uv run pytest tests/e2e/m3/test_engine_transport.py -q -s
 
 # T1：真实文件系统故障下的 hello 发布回归
 uv run pytest tests/e2e/test_gdscript_units.py -q -s -k transport
