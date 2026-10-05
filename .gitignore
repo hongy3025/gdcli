@@ -11,6 +11,9 @@ gdapi/addon/bin/linux/
 gdapi/addon/bin/macos/
 gdapi/addon/bin/windows/
 
+# Plugin installed into the sample project by scripts/install-sample-plugin.py
+/godot/sample_project/addons/gdapi/
+
 # Per-project Godot metadata
 .godot/
 

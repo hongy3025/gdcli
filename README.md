@@ -72,6 +72,16 @@ gdcli status --project /path/to/project
 
 ---
 
+## Sample Godot Project
+
+`godot/sample_project/` is a minimal Godot 4.7.x project; Godot 4.7.2 is the development baseline. From the repository root, run:
+
+```bash
+python scripts/install-sample-plugin.py
+```
+
+The script builds the gdapi extension, installs it into `godot/sample_project/addons/gdapi/`, and enables the plugin. Re-running it replaces the existing sample-project installation. Open `godot/sample_project/` with Godot 4.7.2 to use the project.
+
 ## 开发验证
 
 M1/M2/M3 gdapi 路由基础设施端到端验证（需要 Godot 编辑器，用 uv 管理 Python venv）：

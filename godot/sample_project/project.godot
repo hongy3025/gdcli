@@ -1,0 +1,27 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="gdcli Godot 4.7.2 Sample"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+GdApiRuntimeProbe="*uid://bkkn7w1cus0gi"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdapi/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
