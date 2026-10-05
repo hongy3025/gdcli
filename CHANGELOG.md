@@ -18,6 +18,7 @@
 - 新增音频 bus 属性及 AudioEffect 编辑、AnimationTree blend graph 增删连线与参数持久化、运行时 Tween 进度/停止。
 
 ### Fixes
+- HTTP 响应的 RFC 8259 转义修正改用缓存的原生正则扫描与一次性分段合并，移除逐字符字符串累加的二次复杂度；数 MB 截图响应不再长时间卡住编辑器主线程并引发后续 E2E 恢复超时。保留 C0 控制字符修正，新增字面反斜杠、混合转义、Unicode 与嵌套值往返回归。
 - 修复合并审查 R01/R02/R09：跨 origin 重定向永久剥离认证/Cookie 等敏感头；受限 eval 在 Variant 解码/资源加载前递归拒绝危险输入；通用审计摘要清除 URL userinfo，包括错误路径及嵌套字段。
 - 修复 R03 与 Unix 任务生命周期：保持生产默认 30 秒期限，用请求级绝对期限/取消原因协调 HTTP、实际进程和审计；超时、断连、shutdown、drop 先清理后返回失败。Unix 原子创建独立进程组，Windows 保留 Job Object；自然退出也清理持有管道的后代，输出线程可停止并有界排空。
 - 修复 R04/R05：场景另存前检查可写性，读取实际磁盘场景并比较解码后的 SceneState，而非不稳定的 PackedScene 内部索引；失败恢复路径/dirty 状态和目标字节。`scene/current.edited` 返回真实未保存状态；删除依赖扫描覆盖 GDScript preload/load 的资源、相对和 UID 路径，扫描不执行脚本。
@@ -52,6 +53,7 @@
 - JSON 字符串中的 C0 控制字符现在按 RFC 8259 兼容形式转义；`network/http_request` 将 HTTP 304 视为正常响应，而非重定向。
 
 ### Maintenance
+- E2E 测试专用插件将编辑器聚焦/失焦帧间休眠统一为 2ms，并在退出时恢复设置与当前 OS 休眠值；保留真实 CLI 调用、场景同步屏障、每测试隔离、生产请求期限与现有测试选择，不用零休眠或时间缩放换取 walltime。
 - CLI 的同步 HTTP/install 路径不再创建 Tokio 多线程池，LSP 按需创建单线程运行时；E2E 文件隔离在遍历前剪枝 `.godot` 和安装目录，保留相同文件基线与实际字节核验。
 - 完整门禁的 file/budget 共用同一次新鲜父进程计时，移除重复全套运行；独立 budget 命令仍执行完整套件。E2E 不再覆盖生产 handler 期限；格式/lint 合并有命令行长度上限的批次，去重 junction 的同一物理源码，不减少检查覆盖。
 - 修正 E2E 隔离：`default_bus_layout.tres` 由 Godot 自身维护，不再纳入文件基线（此前导致 M2/M4 隔离断言间歇失败）；`restore_file_state` 写回后校验并在失败时重试，仍不一致则报错而不是静默吞掉。

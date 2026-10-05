@@ -105,6 +105,8 @@ uv run python scripts/check.py
 
 同一次 `scripts/check.py` 调用选择 `file` 和 `budget` 时，只执行一次完整 file 套件：budget 使用该次子进程从启动到退出的父进程 monotonic wall-clock，不复用旧产物、不缩减测试。单独 `--gate budget` 仍重新运行完整套件。E2E 编辑器不再强行设置 180 秒 handler 超时，默认与生产一样为 30 秒。GDScript 格式/lint 在遍历前排除生成目录，junction 别名按物理目录去重，并按 Windows 命令行长度限制合并批次。
 
+E2E 的测试专用 `gdapi_test` 插件将编辑器聚焦/失焦时的帧间休眠统一设为 2ms，并在插件退出时恢复原值，避免默认 100ms 失焦休眠反复拖慢 HTTP 请求、场景切换与 Undo/Redo。保留正数休眠，不启用忙循环、不加速游戏时间；生产 addon 的帧调度、30 秒请求期限、每测试文件/场景隔离与测试选择均不变。大响应的 JSON 转义修正使用原生扫描与分段合并，避免逐字符字符串拼接卡住编辑器主线程。
+
 通过 `GODOT_BIN` 环境变量可覆盖 Godot 路径；共享 E2E fixture 在 Windows 上默认使用 `D:\app\devel\Godot\v4.7.2\godot_console.exe`，其他平台默认使用 PATH 中的 `godot`。直接调用 `build_environment(godot_bin=...)` 时，显式参数优先于环境变量。
 
 E2E fixture 默认强制 file transport（保证确定性）；需要验收 EngineDebugger 数据面时：

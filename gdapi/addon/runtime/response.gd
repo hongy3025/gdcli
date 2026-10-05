@@ -10,6 +10,9 @@ extends RefCounted
 
 const AuditLog := preload("res://addons/gdapi/runtime/audit_log.gd")
 
+# Consume valid escape pairs too, so literal "\\v" is not mistaken for "\v".
+static var _json_escape_pattern := RegEx.create_from_string(r"\\.|[\x00-\x1f]")
+
 ## 已完成的 JSON 响应体与独立请求审计所有者。
 var payload: Dictionary = {}
 var audit_context: Dictionary = {}
@@ -95,26 +98,24 @@ func json(data: Dictionary) -> void:
 ## Normalize only JSON string contents; decoded values remain unchanged.
 func _json_bytes(data: Dictionary) -> PackedByteArray:
 	var serialized := JSON.stringify(data)
-	var safe := ""
-	var in_string := false
-	var escaped := false
-	for index in range(serialized.length()):
-		var character := serialized.substr(index, 1)
-		var codepoint := character.unicode_at(0)
-		if in_string and escaped:
-			safe += "u000b" if character == "v" else character
-			escaped = false
-		elif in_string and character == "\\":
-			safe += character
-			escaped = true
-		elif character == '"':
-			safe += character
-			in_string = not in_string
-		elif in_string and codepoint < 0x20:
-			safe += "\\u%04x" % codepoint
+	var parts := PackedStringArray()
+	var start := 0
+	for matched in _json_escape_pattern.search_all(serialized):
+		var token := matched.get_string()
+		var replacement := ""
+		if token == "\\v":
+			replacement = "\\u000b"
+		elif token.unicode_at(0) < 0x20:
+			replacement = "\\u%04x" % token.unicode_at(0)
 		else:
-			safe += character
-	return safe.to_utf8_buffer()
+			continue
+		parts.append(serialized.substr(start, matched.get_start() - start))
+		parts.append(replacement)
+		start = matched.get_end()
+	if start == 0:
+		return serialized.to_utf8_buffer()
+	parts.append(serialized.substr(start))
+	return "".join(parts).to_utf8_buffer()
 
 
 ## 发送纯文本响应

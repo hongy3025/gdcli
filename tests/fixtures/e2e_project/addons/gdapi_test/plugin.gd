@@ -4,10 +4,35 @@ extends EditorPlugin
 const COMMAND := "res://.godot/gdapi-test-command.json"
 const RESULT := "res://.godot/gdapi-test-result.json"
 const RESULT_TEMP := "res://.godot/gdapi-test-result.tmp"
+const EDITOR_SLEEP_USEC := 2000
+const EDITOR_SLEEP_SETTINGS := [
+	"interface/editor/timers/low_processor_mode_sleep_usec",
+	"interface/editor/timers/unfocused_low_processor_mode_sleep_usec",
+]
 
 ## 最近一次已执行的请求：harness 重投同一 request_id 时只重发结果，不重复执行 undo/redo。
 var _last_request_id := ""
 var _last_result := ""
+var _original_sleep_settings: Dictionary = {}
+var _original_os_sleep_usec: int
+
+
+func _enter_tree() -> void:
+	# RPCs and undo/redo are frame-gated. Avoid the editor's 100ms background
+	# throttle in this test-only plugin, but retain a positive sleep (no busy loop).
+	var settings := EditorInterface.get_editor_settings()
+	for key in EDITOR_SLEEP_SETTINGS:
+		_original_sleep_settings[key] = settings.get_setting(key)
+		settings.set_setting(key, EDITOR_SLEEP_USEC)
+	_original_os_sleep_usec = OS.low_processor_usage_mode_sleep_usec
+	OS.low_processor_usage_mode_sleep_usec = EDITOR_SLEEP_USEC
+
+
+func _exit_tree() -> void:
+	var settings := EditorInterface.get_editor_settings()
+	for key in _original_sleep_settings:
+		settings.set_setting(key, _original_sleep_settings[key])
+	OS.low_processor_usage_mode_sleep_usec = _original_os_sleep_usec
 
 
 func _process(_delta: float) -> void:

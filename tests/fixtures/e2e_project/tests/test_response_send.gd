@@ -41,6 +41,7 @@ func _init() -> void:
 	test_committed_operation_remains_successful_after_cancellation()
 	test_json_controls_are_valid_for_success_and_error_responses()
 	test_json_controls_are_valid_for_cancellation_response()
+	test_json_escape_pairs_and_unicode_preserve_values()
 	print("=== Results: %d passed, %d failed ===" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -90,6 +91,22 @@ func test_json_controls_are_valid_for_cancellation_response() -> void:
 	response.json({"stdout": "discarded"})
 	assert_json_body_preserves_controls(
 		server.last_body, "request cancelled: " + controls, "cancellation response"
+	)
+
+
+func test_json_escape_pairs_and_unicode_preserve_values() -> void:
+	var values := {
+		"literal": "\\v",
+		"slashes": "\\\\v",
+		"mixed": '\\"quoted"\\\u000b\n\t',
+		"unicode": "中文 😀 \u0001 \u001f",
+		"nested": [{"key\\v": "line\r\nend"}],
+	}
+	var server := FakeServer.new()
+	var response := GdApiResponse.new(server, 14, null)
+	response.json(values)
+	assert_eq(
+		JSON.parse_string(server.last_body.get_string_from_utf8()), values, "escape roundtrip"
 	)
 
 
